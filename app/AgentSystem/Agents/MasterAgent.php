@@ -6,6 +6,7 @@ use App\AgentSystem\Gateway\AIGateway;
 use App\AgentSystem\Tools\ToolRegistry;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
+use App\Services\MemoryService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -15,12 +16,13 @@ use Illuminate\Support\Facades\Log;
  * - Retries failed AI calls up to 2 times per step
  * - Delegates to sub-agents when specialised work is needed
  * - Records every step in agent_steps table
+ * - Persists key observations in agent_memories for future context
  */
 class MasterAgent
 {
-    private const MAX_STEPS      = 10;
-    private const MAX_RETRIES    = 2;
-    private const RETRY_DELAY_S  = 2;
+    private const MAX_STEPS     = 10;
+    private const MAX_RETRIES   = 2;
+    private const RETRY_DELAY_S = 2;
 
     /** @var array<int,array{role:string,content:string}> */
     private array $messages = [];
@@ -28,14 +30,15 @@ class MasterAgent
     /** Aggregated data from all previous steps – passed to SummarizeTool at the end. */
     private array $collectedData = [];
 
-    private int $stepOffset = 0;   // number of steps already used by parent task
+    private int $stepOffset = 0;
 
     public function __construct(
-        private readonly AgentTask    $task,
-        private readonly AIGateway    $gateway,
-        private readonly ToolRegistry $toolRegistry,
-        private readonly ContentAgent $contentAgent,
-        private readonly KeywordAgent $keywordAgent,
+        private readonly AgentTask     $task,
+        private readonly AIGateway     $gateway,
+        private readonly ToolRegistry  $toolRegistry,
+        private readonly ContentAgent  $contentAgent,
+        private readonly KeywordAgent  $keywordAgent,
+        private readonly ?MemoryService $memory = null,
     ) {}
 
     // ─────────────────────────────────────────────────────────────────────
@@ -83,8 +86,8 @@ class MasterAgent
                     Log::warning("[MasterAgent] Retrying step {$stepNumber}, attempt {$r}");
                 }
                 try {
-                    $startMs  = (int) round(microtime(true) * 1000);
-                    $response = $this->gateway->complete($this->messages);
+                    $startMs    = (int) round(microtime(true) * 1000);
+                    $response   = $this->gateway->complete($this->messages);
                     $latencyMs  = (int) round(microtime(true) * 1000) - $startMs;
                     $tokensUsed = $response['tokens']['total'] ?? 0;
                     $decision   = $this->gateway->parseJson($response['content']);
@@ -153,9 +156,10 @@ class MasterAgent
                 Log::warning("[MasterAgent] Step {$stepNumber} action failed: " . ($result['error'] ?? ''));
             }
 
-            // Collect data for final summarization
+            // ── Collect + store memory ─────────────────────────────────
             if ($result['success'] && ! empty($result['data'])) {
                 $this->collectedData[$action] = $result['data'];
+                $this->storeMemory($action, $result['data']);
             }
 
             // ── OBSERVE – append to conversation ───────────────────────
@@ -180,24 +184,18 @@ class MasterAgent
 
     private function executeAction(string $action, array $parameters, ?string $subAgent, AgentTask $task): array
     {
-        // Delegate to sub-agent if specified
         if ($subAgent && $subAgent !== 'MasterAgent') {
             return match ($subAgent) {
                 'ContentAgent' => $this->contentAgent->execute(
-                    $parameters['objective'] ?? $action,
-                    $task,
-                    $parameters
+                    $parameters['objective'] ?? $action, $task, $parameters
                 ),
                 'KeywordAgent' => $this->keywordAgent->execute(
-                    $parameters['objective'] ?? $action,
-                    $task,
-                    $parameters
+                    $parameters['objective'] ?? $action, $task, $parameters
                 ),
                 default => ['success' => false, 'data' => null, 'error' => "Unknown sub-agent: {$subAgent}"],
             };
         }
 
-        // Execute a direct tool call
         return $this->toolRegistry->execute($action, $parameters);
     }
 
@@ -205,7 +203,6 @@ class MasterAgent
     {
         $summary = $decision['summary'] ?? null;
 
-        // Run SummarizeTool automatically if we have collected data and no explicit summary
         if (! $summary && ! empty($this->collectedData)) {
             $summaryResult = $this->toolRegistry->execute('SummarizeTool', [
                 'task_description' => $this->task->user_input,
@@ -223,9 +220,23 @@ class MasterAgent
         ];
     }
 
+    /**
+     * Persist a tool result as a memory entry (capped at 500 chars by MemoryService).
+     */
+    private function storeMemory(string $toolName, mixed $data): void
+    {
+        if (! $this->memory) {
+            return;
+        }
+
+        $value = is_array($data) ? json_encode($data) : (string) $data;
+        $this->memory->store($this->task->id, $toolName . '_result', $value, "Result from {$toolName}");
+    }
+
     private function buildSystemPrompt(): string
     {
-        $catalogue = $this->toolRegistry->getCatalogueDescription();
+        $catalogue    = $this->toolRegistry->getCatalogueDescription();
+        $memoryPrefix = $this->buildMemoryPrefix();
 
         return <<<PROMPT
 You are a Master Marketing Agent. You orchestrate a multi-step workflow to fulfil marketing tasks for businesses.
@@ -239,7 +250,7 @@ THINK (reason about what to do) → DECIDE (pick action) → ACT (the system exe
 
 ## Tools Available
 {$catalogue}
-
+{$memoryPrefix}
 ## Decision Output Format
 Every response MUST be strict JSON (no markdown, no explanation outside JSON):
 ```json
@@ -267,5 +278,29 @@ Every response MUST be strict JSON (no markdown, no explanation outside JSON):
 - Use **KeywordAgent** when you need deep keyword research with competitive analysis.
 - Otherwise, call tools directly.
 PROMPT;
+    }
+
+    /**
+     * Build a memory context prefix (max ~800 tokens, 10 entries, 500 chars each).
+     */
+    private function buildMemoryPrefix(): string
+    {
+        if (! $this->memory) {
+            return '';
+        }
+
+        $memories = $this->memory->all($this->task->id);
+
+        if (empty($memories)) {
+            return '';
+        }
+
+        $lines = ["## Prior Context (from earlier steps)"];
+        foreach ($memories as $key => $value) {
+            $lines[] = "- **{$key}**: {$value}";
+        }
+        $lines[] = '';
+
+        return implode("\n", $lines) . "\n";
     }
 }

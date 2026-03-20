@@ -44,4 +44,22 @@ return [
     'queue_connection' => env('AGENT_QUEUE_CONNECTION', null),
     'queue_name'       => env('AGENT_QUEUE_NAME', 'default'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Access Token (optional)
+    |--------------------------------------------------------------------------
+    | If set, all mutating agent endpoints require the header:
+    |   X-Agent-Token: <value>
+    | Leave empty for open access (development / trusted internal networks).
+    */
+    'access_token' => env('AGENT_ACCESS_TOKEN', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Memory Retention
+    |--------------------------------------------------------------------------
+    | agent_memories rows older than this many days are pruned automatically.
+    */
+    'memory_retention_days' => env('AGENT_MEMORY_RETENTION_DAYS', 30),
+
 ];

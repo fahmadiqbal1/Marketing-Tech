@@ -8,10 +8,18 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // Shared infrastructure services
+        $this->app->singleton(\App\Services\ApiCredentialService::class);
+        $this->app->singleton(\App\Services\MemoryService::class);
+
         // AI Services
+        $this->app->singleton(\App\Services\AI\CostCalculatorService::class);
         $this->app->singleton(\App\Services\AI\OpenAIService::class);
         $this->app->singleton(\App\Services\AI\AnthropicService::class);
         $this->app->singleton(\App\Services\AI\AIRouter::class);
+
+        // Dashboard
+        $this->app->singleton(\App\Services\Dashboard\DashboardStatsService::class);
 
         // Telegram
         $this->app->singleton(\App\Services\Telegram\TelegramBotService::class);
