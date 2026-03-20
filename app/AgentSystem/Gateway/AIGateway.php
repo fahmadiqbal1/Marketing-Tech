@@ -293,7 +293,8 @@ class AIGateway
                 'status'           => $status,
                 'error_message'    => $error,
                 'used_fallback'    => false,
-                'request_metadata' => $this->agentTaskId ? ['agent_task_id' => $this->agentTaskId] : [],
+                'agent_task_id'    => $this->agentTaskId,
+                'request_metadata' => [],
             ]);
         } catch (\Throwable $e) {
             // Non-fatal — never let logging break the agent

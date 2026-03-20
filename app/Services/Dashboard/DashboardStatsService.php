@@ -198,6 +198,27 @@ class DashboardStatsService
             'total'       => round((float) $breakdown->sum('total_cost'), 4),
             'breakdown'   => $breakdown,
             'daily'       => $daily,
+            'by_task'     => $this->getTaskCosts(),
         ];
+    }
+
+    /**
+     * Per-agent-task cost breakdown — enables debugging expensive runs
+     * and is the foundation for future per-task billing.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getTaskCosts(int $limit = 20): \Illuminate\Support\Collection
+    {
+        return AiRequest::whereNotNull('agent_task_id')
+            ->selectRaw(
+                'agent_task_id, COUNT(*) as requests,
+                 SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out,
+                 ROUND(SUM(cost_usd)::numeric, 6) as total_cost'
+            )
+            ->groupBy('agent_task_id')
+            ->orderByDesc('total_cost')
+            ->limit($limit)
+            ->get();
     }
 }

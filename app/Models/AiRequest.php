@@ -12,6 +12,7 @@ class AiRequest extends Model
     const UPDATED_AT = null;
     protected $fillable = [
         'agent_run_id',
+        'agent_task_id',
         'workflow_id',
         'provider',
         'model',
