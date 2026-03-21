@@ -192,6 +192,50 @@
         </template>
     </div>
 
+    {{-- ── Content Variations (A/B/C) ─────────────────────────────── --}}
+    <div x-show="variations.length > 0" class="stat-card border-violet-500/20 mb-6" x-transition>
+        <div class="flex items-center gap-3 mb-4">
+            <h2 class="text-base font-semibold text-white">Content Variations</h2>
+            <span class="badge bg-violet-500/20 text-violet-400 border border-violet-500/30 text-xs" x-text="variations.length + ' variants'"></span>
+        </div>
+
+        {{-- Tab headers --}}
+        <div class="flex gap-1 mb-4 border-b border-slate-800">
+            <template x-for="v in variations" :key="v.id">
+                <button @click="activeVariation = v.variation_label"
+                        class="px-4 py-2 text-sm font-medium border-b-2 transition"
+                        :class="activeVariation === v.variation_label
+                            ? 'border-brand-500 text-brand-400'
+                            : 'border-transparent text-slate-500 hover:text-slate-300'">
+                    <span x-text="'Variation ' + v.variation_label"></span>
+                    <span x-show="v.is_winner" class="ml-1 text-amber-400">★</span>
+                </button>
+            </template>
+        </div>
+
+        {{-- Tab content --}}
+        <template x-for="v in variations" :key="'content-' + v.id">
+            <div x-show="activeVariation === v.variation_label">
+                {{-- Metadata badges --}}
+                <div class="flex flex-wrap gap-2 mb-3">
+                    <template x-if="v.metadata?.tone">
+                        <span class="badge bg-slate-700/60 text-slate-300 border border-slate-700 text-xs capitalize" x-text="'tone: ' + v.metadata.tone"></span>
+                    </template>
+                    <template x-if="v.metadata?.hook_type">
+                        <span class="badge bg-slate-700/60 text-slate-300 border border-slate-700 text-xs capitalize" x-text="'hook: ' + v.metadata.hook_type"></span>
+                    </template>
+                    <template x-if="v.metadata?.structure">
+                        <span class="badge bg-slate-700/60 text-slate-300 border border-slate-700 text-xs capitalize" x-text="'structure: ' + v.metadata.structure"></span>
+                    </template>
+                    <template x-if="v.latest_score > 0">
+                        <span class="badge bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs" x-text="'score: ' + v.latest_score.toFixed(1)"></span>
+                    </template>
+                </div>
+                <pre class="text-xs bg-slate-900/60 text-slate-300 p-4 rounded-xl overflow-x-auto max-h-80 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed" x-text="v.content"></pre>
+            </div>
+        </template>
+    </div>
+
     {{-- ── Recent Tasks ────────────────────────────────────────────── --}}
     <div class="stat-card">
         <div class="flex items-center justify-between mb-3">
@@ -249,6 +293,9 @@ function agentApp() {
         newApiKey: '',
         recentTasks: @json($recentTasks ?? []),
         pollTimer: null,
+        lastStepSeen: -1,
+        variations: [],
+        activeVariation: 'A',
 
         get isRunning() {
             return this.taskStatus === 'running' || this.taskStatus === 'pending';
@@ -264,6 +311,8 @@ function agentApp() {
             this.taskStatus = 'pending';
             this.totalTokens = 0;
             this.apiNeedsUpdate = false;
+            this.lastStepSeen = -1;
+            this.variations = [];
 
             try {
                 const res = await apiPost('/agent/run', {
@@ -309,12 +358,30 @@ function agentApp() {
             if (!this.taskId) return;
 
             try {
-                const r = await fetch('/agent/status/' + this.taskId);
+                const url = '/agent/status/' + this.taskId + '?after_step=' + this.lastStepSeen;
+                const r = await fetch(url);
                 const data = await r.json();
 
                 this.taskStatus = data.status;
-                this.steps = data.steps || [];
                 this.totalTokens = data.total_tokens || 0;
+
+                // Incremental step merge
+                const newSteps = data.steps || [];
+                if (newSteps.length > 0) {
+                    // Merge new steps into existing list
+                    newSteps.forEach(s => {
+                        const existing = this.steps.findIndex(e => e.id === s.id);
+                        if (existing >= 0) {
+                            this.steps[existing] = s;
+                        } else {
+                            this.steps.push(s);
+                        }
+                        if (s.step_number > this.lastStepSeen) {
+                            this.lastStepSeen = s.step_number;
+                        }
+                    });
+                    this.steps.sort((a, b) => a.step_number - b.step_number);
+                }
 
                 if (data.final_output) {
                     this.finalOutput = data.final_output;
@@ -328,9 +395,25 @@ function agentApp() {
                 if (['completed', 'failed'].includes(data.status)) {
                     this.stopPolling();
                     this.loadRecentTasks();
+                    if (data.status === 'completed') {
+                        await this.loadVariations();
+                    }
                 }
             } catch (e) {
                 console.error('Poll error:', e);
+            }
+        },
+
+        async loadVariations() {
+            if (!this.taskId) return;
+            try {
+                const data = await apiGet('/dashboard/api/variations/' + this.taskId);
+                if (data.variations && data.variations.length > 0) {
+                    this.variations = data.variations;
+                    this.activeVariation = data.variations[0].variation_label;
+                }
+            } catch (e) {
+                // Variations not available — not a content task
             }
         },
 
@@ -353,10 +436,15 @@ function agentApp() {
             this.taskId = id;
             this.errorMessage = '';
             this.finalOutput = null;
+            this.steps = [];
+            this.variations = [];
+            this.lastStepSeen = -1;
             await this.pollStatus();
 
             if (['running', 'pending'].includes(this.taskStatus)) {
                 this.startPolling();
+            } else if (this.taskStatus === 'completed') {
+                await this.loadVariations();
             }
         },
 

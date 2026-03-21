@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PipelineActionController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Middleware\DashboardBasicAuth;
 use Illuminate\Support\Carbon;
@@ -55,7 +56,8 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
     Route::get('/',           [DashboardController::class, 'overview']);
     Route::get('/workflows',  [DashboardController::class, 'workflows']);
     Route::get('/jobs',       [DashboardController::class, 'jobs']);
-    Route::get('/campaigns',  [DashboardController::class, 'campaigns']);
+    Route::get('/campaigns',          [DashboardController::class, 'campaigns']);
+    Route::get('/campaigns/{id}',     [DashboardController::class, 'campaignDetail']);
     Route::get('/candidates', [DashboardController::class, 'candidates']);
     Route::get('/content',    [DashboardController::class, 'content']);
     Route::get('/system',     [DashboardController::class, 'system']);
@@ -89,5 +91,17 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
         Route::post('/platform',                  [DashboardController::class, 'savePlatform']);
         Route::post('/test-connection',           [DashboardController::class, 'testConnection']);
+
+        // Pipeline actions (Phase 4)
+        Route::post('/pipeline/steps/{id}/skip',  [PipelineActionController::class, 'skipStep']);
+        Route::post('/pipeline/jobs/{id}/retry',  [PipelineActionController::class, 'retryJob']);
+
+        // Variations & performance
+        Route::get('/variations/{jobId}',         [PipelineActionController::class, 'listVariations']);
+        Route::post('/variations/{id}/performance', [PipelineActionController::class, 'recordPerformance']);
+
+        // Campaign intelligence
+        Route::get('/campaigns/{id}/intelligence', [PipelineActionController::class, 'campaignIntelligence']);
+        Route::get('/campaigns/{id}/detail',       [DashboardController::class, 'apiCampaignDetail']);
     });
 });

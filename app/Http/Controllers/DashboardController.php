@@ -5,7 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\AgentJob;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
+use App\Models\ContentVariation;
+use App\Models\GeneratedOutput;
 use App\Models\KnowledgeBase;
+use App\Services\CampaignContextService;
+use App\Services\Marketing\CampaignService;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
 use App\Services\AI\OpenAIService;
@@ -24,8 +28,9 @@ use Illuminate\Support\Facades\Http;
 class DashboardController extends Controller
 {
     public function __construct(
-        private readonly DashboardStatsService $stats,
-        private readonly ApiCredentialService $credentials,
+        private readonly DashboardStatsService  $stats,
+        private readonly ApiCredentialService   $credentials,
+        private readonly CampaignContextService $campaignContext,
     ) {}
 
     // ── Page renders ──────────────────────────────────────────────────
@@ -132,7 +137,7 @@ class DashboardController extends Controller
         // Recent steps across all agents (last 60)
         $recentSteps = AgentStep::latest()
             ->limit(60)
-            ->get(['id', 'task_id', 'agent_job_id', 'agent_name', 'action', 'thought', 'status', 'tokens_used', 'latency_ms', 'knowledge_chunks_used', 'from_cache', 'created_at'])
+            ->get(['id', 'task_id', 'agent_job_id', 'agent_name', 'action', 'thought', 'status', 'tokens_used', 'latency_ms', 'knowledge_chunks_used', 'knowledge_scores', 'tool_success', 'tool_error', 'from_cache', 'created_at'])
             ->toArray();
 
         // Group steps by agent name
@@ -170,6 +175,37 @@ class DashboardController extends Controller
             'agents'            => $agents,
             'total_running'     => $totalRunning,
             'total_steps_today' => AgentStep::whereDate('created_at', today())->count(),
+        ]);
+    }
+
+    // ── API: Campaign Detail ──────────────────────────────────────────
+
+    public function campaignDetail(string $id)
+    {
+        return view('campaign-detail', ['campaignId' => $id]);
+    }
+
+    public function apiCampaignDetail(string $id): JsonResponse
+    {
+        $jobs = AgentJob::where('campaign_id', $id)
+            ->latest()
+            ->get(['id', 'agent_type', 'ai_provider', 'instruction', 'status', 'steps_taken', 'total_tokens', 'created_at', 'completed_at']);
+
+        $outputs = GeneratedOutput::query()
+            ->join('agent_jobs', 'generated_outputs.agent_job_id', '=', 'agent_jobs.id')
+            ->where('agent_jobs.campaign_id', $id)
+            ->orderByDesc('generated_outputs.created_at')
+            ->limit(20)
+            ->get(['generated_outputs.id', 'generated_outputs.type', 'generated_outputs.version',
+                   'generated_outputs.is_winner', 'generated_outputs.metadata', 'generated_outputs.created_at',
+                   'generated_outputs.agent_job_id']);
+
+        return response()->json([
+            'campaign_id'  => $id,
+            'jobs'         => $jobs,
+            'outputs'      => $outputs,
+            'best_assets'  => $this->campaignContext->getBestPerformingAssets($id),
+            'context'      => $this->campaignContext->getCampaignContext($id),
         ]);
     }
 

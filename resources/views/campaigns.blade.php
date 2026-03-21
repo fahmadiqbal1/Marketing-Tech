@@ -22,10 +22,11 @@
                     <th class="text-left py-3">Audience</th>
                     <th class="text-left py-3">Sends</th>
                     <th class="text-left py-3">Revenue</th>
+                    <th class="text-left py-3"></th>
                 </tr>
             </thead>
             <tbody>
-                <template x-if="!campaigns.length"><tr><td colspan="5" class="py-8 text-center text-slate-500">No campaigns available.</td></tr></template>
+                <template x-if="!campaigns.length"><tr><td colspan="6" class="py-8 text-center text-slate-500">No campaigns available.</td></tr></template>
                 <template x-for="campaign in campaigns" :key="campaign.id">
                     <tr class="border-b border-slate-800/60">
                         <td class="py-3"><div class="font-medium" x-text="campaign.name"></div><div class="text-xs text-slate-500" x-text="campaign.type"></div></td>
@@ -33,6 +34,10 @@
                         <td class="py-3 text-slate-400" x-text="campaign.audience"></td>
                         <td class="py-3 text-slate-400" x-text="campaign.send_count ?? 0"></td>
                         <td class="py-3 text-slate-400" x-text="'$' + Number(campaign.revenue_attributed ?? 0).toFixed(2)"></td>
+                        <td class="py-3">
+                            <a :href="'/dashboard/campaigns/' + campaign.id"
+                               class="text-xs text-brand-400 hover:text-brand-300 transition whitespace-nowrap">View Intelligence →</a>
+                        </td>
                     </tr>
                 </template>
             </tbody>
