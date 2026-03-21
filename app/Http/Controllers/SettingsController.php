@@ -13,6 +13,7 @@ class SettingsController extends Controller
     private const SECRET_FIELDS = [
         'OPENAI_API_KEY',
         'ANTHROPIC_API_KEY',
+        'GEMINI_API_KEY',
         'TELEGRAM_BOT_TOKEN',
         'TELEGRAM_WEBHOOK_SECRET',
     ];
@@ -21,6 +22,7 @@ class SettingsController extends Controller
     private const PROVIDER_MAP = [
         'OPENAI_API_KEY'           => 'openai',
         'ANTHROPIC_API_KEY'        => 'anthropic',
+        'GEMINI_API_KEY'           => 'gemini',
         'TELEGRAM_BOT_TOKEN'       => 'telegram',
         'TELEGRAM_WEBHOOK_SECRET'  => 'telegram',
     ];
@@ -45,6 +47,7 @@ class SettingsController extends Controller
             'APP_ENV'                  => env('APP_ENV', 'local'),
             'OPENAI_API_KEY'           => $this->maskOrEmpty('OPENAI_API_KEY'),
             'ANTHROPIC_API_KEY'        => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
+            'GEMINI_API_KEY'           => $this->maskOrEmpty('GEMINI_API_KEY'),
             'TELEGRAM_BOT_TOKEN'       => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
             'TELEGRAM_WEBHOOK_SECRET'  => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
             'TELEGRAM_ALLOWED_USERS'   => env('TELEGRAM_ALLOWED_USERS', ''),

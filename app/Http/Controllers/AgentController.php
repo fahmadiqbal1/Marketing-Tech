@@ -46,7 +46,7 @@ class AgentController extends Controller
     {
         $validated = $request->validate([
             'prompt'          => 'required|string|max:2000',
-            'provider'        => 'nullable|string|in:openai,gemini',
+            'provider'        => 'nullable|string|in:openai,gemini,anthropic',
             'model'           => 'nullable|string|max:100',
             'idempotency_key' => 'nullable|string|max:64',
         ]);
@@ -67,7 +67,11 @@ class AgentController extends Controller
         }
 
         // ── Validate API key exists ───────────────────────────────────
-        $envKey = $provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+        $envKey = match($provider) {
+            'gemini'    => 'GEMINI_API_KEY',
+            'anthropic' => 'ANTHROPIC_API_KEY',
+            default     => 'OPENAI_API_KEY',
+        };
         $apiKey = $this->credentials->retrieve($envKey);
 
         if (empty($apiKey) || str_contains($apiKey, 'CHANGE_ME')) {
@@ -185,12 +189,20 @@ class AgentController extends Controller
         ]);
 
         $provider = $validated['provider'] ?? 'openai';
-        $envKey   = $provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+        $envKey   = match($provider) {
+            'gemini'    => 'GEMINI_API_KEY',
+            'anthropic' => 'ANTHROPIC_API_KEY',
+            default     => 'OPENAI_API_KEY',
+        };
 
         $this->credentials->store($provider, $envKey, $validated['api_key']);
 
         if (! empty($validated['model'])) {
-            $modelEnvKey = $provider === 'gemini' ? 'AGENT_GEMINI_MODEL' : 'AGENT_OPENAI_MODEL';
+            $modelEnvKey = match($provider) {
+                'gemini'    => 'AGENT_GEMINI_MODEL',
+                'anthropic' => 'AGENT_ANTHROPIC_MODEL',
+                default     => 'AGENT_OPENAI_MODEL',
+            };
             $this->credentials->store($provider, $modelEnvKey, $validated['model']);
         }
 
@@ -202,15 +214,18 @@ class AgentController extends Controller
 
     public function getConfig(): JsonResponse
     {
-        $openaiKey = $this->credentials->retrieve('OPENAI_API_KEY') ?? '';
-        $geminiKey = $this->credentials->retrieve('GEMINI_API_KEY') ?? '';
+        $openaiKey    = $this->credentials->retrieve('OPENAI_API_KEY') ?? '';
+        $geminiKey    = $this->credentials->retrieve('GEMINI_API_KEY') ?? '';
+        $anthropicKey = $this->credentials->retrieve('ANTHROPIC_API_KEY') ?? '';
 
         return response()->json([
-            'openai_configured' => ! empty($openaiKey) && ! str_contains($openaiKey, 'CHANGE_ME'),
-            'gemini_configured' => ! empty($geminiKey) && ! str_contains($geminiKey, 'CHANGE_ME'),
-            'default_provider'  => config('agent_system.default_provider', 'openai'),
-            'openai_model'      => config('agent_system.openai_model', 'gpt-4o-mini'),
-            'gemini_model'      => config('agent_system.gemini_model', 'gemini-1.5-flash'),
+            'openai_configured'    => ! empty($openaiKey) && ! str_contains($openaiKey, 'CHANGE_ME'),
+            'gemini_configured'    => ! empty($geminiKey) && ! str_contains($geminiKey, 'CHANGE_ME'),
+            'anthropic_configured' => ! empty($anthropicKey) && ! str_contains($anthropicKey, 'CHANGE_ME'),
+            'default_provider'     => config('agent_system.default_provider', 'openai'),
+            'openai_model'         => config('agent_system.openai_model', 'gpt-4o-mini'),
+            'gemini_model'         => config('agent_system.gemini_model', 'gemini-1.5-flash'),
+            'anthropic_model'      => config('agents.anthropic.default_model', 'claude-opus-4-5'),
         ]);
     }
 }

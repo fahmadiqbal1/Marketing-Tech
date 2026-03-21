@@ -2,7 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AgentStep;
+use App\Models\AgentTask;
+use App\Models\KnowledgeBase;
+use App\Services\ApiCredentialService;
 use App\Services\Dashboard\DashboardStatsService;
+use App\Services\Knowledge\VectorStoreService;
 use App\Workflows\WorkflowDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +18,10 @@ use Illuminate\Http\Request;
  */
 class DashboardController extends Controller
 {
-    public function __construct(private readonly DashboardStatsService $stats) {}
+    public function __construct(
+        private readonly DashboardStatsService $stats,
+        private readonly ApiCredentialService $credentials,
+    ) {}
 
     // ── Page renders ──────────────────────────────────────────────────
 
@@ -24,6 +32,8 @@ class DashboardController extends Controller
     public function candidates() { return view('candidates'); }
     public function content()    { return view('content'); }
     public function system()     { return view('system'); }
+    public function pipeline()   { return view('pipeline', ['agents' => config('agents.agents', [])]); }
+    public function knowledge()  { return view('knowledge'); }
 
     // ── API: Overview stats ───────────────────────────────────────────
 
@@ -106,5 +116,171 @@ class DashboardController extends Controller
     {
         $days = (int) $request->query('days', 7);
         return response()->json($this->stats->getAiCosts($days));
+    }
+
+    // ── API: Pipeline ─────────────────────────────────────────────────
+
+    public function apiPipeline(): JsonResponse
+    {
+        $agentDefs = config('agents.agents', []);
+
+        // Recent steps across all agents (last 60)
+        $recentSteps = AgentStep::latest()
+            ->limit(60)
+            ->get(['id', 'task_id', 'agent_name', 'action', 'thought', 'status', 'tokens_used', 'latency_ms', 'created_at'])
+            ->toArray();
+
+        // Group steps by agent name
+        $stepsByAgent = collect($recentSteps)->groupBy('agent_name');
+
+        // Running job counts per queue
+        $runningByQueue = AgentTask::where('status', 'running')
+            ->get(['ai_provider', 'model', 'status'])
+            ->count();
+
+        $agents = [];
+        foreach ($agentDefs as $name => $def) {
+            $promptKey     = 'AGENT_' . strtoupper($name) . '_PROMPT';
+            $customPrompt  = $this->credentials->retrieve($promptKey);
+            $agents[]      = [
+                'name'          => $name,
+                'provider'      => $def['provider'] ?? 'openai',
+                'model'         => $def['model'] ?? 'gpt-4o',
+                'queue'         => $def['queue'] ?? $name,
+                'max_steps'     => $def['max_steps'] ?? 15,
+                'tools'         => $def['tools'] ?? [],
+                'system_prompt' => $customPrompt ?? ($def['system_prompt'] ?? ''),
+                'recent_steps'  => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
+                'active_jobs'   => AgentTask::where('status', 'running')->count(),
+            ];
+        }
+
+        return response()->json([
+            'agents'           => $agents,
+            'total_running'    => $runningByQueue,
+            'total_steps_today' => AgentStep::whereDate('created_at', today())->count(),
+        ]);
+    }
+
+    // ── API: Knowledge ────────────────────────────────────────────────
+
+    public function apiKnowledge(Request $request): JsonResponse
+    {
+        $query = KnowledgeBase::whereNull('parent_id') // top-level entries only
+            ->select(['id', 'title', 'category', 'tags', 'chunk_index', 'access_count', 'last_accessed_at', 'created_at']);
+
+        if ($search = $request->query('search')) {
+            $query->where('title', 'ilike', "%{$search}%")
+                  ->orWhere('content', 'ilike', "%{$search}%");
+        }
+
+        if ($category = $request->query('category')) {
+            $query->where('category', $category);
+        }
+
+        $paginated = $query->latest()->paginate(20);
+
+        // Stats
+        $totalEntries = KnowledgeBase::whereNull('parent_id')->count();
+        $totalChunks  = KnowledgeBase::whereNotNull('parent_id')->count() + $totalEntries;
+        $categories   = KnowledgeBase::whereNull('parent_id')
+            ->distinct('category')
+            ->pluck('category')
+            ->filter()
+            ->values();
+
+        return response()->json([
+            'data'          => $paginated->items(),
+            'total'         => $paginated->total(),
+            'per_page'      => $paginated->perPage(),
+            'current_page'  => $paginated->currentPage(),
+            'last_page'     => $paginated->lastPage(),
+            'stats'         => [
+                'total_entries' => $totalEntries,
+                'total_chunks'  => $totalChunks,
+                'categories'    => $categories,
+            ],
+        ]);
+    }
+
+    public function apiKnowledgeCreate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'title'    => 'required|string|max:255',
+            'content'  => 'required|string',
+            'category' => 'nullable|string|max:100',
+            'tags'     => 'nullable|array',
+        ]);
+
+        try {
+            $vectorStore = app(VectorStoreService::class);
+            $id = $vectorStore->store(
+                $validated['title'],
+                $validated['content'],
+                $validated['tags'] ?? [],
+                $validated['category'] ?? 'general',
+            );
+            return response()->json(['id' => $id, 'message' => 'Knowledge stored successfully.'], 201);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Failed to store knowledge: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function apiKnowledgeDelete(string $id): JsonResponse
+    {
+        // Delete the entry and all its chunks
+        $deleted = KnowledgeBase::where('id', $id)
+            ->orWhere('parent_id', $id)
+            ->delete();
+
+        return response()->json(['deleted' => $deleted > 0]);
+    }
+
+    // ── API: Agent Prompt Override ────────────────────────────────────
+
+    public function apiUpdatePrompt(Request $request, string $name): JsonResponse
+    {
+        $agents = array_keys(config('agents.agents', []));
+        if (! in_array($name, $agents)) {
+            return response()->json(['error' => 'Unknown agent: ' . $name], 404);
+        }
+
+        $validated = $request->validate(['prompt' => 'required|string|min:10|max:5000']);
+
+        $promptKey = 'AGENT_' . strtoupper($name) . '_PROMPT';
+        $this->credentials->store($name, $promptKey, $validated['prompt']);
+
+        return response()->json(['saved' => true, 'agent' => $name]);
+    }
+
+    // ── API: Save Platform Config ─────────────────────────────────────
+
+    public function savePlatform(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'provider' => 'required|string|in:openai,anthropic,gemini',
+            'api_key'  => 'required|string|min:10',
+            'model'    => 'nullable|string|max:100',
+        ]);
+
+        $provider = $validated['provider'];
+        $envKey   = match($provider) {
+            'anthropic' => 'ANTHROPIC_API_KEY',
+            'gemini'    => 'GEMINI_API_KEY',
+            default     => 'OPENAI_API_KEY',
+        };
+
+        $this->credentials->store($provider, $envKey, $validated['api_key']);
+
+        if (! empty($validated['model'])) {
+            $modelKey = match($provider) {
+                'anthropic' => 'ANTHROPIC_DEFAULT_MODEL',
+                'gemini'    => 'GEMINI_DEFAULT_MODEL',
+                default     => 'OPENAI_DEFAULT_MODEL',
+            };
+            $this->credentials->store($provider, $modelKey, $validated['model']);
+        }
+
+        return response()->json(['saved' => true, 'provider' => $provider]);
     }
 }

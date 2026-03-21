@@ -48,6 +48,8 @@ Route::prefix('dashboard')->group(function () {
     Route::get('/content',     [DashboardController::class, 'content']);
     Route::get('/system',      [DashboardController::class, 'system']);
     Route::get('/settings',    [SettingsController::class,  'index']);
+    Route::get('/pipeline',    [DashboardController::class, 'pipeline']);
+    Route::get('/knowledge',   [DashboardController::class, 'knowledge']);
 
     // ── JSON data endpoints (no auth for local dev) ────────────────
     Route::prefix('api')->group(function () {
@@ -67,5 +69,13 @@ Route::prefix('dashboard')->group(function () {
         Route::get('/settings',                      [SettingsController::class, 'show']);
         Route::post('/settings',                     [SettingsController::class, 'update']);
         Route::post('/settings/telegram/webhook',    [SettingsController::class, 'registerWebhook']);
+
+        // Pipeline & Knowledge
+        Route::get('/pipeline',                      [DashboardController::class, 'apiPipeline']);
+        Route::get('/knowledge',                     [DashboardController::class, 'apiKnowledge']);
+        Route::post('/knowledge',                    [DashboardController::class, 'apiKnowledgeCreate']);
+        Route::delete('/knowledge/{id}',             [DashboardController::class, 'apiKnowledgeDelete']);
+        Route::post('/agents/{name}/prompt',         [DashboardController::class, 'apiUpdatePrompt']);
+        Route::post('/platform',                     [DashboardController::class, 'savePlatform']);
     });
 });
