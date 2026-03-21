@@ -46,7 +46,7 @@ class AgentController extends Controller
     {
         $validated = $request->validate([
             'prompt'          => 'required|string|max:2000',
-            'provider'        => 'nullable|string|in:openai,gemini,anthropic',
+            'provider'        => 'nullable|string|in:openai,anthropic,gemini',
             'model'           => 'nullable|string|max:100',
             'idempotency_key' => 'nullable|string|max:64',
         ]);
@@ -184,7 +184,7 @@ class AgentController extends Controller
     {
         $validated = $request->validate([
             'api_key'  => 'required|string|min:10',
-            'provider' => 'nullable|string|in:openai,gemini',
+            'provider' => 'nullable|string|in:openai,gemini,anthropic',
             'model'    => 'nullable|string|max:100',
         ]);
 
@@ -198,10 +198,11 @@ class AgentController extends Controller
         $this->credentials->store($provider, $envKey, $validated['api_key']);
 
         if (! empty($validated['model'])) {
+            // Use the same key names as savePlatform() so both endpoints are consistent
             $modelEnvKey = match($provider) {
-                'gemini'    => 'AGENT_GEMINI_MODEL',
-                'anthropic' => 'AGENT_ANTHROPIC_MODEL',
-                default     => 'AGENT_OPENAI_MODEL',
+                'gemini'    => 'GEMINI_DEFAULT_MODEL',
+                'anthropic' => 'ANTHROPIC_DEFAULT_MODEL',
+                default     => 'OPENAI_DEFAULT_MODEL',
             };
             $this->credentials->store($provider, $modelEnvKey, $validated['model']);
         }

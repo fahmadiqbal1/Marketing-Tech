@@ -36,6 +36,12 @@
         </div>
     </template>
 
+    {{-- ── Error Banner ──────────────────────────────────────────────── --}}
+    <div x-show="loadError" x-cloak class="mb-4 rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300 flex items-center gap-2">
+        <span>⚠</span>
+        <span x-text="loadError"></span>
+    </div>
+
     {{-- ── Top Stats Bar ────────────────────────────────────────────── --}}
     <div class="grid grid-cols-3 gap-4 mb-6">
         <div class="stat-card">
@@ -227,6 +233,7 @@ function pipelineApp() {
         allSteps: [],
         totalRunning: 0,
         stepsToday: 0,
+        loadError: '',
         pollTimer: null,
 
         // Modal
@@ -242,12 +249,12 @@ function pipelineApp() {
 
         async load() {
             try {
-                const r = await fetch('/dashboard/api/pipeline');
-                const d = await r.json();
+                const d = await apiGet('/dashboard/api/pipeline');
 
-                this.agents      = d.agents || [];
+                this.agents       = d.agents || [];
                 this.totalRunning = d.total_running || 0;
-                this.stepsToday  = d.total_steps_today || 0;
+                this.stepsToday   = d.total_steps_today || 0;
+                this.loadError    = '';
 
                 // Build provider lookup
                 this.providerMap = {};
@@ -264,6 +271,7 @@ function pipelineApp() {
 
                 updateTimestamp();
             } catch(e) {
+                this.loadError = 'Failed to load pipeline data: ' + e.message;
                 console.error('Pipeline poll error:', e);
             }
         },

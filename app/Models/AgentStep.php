@@ -9,6 +9,7 @@ class AgentStep extends Model
 {
     protected $fillable = [
         'task_id',
+        'agent_job_id',
         'step_number',
         'agent_name',
         'thought',
