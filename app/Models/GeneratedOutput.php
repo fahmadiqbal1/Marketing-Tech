@@ -15,6 +15,7 @@ class GeneratedOutput extends Model
     protected $fillable = [
         'agent_job_id',
         'parent_output_id',
+        'content_variation_id',
         'type',
         'content',
         'version',
