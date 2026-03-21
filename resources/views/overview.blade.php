@@ -196,7 +196,11 @@ function overviewApp() {
                             responsive: true,
                             maintainAspectRatio: false,
                             cutout: '65%',
-                            plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 8 } } },
+                            plugins: {
+                                title:    { display: false },
+                                subtitle: { display: false },
+                                legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 8 } },
+                            },
                         }
                     });
                 }
@@ -214,7 +218,11 @@ function overviewApp() {
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
-                            plugins: { legend: { display: false } },
+                            plugins: {
+                                title:    { display: false },
+                                subtitle: { display: false },
+                                legend:   { display: false },
+                            },
                             scales: {
                                 x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } },
                                 y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => '$' + v } },

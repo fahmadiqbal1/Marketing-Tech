@@ -9,11 +9,15 @@ class KnowledgeBase extends Model {
     protected $fillable = ['title','content','category','tags','source','embedding','chunk_index','parent_id','content_hash'];
     protected $casts = ['tags'=>'array'];
     public static function semanticSearch(array $embedding, int $topK=5, ?string $category=null): \Illuminate\Support\Collection {
-        $vec = '['.implode(',', $embedding).']';
+        // Sanitize: cast every value to float to prevent injection via non-numeric values.
+        // PDO does not support parameterized pgvector literals, so we sanitize explicitly.
+        $safeFloats = array_map('floatval', $embedding);
+        $vec = '[' . implode(',', $safeFloats) . ']';
+
         $query = DB::table('knowledge_base')
-            ->selectRaw("*, 1 - (embedding <=> '{$vec}'::vector) as similarity")
-            ->where(DB::raw("1 - (embedding <=> '{$vec}'::vector)"), '>=', 0.65)
-            ->orderByRaw("embedding <=> '{$vec}'::vector")
+            ->selectRaw("*, 1 - (embedding <=> ?::vector) as similarity", [$vec])
+            ->whereRaw("1 - (embedding <=> ?::vector) >= 0.65", [$vec])
+            ->orderByRaw("embedding <=> ?::vector", [$vec])
             ->limit($topK);
         if ($category) $query->where('category', $category);
         return $query->get();

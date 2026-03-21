@@ -313,7 +313,15 @@ class IterationEngineService
                 ->where('content_variation_id', $winnerId)
                 ->update(['is_winner' => true]);
         } else {
-            // Fallback: mark the latest output as winner
+            // Fallback: no output is linked via content_variation_id — log a warning so this
+            // data integrity gap is visible. This should not happen in new code; it may occur
+            // for legacy outputs created before the content_variation_id column was added.
+            Log::warning('IterationEngineService: syncOutputWinner fallback activated — no output linked to winning variation', [
+                'job_id'    => $agentJobId,
+                'winner_id' => $winnerId,
+                'action'    => 'marking latest output as winner for legacy compatibility',
+            ]);
+
             $latest = GeneratedOutput::where('agent_job_id', $agentJobId)
                 ->orderByDesc('created_at')
                 ->first();

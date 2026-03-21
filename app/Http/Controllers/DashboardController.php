@@ -166,20 +166,42 @@ class DashboardController extends Controller
             ->groupBy('agent_type')
             ->pluck('cnt', 'agent_type');
 
+        // Count knowledge entries per agent.
+        // Agents store knowledge under their own name as category (e.g. 'content', 'marketing').
+        // AgentSkillsSeeder also stores entries under 'agent-skills' with title "Agent Skills: {Name}".
+        // We count both to give an accurate picture of what knowledge exists for each agent.
+        $knowledgeCounts = KnowledgeBase::selectRaw('category, count(*) as cnt')
+            ->groupBy('category')
+            ->pluck('cnt', 'category');
+
+        // Count agent-skills entries per agent name (title contains agent name, case-insensitive)
+        $agentNames    = array_keys($agentDefs);
+        $skillCounts   = [];
+        if (! empty($agentNames) && KnowledgeBase::where('category', 'agent-skills')->exists()) {
+            foreach ($agentNames as $agentName) {
+                $skillCounts[$agentName] = KnowledgeBase::where('category', 'agent-skills')
+                    ->whereRaw('lower(title) like ?', ['%' . strtolower($agentName) . '%'])
+                    ->count();
+            }
+        }
+
+        $totalKnowledge = KnowledgeBase::count();
+
         $agents = [];
         foreach ($agentDefs as $name => $def) {
             $promptKey    = 'AGENT_' . strtoupper($name) . '_PROMPT';
             $customPrompt = $this->credentials->retrieve($promptKey);
             $agents[]     = [
-                'name'          => $name,
-                'provider'      => $def['provider'] ?? 'openai',
-                'model'         => $def['model'] ?? 'gpt-4o',
-                'queue'         => $def['queue'] ?? $name,
-                'max_steps'     => $def['max_steps'] ?? 15,
-                'tools'         => $def['tools'] ?? [],
-                'system_prompt' => $customPrompt ?? ($def['system_prompt'] ?? ''),
-                'recent_steps'  => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
-                'active_jobs'   => (int) ($runningPerAgent[$name] ?? 0),
+                'name'            => $name,
+                'provider'        => $def['provider'] ?? 'openai',
+                'model'           => $def['model'] ?? 'gpt-4o',
+                'queue'           => $def['queue'] ?? $name,
+                'max_steps'       => $def['max_steps'] ?? 15,
+                'tools'           => $def['tools'] ?? [],
+                'system_prompt'   => $customPrompt ?? ($def['system_prompt'] ?? ''),
+                'knowledge_count' => (int) ($knowledgeCounts[$name] ?? 0) + (int) ($skillCounts[strtolower($name)] ?? 0),
+                'recent_steps'    => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
+                'active_jobs'     => (int) ($runningPerAgent[$name] ?? 0),
             ];
         }
 
@@ -187,6 +209,7 @@ class DashboardController extends Controller
             'agents'            => $agents,
             'total_running'     => $totalRunning,
             'total_steps_today' => AgentStep::whereDate('created_at', today())->count(),
+            'total_knowledge'   => $totalKnowledge,
         ]);
     }
 
