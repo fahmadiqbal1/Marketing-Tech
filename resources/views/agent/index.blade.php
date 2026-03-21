@@ -213,7 +213,7 @@
                 <tbody>
                     <template x-for="t in recentTasks" :key="t.id">
                         <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 cursor-pointer transition" @click="loadTask(t.id)">
-                            <td class="py-2 pr-4 text-slate-400" x-text="'#' + t.id"></td>
+                            <td class="py-2 pr-4 text-slate-400 font-mono text-xs" x-text="String(t.id).substring(0, 8) + '…'"></td>
                             <td class="py-2 pr-4 text-slate-300 max-w-xs truncate" x-text="t.user_input"></td>
                             <td class="py-2 pr-4"><span class="badge" :class="statusBadgeClass(t.status)" x-text="t.status"></span></td>
                             <td class="py-2 pr-4 text-slate-400" x-text="t.current_step"></td>

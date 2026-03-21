@@ -7,33 +7,44 @@ use App\Models\AgentStep;
 use App\Services\AI\OpenAIService;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
+use App\Services\ApiCredentialService;
 use App\Services\Telegram\TelegramBotService;
 use App\Services\Knowledge\VectorStoreService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 abstract class BaseAgent
 {
     protected string $agentType;
-    protected string $provider   = 'openai';
+    protected string $provider    = 'openai';
     protected string $model;
-    protected int    $maxSteps   = 15;
-    protected array  $tools      = [];
+    protected int    $maxSteps    = 15;
+    protected array  $tools       = [];
     protected string $systemPrompt = '';
 
+    /** Per-agent rate limit (requests per minute). 0 = unlimited. */
+    private int $rateLimitPerMinute = 0;
+
+    /** Tool result cache TTL in seconds. 0 = no cache. */
+    private int $toolCacheTtl = 0;
+
     public function __construct(
-        protected readonly OpenAIService    $openai,
-        protected readonly AnthropicService $anthropic,
-        protected readonly GeminiService    $gemini,
-        protected readonly TelegramBotService $telegram,
-        protected readonly VectorStoreService $knowledge,
+        protected readonly OpenAIService       $openai,
+        protected readonly AnthropicService    $anthropic,
+        protected readonly GeminiService       $gemini,
+        protected readonly TelegramBotService  $telegram,
+        protected readonly VectorStoreService  $knowledge,
+        protected readonly ApiCredentialService $credentials,
     ) {
         $config = config("agents.agents.{$this->agentType}", []);
-        $this->provider     = $config['provider']    ?? $this->provider;
-        $this->model        = $config['model']       ?? 'gpt-4o';
-        $this->maxSteps     = $config['max_steps']   ?? $this->maxSteps;
-        $this->systemPrompt = $config['system_prompt'] ?? $this->systemPrompt;
-        $this->tools        = $config['tools']       ?? $this->tools;
+        $this->provider            = $config['provider']             ?? $this->provider;
+        $this->model               = $config['model']                ?? 'gpt-4o';
+        $this->maxSteps            = $config['max_steps']            ?? $this->maxSteps;
+        $this->systemPrompt        = $config['system_prompt']        ?? $this->systemPrompt;
+        $this->tools               = $config['tools']                ?? $this->tools;
+        $this->rateLimitPerMinute  = $config['rate_limit_per_minute'] ?? 0;
+        $this->toolCacheTtl        = $config['tool_cache_ttl']        ?? 0;
     }
 
     /**
@@ -41,49 +52,122 @@ abstract class BaseAgent
      */
     final public function run(AgentJob $job): void
     {
+        $traceId = $job->id;
+
+        // Apply provider/model overrides from job metadata (set by AgentController)
+        if (! empty($job->ai_provider)) {
+            $this->provider = $job->ai_provider;
+        }
+        if (! empty($job->model)) {
+            $this->model = $job->model;
+        }
+
+        // Apply custom system prompt override (from credential store)
+        $promptKey    = 'AGENT_' . strtoupper($this->agentType) . '_PROMPT';
+        $customPrompt = $this->credentials->retrieve($promptKey);
+        if (! empty($customPrompt)) {
+            $this->systemPrompt = $customPrompt;
+        }
+
         $job->update(['status' => 'running', 'started_at' => now()]);
         $this->notifyUser($job, "⚡ *{$this->agentType}* agent started...");
 
-        $messages  = $this->buildInitialMessages($job);
-        $stepCount = 0;
-        $result    = null;
+        [$messages, $knowledgeChunkIds] = $this->buildInitialMessages($job);
+        $stepCount   = 0;
+        $totalTokens = 0;
+        $result      = null;
 
         try {
             while ($stepCount < $this->maxSteps) {
+                // ── Check for pause / cancel between steps ────────────────
+                $job->refresh();
+                if (in_array($job->status, ['paused', 'cancelled'])) {
+                    Log::info('Agent loop halted', [
+                        'trace_id' => $traceId,
+                        'status'   => $job->status,
+                        'agent'    => $this->agentType,
+                    ]);
+                    return;
+                }
+
+                // ── Rate limiting ─────────────────────────────────────────
+                if ($this->rateLimitPerMinute > 0) {
+                    $this->enforceRateLimit($traceId);
+                }
+
                 $stepCount++;
 
-                Log::debug("Agent step {$stepCount}", ['job_id' => $job->id, 'agent' => $this->agentType]);
+                Log::debug('Agent step', [
+                    'trace_id' => $traceId,
+                    'step'     => $stepCount,
+                    'agent'    => $this->agentType,
+                    'provider' => $this->provider,
+                    'model'    => $this->model,
+                ]);
 
-                // Call AI model — track latency
-                $aiStart   = (int) round(microtime(true) * 1000);
-                $response  = $this->callAI($messages, $this->getToolDefinitions());
-                $aiLatency = (int) round(microtime(true) * 1000) - $aiStart;
+                // ── Call AI model — track latency ─────────────────────────
+                $aiStart    = (int) round(microtime(true) * 1000);
+                $response   = $this->callAI($messages, $this->getToolDefinitions());
+                $aiLatency  = (int) round(microtime(true) * 1000) - $aiStart;
                 $tokensUsed = $this->extractTokensUsed($response);
+                $totalTokens += $tokensUsed;
 
-                // Check for tool calls
+                $thought   = $this->extractThought($response);
                 $toolCalls = $this->extractToolCalls($response);
 
                 if (empty($toolCalls)) {
-                    // No tool calls — extract final text response
+                    // No tool calls — final text response
                     $result = $this->extractText($response);
 
-                    // Record final step in pipeline
-                    $this->recordStep($job, $stepCount, 'finish', null, [], $result, $tokensUsed, $aiLatency);
+                    $this->recordStep(
+                        job:              $job,
+                        stepNumber:       $stepCount,
+                        action:           'finish',
+                        thought:          $thought,
+                        parameters:       [],
+                        result:           $result,
+                        tokensUsed:       $tokensUsed,
+                        latencyMs:        $aiLatency,
+                        knowledgeChunks:  $knowledgeChunkIds,
+                        fromCache:        false,
+                    );
                     break;
                 }
 
-                // Execute tool calls and append results to messages
-                $messages[] = $this->buildAssistantMessage($response);
+                $messages[]  = $this->buildAssistantMessage($response);
                 $toolResults = [];
 
                 foreach ($toolCalls as $toolCall) {
                     $toolStart = (int) round(microtime(true) * 1000);
 
-                    $toolResult = $this->executeTool(
-                        name:     $toolCall['name'],
-                        args:     $toolCall['arguments'],
-                        job:      $job,
-                    );
+                    // ── Tool result cache ─────────────────────────────────
+                    $fromCache  = false;
+                    $cacheKey   = null;
+                    $toolResult = null;
+
+                    if ($this->toolCacheTtl > 0) {
+                        $cacheKey   = 'agent_tool:' . md5($toolCall['name'] . json_encode($toolCall['arguments']));
+                        $toolResult = Cache::get($cacheKey);
+                        if ($toolResult !== null) {
+                            $fromCache = true;
+                            Log::debug('Tool result served from cache', [
+                                'trace_id' => $traceId,
+                                'tool'     => $toolCall['name'],
+                            ]);
+                        }
+                    }
+
+                    if ($toolResult === null) {
+                        $toolResult = $this->executeTool(
+                            name: $toolCall['name'],
+                            args: $toolCall['arguments'],
+                            job:  $job,
+                        );
+
+                        if ($this->toolCacheTtl > 0 && $cacheKey !== null) {
+                            Cache::put($cacheKey, $toolResult, $this->toolCacheTtl);
+                        }
+                    }
 
                     $toolLatency = (int) round(microtime(true) * 1000) - $toolStart;
                     $resultStr   = is_string($toolResult) ? $toolResult : json_encode($toolResult);
@@ -94,19 +178,32 @@ abstract class BaseAgent
                         'content'      => $resultStr,
                     ];
 
-                    // Record this step in agent_steps for the pipeline dashboard
-                    $this->recordStep($job, $stepCount, $toolCall['name'], null, $toolCall['arguments'], $resultStr, $tokensUsed, $aiLatency + $toolLatency);
+                    $this->recordStep(
+                        job:             $job,
+                        stepNumber:      $stepCount,
+                        action:          $toolCall['name'],
+                        thought:         $thought,
+                        parameters:      $toolCall['arguments'],
+                        result:          $resultStr,
+                        tokensUsed:      $tokensUsed,
+                        latencyMs:       $aiLatency + $toolLatency,
+                        knowledgeChunks: $knowledgeChunkIds,
+                        fromCache:       $fromCache,
+                    );
 
-                    Log::debug("Tool executed", [
-                        'tool'    => $toolCall['name'],
-                        'job_id'  => $job->id,
-                        'success' => ! empty($toolResult),
+                    Log::info('Tool executed', [
+                        'trace_id'   => $traceId,
+                        'tool'       => $toolCall['name'],
+                        'from_cache' => $fromCache,
+                        'latency_ms' => $toolLatency,
                     ]);
+
+                    // Only use knowledge context on first step, not every tool call
+                    $knowledgeChunkIds = [];
                 }
 
                 $messages[] = $this->buildToolResultMessage($toolResults);
 
-                // Update progress
                 $job->update([
                     'steps_taken' => $stepCount,
                     'last_tool'   => $toolCalls[0]['name'] ?? null,
@@ -115,15 +212,22 @@ abstract class BaseAgent
 
             if ($stepCount >= $this->maxSteps && $result === null) {
                 $result = "Agent reached maximum steps ({$this->maxSteps}). Partial work may have been completed.";
-                Log::warning("Agent hit max steps", ['job_id' => $job->id]);
+                Log::warning('Agent hit max steps', ['trace_id' => $traceId, 'agent' => $this->agentType]);
             }
 
-            // Store result and update job
             $job->update([
                 'status'       => 'completed',
                 'result'       => $result,
                 'steps_taken'  => $stepCount,
+                'total_tokens' => $totalTokens,
                 'completed_at' => now(),
+            ]);
+
+            Log::info('Agent completed', [
+                'trace_id'     => $traceId,
+                'agent'        => $this->agentType,
+                'steps'        => $stepCount,
+                'total_tokens' => $totalTokens,
             ]);
 
             $this->notifyUser($job, "✅ *{$this->agentType}* completed:\n\n{$result}");
@@ -131,16 +235,17 @@ abstract class BaseAgent
         } catch (\Throwable $e) {
             $errorMsg = $e->getMessage();
 
-            Log::error("Agent failed", [
-                'job_id'  => $job->id,
-                'agent'   => $this->agentType,
-                'error'   => $errorMsg,
-                'trace'   => $e->getTraceAsString(),
+            Log::error('Agent failed', [
+                'trace_id' => $traceId,
+                'agent'    => $this->agentType,
+                'error'    => $errorMsg,
+                'trace'    => $e->getTraceAsString(),
             ]);
 
             $job->update([
                 'status'        => 'failed',
                 'error_message' => $errorMsg,
+                'total_tokens'  => $totalTokens,
                 'completed_at'  => now(),
             ]);
 
@@ -177,7 +282,7 @@ abstract class BaseAgent
                 model:        $this->model,
                 systemPrompt: $this->systemPrompt,
                 tools:        $tools,
-                maxTokens:    config('agents.openai.max_tokens', 4096),
+                maxTokens:    config('agents.gemini.max_tokens', 4096),
             ),
             default => $this->openai->chat(
                 messages:     $messages,
@@ -191,24 +296,30 @@ abstract class BaseAgent
 
     // ─── Message Building ─────────────────────────────────────────
 
+    /**
+     * Returns [messages array, knowledge_chunk_ids array].
+     */
     private function buildInitialMessages(AgentJob $job): array
     {
-        $messages = [];
+        $messages        = [];
+        $chunkIds        = [];
 
-        // Inject relevant knowledge context if available
         $context = $this->knowledge->search($job->instruction, topK: 3);
         if (! empty($context)) {
             $contextText = "Relevant knowledge from the knowledge base:\n\n";
             foreach ($context as $item) {
                 $contextText .= "- {$item['content']}\n";
+                if (! empty($item['id'])) {
+                    $chunkIds[] = $item['id'];
+                }
             }
-            $messages[] = ['role' => 'user', 'content' => $contextText];
+            $messages[] = ['role' => 'user',      'content' => $contextText];
             $messages[] = ['role' => 'assistant', 'content' => 'I have reviewed the relevant knowledge context and will use it to inform my response.'];
         }
 
         $messages[] = ['role' => 'user', 'content' => $job->instruction];
 
-        return $messages;
+        return [$messages, $chunkIds];
     }
 
     private function buildAssistantMessage(array $response): array
@@ -228,9 +339,9 @@ abstract class BaseAgent
     {
         if ($this->provider === 'anthropic') {
             $content = array_map(fn($r) => [
-                'type'         => 'tool_result',
-                'tool_use_id'  => $r['tool_call_id'],
-                'content'      => $r['content'],
+                'type'        => 'tool_result',
+                'tool_use_id' => $r['tool_call_id'],
+                'content'     => $r['content'],
             ], $toolResults);
 
             return ['role' => 'user', 'content' => $content];
@@ -282,6 +393,22 @@ abstract class BaseAgent
         return $response['choices'][0]['message']['content'] ?? '';
     }
 
+    /**
+     * Try to extract a reasoning/thought string from the response.
+     * Anthropic text blocks before tool_use are used as "thought".
+     */
+    private function extractThought(array $response): ?string
+    {
+        if ($this->provider === 'anthropic') {
+            foreach ($response['content'] ?? [] as $block) {
+                if ($block['type'] === 'text' && ! empty($block['text'])) {
+                    return Str::limit($block['text'], 500);
+                }
+            }
+        }
+        return null;
+    }
+
     private function convertToolsForAnthropic(array $openAiTools): array
     {
         return array_map(fn($tool) => [
@@ -293,9 +420,6 @@ abstract class BaseAgent
 
     // ─── Helpers ──────────────────────────────────────────────────
 
-    /**
-     * Write a step record to agent_steps so the pipeline dashboard can display it.
-     */
     private function recordStep(
         AgentJob $job,
         int      $stepNumber,
@@ -305,29 +429,33 @@ abstract class BaseAgent
         mixed    $result,
         int      $tokensUsed,
         int      $latencyMs,
+        array    $knowledgeChunks = [],
+        bool     $fromCache = false,
     ): void {
         try {
             AgentStep::create([
-                'task_id'     => null,
-                'agent_job_id'=> $job->id,
-                'step_number' => $stepNumber,
-                'agent_name'  => $this->agentType,
-                'action'      => $action,
-                'thought'     => $thought,
-                'parameters'  => $parameters,
-                'result'      => is_string($result) ? ['output' => $result] : (array) $result,
-                'status'      => 'completed',
-                'tokens_used' => $tokensUsed,
-                'latency_ms'  => $latencyMs,
+                'task_id'              => null,
+                'agent_job_id'         => $job->id,
+                'step_number'          => $stepNumber,
+                'agent_name'           => $this->agentType,
+                'action'               => $action,
+                'thought'              => $thought,
+                'parameters'           => $parameters,
+                'result'               => is_string($result) ? ['output' => $result] : (array) $result,
+                'knowledge_chunks_used'=> empty($knowledgeChunks) ? null : $knowledgeChunks,
+                'from_cache'           => $fromCache,
+                'status'               => 'completed',
+                'tokens_used'          => $tokensUsed,
+                'latency_ms'           => $latencyMs,
             ]);
         } catch (\Throwable $e) {
-            Log::warning('Failed to record agent step', ['error' => $e->getMessage()]);
+            Log::warning('Failed to record agent step', [
+                'trace_id' => $job->id,
+                'error'    => $e->getMessage(),
+            ]);
         }
     }
 
-    /**
-     * Extract total tokens used from an AI response (works for OpenAI and Gemini responses).
-     */
     private function extractTokensUsed(array $response): int
     {
         // Anthropic format
@@ -338,13 +466,38 @@ abstract class BaseAgent
         return $response['usage']['total_tokens'] ?? 0;
     }
 
+    /**
+     * Cache-based per-agent rate limiting.
+     * Blocks (sleeps) if the per-minute quota is exhausted.
+     */
+    private function enforceRateLimit(string $traceId): void
+    {
+        $key     = "agent_rate:{$this->agentType}:" . date('YmdHi');
+        $current = (int) Cache::get($key, 0);
+
+        if ($current >= $this->rateLimitPerMinute) {
+            $sleepSeconds = 60 - (int) date('s');
+            Log::warning('Agent rate limit reached, waiting', [
+                'trace_id'   => $traceId,
+                'agent'      => $this->agentType,
+                'sleep_secs' => $sleepSeconds,
+            ]);
+            sleep(max(1, $sleepSeconds));
+            // Reset counter for new minute
+            Cache::forget($key);
+            $current = 0;
+        }
+
+        Cache::put($key, $current + 1, 120);
+    }
+
     protected function notifyUser(AgentJob $job, string $message): void
     {
         if ($job->chat_id) {
             try {
                 $this->telegram->sendMessage($job->chat_id, $message);
             } catch (\Throwable $e) {
-                Log::warning("Failed to notify user", ['error' => $e->getMessage()]);
+                Log::warning('Failed to notify user', ['error' => $e->getMessage()]);
             }
         }
     }

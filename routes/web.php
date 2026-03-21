@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Middleware\DashboardBasicAuth;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -50,7 +51,7 @@ Route::get('/health', function () {
     }
 });
 
-Route::prefix('dashboard')->group(function () {
+Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(function () {
     Route::get('/',           [DashboardController::class, 'overview']);
     Route::get('/workflows',  [DashboardController::class, 'workflows']);
     Route::get('/jobs',       [DashboardController::class, 'jobs']);
@@ -87,5 +88,6 @@ Route::prefix('dashboard')->group(function () {
         Route::delete('/knowledge/{id}',          [DashboardController::class, 'apiKnowledgeDelete']);
         Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
         Route::post('/platform',                  [DashboardController::class, 'savePlatform']);
+        Route::post('/test-connection',           [DashboardController::class, 'testConnection']);
     });
 });
