@@ -17,8 +17,9 @@ Route::prefix('agent')->name('agent.')->group(function () {
     Route::get('/', [AgentController::class, 'index'])->name('index');
 
     // Read-only (status / listing / config — no auth required)
+    // UUIDs are alphanumeric with hyphens; allow any non-slash string
     Route::get('/status/{id}', [AgentController::class, 'status'])->name('status')
-        ->where('id', '[0-9]+');
+        ->where('id', '[0-9a-f\-]+');
     Route::get('/tasks',  [AgentController::class, 'taskList'])->name('tasks');
     Route::get('/config', [AgentController::class, 'getConfig'])->name('config');
 
@@ -26,9 +27,9 @@ Route::prefix('agent')->name('agent.')->group(function () {
     Route::middleware(['throttle:10,1', CheckAgentToken::class])->group(function () {
         Route::post('/run',          [AgentController::class, 'run'])->name('run');
         Route::post('/pause/{id}',   [AgentController::class, 'pause'])->name('pause')
-            ->where('id', '[0-9]+');
+            ->where('id', '[0-9a-f\-]+');
         Route::post('/resume/{id}',  [AgentController::class, 'resume'])->name('resume')
-            ->where('id', '[0-9]+');
+            ->where('id', '[0-9a-f\-]+');
         Route::post('/update-api',   [AgentController::class, 'updateApi'])->name('update-api');
     });
 });

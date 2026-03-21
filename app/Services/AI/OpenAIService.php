@@ -2,26 +2,36 @@
 
 namespace App\Services\AI;
 
+use App\Services\ApiCredentialService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
 
 class OpenAIService
 {
-    private string $apiKey;
-    private string $baseUrl = 'https://api.openai.com/v1';
+    private string $baseUrl      = 'https://api.openai.com/v1';
     private int    $retryAttempts;
     private int    $retryDelayMs;
 
-    public function __construct()
+    public function __construct(private readonly ApiCredentialService $credentials)
     {
-        $this->apiKey       = config('agents.openai.api_key');
         $this->retryAttempts = config('agents.openai.retry_attempts', 3);
         $this->retryDelayMs  = config('agents.openai.retry_delay_ms', 1000);
+    }
 
-        if (empty($this->apiKey)) {
+    /**
+     * Resolve the API key at call-time: DB-stored credential takes priority over .env.
+     */
+    private function apiKey(): string
+    {
+        $key = $this->credentials->retrieve('OPENAI_API_KEY')
+            ?? config('agents.openai.api_key')
+            ?? '';
+
+        if (empty($key) || str_contains($key, 'CHANGE_ME')) {
             throw new \RuntimeException('OpenAI API key is not configured.');
         }
+
+        return $key;
     }
 
     /**
@@ -29,11 +39,11 @@ class OpenAIService
      */
     public function chat(
         array   $messages,
-        string  $model       = 'gpt-4o',
+        string  $model        = 'gpt-4o',
         string  $systemPrompt = '',
-        array   $tools       = [],
-        int     $maxTokens   = 4096,
-        float   $temperature = 0.7,
+        array   $tools        = [],
+        int     $maxTokens    = 4096,
+        float   $temperature  = 0.7,
     ): array {
         $payload = [
             'model'       => $model,
@@ -41,7 +51,6 @@ class OpenAIService
             'temperature' => $temperature,
         ];
 
-        // Prepend system prompt as system message
         if (! empty($systemPrompt)) {
             array_unshift($messages, ['role' => 'system', 'content' => $systemPrompt]);
         }
@@ -80,7 +89,7 @@ class OpenAIService
      */
     public function embed(string|array $input): array
     {
-        $model     = config('agents.openai.embedding_model', 'text-embedding-3-large');
+        $model      = config('agents.openai.embedding_model', 'text-embedding-3-large');
         $dimensions = config('agents.openai.embedding_dim', 3072);
 
         $texts = is_array($input) ? $input : [$input];
@@ -104,7 +113,7 @@ class OpenAIService
      */
     public function transcribe(string $filePath, string $language = 'en'): string
     {
-        $response = Http::withToken($this->apiKey)
+        $response = Http::withToken($this->apiKey())
             ->timeout(120)
             ->attach('file', file_get_contents($filePath), basename($filePath))
             ->post("{$this->baseUrl}/audio/transcriptions", [
@@ -147,17 +156,39 @@ class OpenAIService
         return $response['choices'][0]['message']['content'] ?? '';
     }
 
+    /**
+     * List available models (used by test-connection endpoint).
+     */
+    public function listModels(): array
+    {
+        return $this->request('models', []);
+    }
+
     // ─── HTTP ─────────────────────────────────────────────────────
 
     private function request(string $endpoint, array $payload): array
     {
+        $apiKey  = $this->apiKey();
         $attempt = 0;
+
+        // GET requests (e.g. list models)
+        if (empty($payload)) {
+            $response = Http::withToken($apiKey)
+                ->timeout(config('agents.openai.timeout', 60))
+                ->get("{$this->baseUrl}/{$endpoint}");
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            throw new \RuntimeException("OpenAI API error {$response->status()}");
+        }
 
         while ($attempt < $this->retryAttempts) {
             $attempt++;
 
             try {
-                $response = Http::withToken($this->apiKey)
+                $response = Http::withToken($apiKey)
                     ->timeout(config('agents.openai.timeout', 60))
                     ->withHeaders(['OpenAI-Organization' => config('agents.openai.organization', '')])
                     ->post("{$this->baseUrl}/{$endpoint}", $payload);
@@ -169,7 +200,6 @@ class OpenAIService
                 $status = $response->status();
                 $body   = $response->json();
 
-                // Rate limit — wait and retry
                 if ($status === 429) {
                     $retryAfter = (int) ($response->header('Retry-After') ?? 10);
                     Log::warning("OpenAI rate limit hit, retrying after {$retryAfter}s");
@@ -177,10 +207,9 @@ class OpenAIService
                     continue;
                 }
 
-                // Server error — retry with backoff
                 if ($status >= 500 && $attempt < $this->retryAttempts) {
                     $delay = $this->retryDelayMs * pow(2, $attempt - 1);
-                    usleep($delay * 1000);
+                    usleep((int) ($delay * 1000));
                     continue;
                 }
 

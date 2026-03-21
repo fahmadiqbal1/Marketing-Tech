@@ -2,25 +2,36 @@
 
 namespace App\Services\AI;
 
+use App\Services\ApiCredentialService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AnthropicService
 {
-    private string $apiKey;
-    private string $baseUrl = 'https://api.anthropic.com/v1';
+    private string $baseUrl      = 'https://api.anthropic.com/v1';
     private int    $retryAttempts;
     private int    $retryDelayMs;
 
-    public function __construct()
+    public function __construct(private readonly ApiCredentialService $credentials)
     {
-        $this->apiKey        = config('agents.anthropic.api_key');
         $this->retryAttempts = config('agents.anthropic.retry_attempts', 3);
         $this->retryDelayMs  = config('agents.anthropic.retry_delay_ms', 1500);
+    }
 
-        if (empty($this->apiKey)) {
+    /**
+     * Resolve the API key at call-time: DB-stored credential takes priority over .env.
+     */
+    private function apiKey(): string
+    {
+        $key = $this->credentials->retrieve('ANTHROPIC_API_KEY')
+            ?? config('agents.anthropic.api_key')
+            ?? '';
+
+        if (empty($key) || str_contains($key, 'CHANGE_ME')) {
             throw new \RuntimeException('Anthropic API key is not configured.');
         }
+
+        return $key;
     }
 
     /**
@@ -57,8 +68,8 @@ class AnthropicService
      */
     public function complete(
         string $prompt,
-        string $model      = 'claude-haiku-4-5-20251001',
-        int    $maxTokens  = 1024,
+        string $model       = 'claude-haiku-4-5-20251001',
+        int    $maxTokens   = 1024,
         float  $temperature = 0.7,
     ): string {
         $response = $this->chat(
@@ -78,7 +89,7 @@ class AnthropicService
     }
 
     /**
-     * Count tokens for a given text (uses /tokens endpoint).
+     * Count tokens for a given text (used by test-connection endpoint).
      */
     public function countTokens(string $text, string $model = 'claude-haiku-4-5-20251001'): int
     {
@@ -89,7 +100,6 @@ class AnthropicService
             ]);
             return $response['input_tokens'] ?? 0;
         } catch (\Throwable) {
-            // Rough estimate: ~4 chars per token
             return (int) (strlen($text) / 4);
         }
     }
@@ -98,6 +108,7 @@ class AnthropicService
 
     private function request(string $endpoint, array $payload): array
     {
+        $apiKey  = $this->apiKey();
         $attempt = 0;
 
         while ($attempt < $this->retryAttempts) {
@@ -105,7 +116,7 @@ class AnthropicService
 
             try {
                 $response = Http::withHeaders([
-                    'x-api-key'         => $this->apiKey,
+                    'x-api-key'         => $apiKey,
                     'anthropic-version' => '2023-06-01',
                     'content-type'      => 'application/json',
                 ])

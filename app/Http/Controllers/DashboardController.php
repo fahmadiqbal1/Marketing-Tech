@@ -6,12 +6,16 @@ use App\Models\AgentJob;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
 use App\Models\KnowledgeBase;
+use App\Services\AI\AnthropicService;
+use App\Services\AI\GeminiService;
+use App\Services\AI\OpenAIService;
 use App\Services\ApiCredentialService;
 use App\Services\Dashboard\DashboardStatsService;
 use App\Services\Knowledge\VectorStoreService;
 use App\Workflows\WorkflowDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 
 /**
  * DashboardController – thin controller.
@@ -128,7 +132,7 @@ class DashboardController extends Controller
         // Recent steps across all agents (last 60)
         $recentSteps = AgentStep::latest()
             ->limit(60)
-            ->get(['id', 'task_id', 'agent_name', 'action', 'thought', 'status', 'tokens_used', 'latency_ms', 'created_at'])
+            ->get(['id', 'task_id', 'agent_job_id', 'agent_name', 'action', 'thought', 'status', 'tokens_used', 'latency_ms', 'knowledge_chunks_used', 'from_cache', 'created_at'])
             ->toArray();
 
         // Group steps by agent name
@@ -241,6 +245,95 @@ class DashboardController extends Controller
             ->delete();
 
         return response()->json(['deleted' => $deleted > 0]);
+    }
+
+    // ── API: Agent Prompt Override ────────────────────────────────────
+
+    // ── API: Test Connection ──────────────────────────────────────────
+
+    public function testConnection(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'provider' => 'required|string|in:openai,anthropic,gemini',
+        ]);
+
+        $provider = $validated['provider'];
+        $start    = (int) round(microtime(true) * 1000);
+
+        try {
+            switch ($provider) {
+                case 'openai':
+                    $key = $this->credentials->retrieve('OPENAI_API_KEY') ?? '';
+                    if (empty($key) || str_contains($key, 'CHANGE_ME')) {
+                        throw new \RuntimeException('OpenAI API key is not configured.');
+                    }
+                    $response = Http::withToken($key)
+                        ->timeout(10)
+                        ->get('https://api.openai.com/v1/models');
+                    if ($response->failed()) {
+                        throw new \RuntimeException('OpenAI responded with HTTP ' . $response->status() . ': ' . ($response->json('error.message') ?? 'Unknown error'));
+                    }
+                    $modelCount = count($response->json('data') ?? []);
+                    $message = "Connected. {$modelCount} models available.";
+                    break;
+
+                case 'anthropic':
+                    $key = $this->credentials->retrieve('ANTHROPIC_API_KEY') ?? '';
+                    if (empty($key) || str_contains($key, 'CHANGE_ME')) {
+                        throw new \RuntimeException('Anthropic API key is not configured.');
+                    }
+                    $response = Http::withHeaders([
+                        'x-api-key'         => $key,
+                        'anthropic-version' => '2023-06-01',
+                        'content-type'      => 'application/json',
+                    ])->timeout(10)->post('https://api.anthropic.com/v1/messages/count_tokens', [
+                        'model'    => 'claude-haiku-4-5-20251001',
+                        'messages' => [['role' => 'user', 'content' => 'ping']],
+                    ]);
+                    if ($response->failed()) {
+                        throw new \RuntimeException('Anthropic responded with HTTP ' . $response->status() . ': ' . ($response->json('error.message') ?? 'Unknown error'));
+                    }
+                    $tokens = $response->json('input_tokens') ?? '?';
+                    $message = "Connected. Token count: {$tokens}.";
+                    break;
+
+                case 'gemini':
+                    $key = $this->credentials->retrieve('GEMINI_API_KEY') ?? '';
+                    if (empty($key) || str_contains($key, 'CHANGE_ME')) {
+                        throw new \RuntimeException('Gemini API key is not configured.');
+                    }
+                    $response = Http::timeout(10)
+                        ->get("https://generativelanguage.googleapis.com/v1beta/models?key={$key}");
+                    if ($response->failed()) {
+                        throw new \RuntimeException('Gemini responded with HTTP ' . $response->status() . ': ' . ($response->json('error.message') ?? 'Unknown error'));
+                    }
+                    $modelCount = count($response->json('models') ?? []);
+                    $message = "Connected. {$modelCount} models available.";
+                    break;
+
+                default:
+                    throw new \RuntimeException("Unknown provider: {$provider}");
+            }
+
+            $latencyMs = (int) round(microtime(true) * 1000) - $start;
+
+            return response()->json([
+                'success'    => true,
+                'provider'   => $provider,
+                'message'    => $message,
+                'latency_ms' => $latencyMs,
+            ]);
+
+        } catch (\Throwable $e) {
+            $latencyMs = (int) round(microtime(true) * 1000) - $start;
+
+            return response()->json([
+                'success'    => false,
+                'provider'   => $provider,
+                'message'    => $e->getMessage(),
+                'latency_ms' => $latencyMs,
+            ], 422);
+        }
     }
 
     // ── API: Agent Prompt Override ────────────────────────────────────

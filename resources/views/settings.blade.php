@@ -48,10 +48,22 @@
                         <option value="gpt-4-turbo">gpt-4-turbo</option>
                     </select>
                 </div>
-                <button @click="savePlatform('openai')" :disabled="saving.openai"
-                        class="w-full py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                    <span x-text="saving.openai ? 'Saving...' : 'Save OpenAI Config'"></span>
-                </button>
+                <div class="flex gap-2">
+                    <button @click="savePlatform('openai')" :disabled="saving.openai"
+                            class="flex-1 py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                        <span x-text="saving.openai ? 'Saving...' : 'Save Config'"></span>
+                    </button>
+                    <button @click="testConnection('openai')" :disabled="testing.openai"
+                            class="px-3 py-2 border border-emerald-500/40 text-emerald-400 text-sm rounded-lg hover:bg-emerald-500/10 transition disabled:opacity-50"
+                            title="Test connection">
+                        <span x-show="!testing.openai">⚡</span>
+                        <span x-show="testing.openai" class="inline-block animate-spin">↻</span>
+                    </button>
+                </div>
+                <div x-show="testResult.openai" class="text-xs rounded-lg px-3 py-2 mt-1"
+                     :class="testResult.openai?.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'">
+                    <span x-text="(testResult.openai?.success ? '✓ ' : '✗ ') + (testResult.openai?.message || '') + (testResult.openai?.latency_ms ? ' (' + testResult.openai.latency_ms + 'ms)' : '')"></span>
+                </div>
             </div>
         </div>
 
@@ -86,10 +98,22 @@
                         <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
                     </select>
                 </div>
-                <button @click="savePlatform('anthropic')" :disabled="saving.anthropic"
-                        class="w-full py-2 bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                    <span x-text="saving.anthropic ? 'Saving...' : 'Save Anthropic Config'"></span>
-                </button>
+                <div class="flex gap-2">
+                    <button @click="savePlatform('anthropic')" :disabled="saving.anthropic"
+                            class="flex-1 py-2 bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                        <span x-text="saving.anthropic ? 'Saving...' : 'Save Config'"></span>
+                    </button>
+                    <button @click="testConnection('anthropic')" :disabled="testing.anthropic"
+                            class="px-3 py-2 border border-violet-500/40 text-violet-400 text-sm rounded-lg hover:bg-violet-500/10 transition disabled:opacity-50"
+                            title="Test connection">
+                        <span x-show="!testing.anthropic">⚡</span>
+                        <span x-show="testing.anthropic" class="inline-block animate-spin">↻</span>
+                    </button>
+                </div>
+                <div x-show="testResult.anthropic" class="text-xs rounded-lg px-3 py-2 mt-1"
+                     :class="testResult.anthropic?.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'">
+                    <span x-text="(testResult.anthropic?.success ? '✓ ' : '✗ ') + (testResult.anthropic?.message || '') + (testResult.anthropic?.latency_ms ? ' (' + testResult.anthropic.latency_ms + 'ms)' : '')"></span>
+                </div>
             </div>
         </div>
 
@@ -124,10 +148,22 @@
                         <option value="gemini-1.5-flash">gemini-1.5-flash (Fast)</option>
                     </select>
                 </div>
-                <button @click="savePlatform('gemini')" :disabled="saving.gemini"
-                        class="w-full py-2 bg-blue-600/80 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                    <span x-text="saving.gemini ? 'Saving...' : 'Save Gemini Config'"></span>
-                </button>
+                <div class="flex gap-2">
+                    <button @click="savePlatform('gemini')" :disabled="saving.gemini"
+                            class="flex-1 py-2 bg-blue-600/80 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                        <span x-text="saving.gemini ? 'Saving...' : 'Save Config'"></span>
+                    </button>
+                    <button @click="testConnection('gemini')" :disabled="testing.gemini"
+                            class="px-3 py-2 border border-blue-500/40 text-blue-400 text-sm rounded-lg hover:bg-blue-500/10 transition disabled:opacity-50"
+                            title="Test connection">
+                        <span x-show="!testing.gemini">⚡</span>
+                        <span x-show="testing.gemini" class="inline-block animate-spin">↻</span>
+                    </button>
+                </div>
+                <div x-show="testResult.gemini" class="text-xs rounded-lg px-3 py-2 mt-1"
+                     :class="testResult.gemini?.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'">
+                    <span x-text="(testResult.gemini?.success ? '✓ ' : '✗ ') + (testResult.gemini?.message || '') + (testResult.gemini?.latency_ms ? ' (' + testResult.gemini.latency_ms + 'ms)' : '')"></span>
+                </div>
             </div>
         </div>
     </div>
@@ -251,7 +287,9 @@ function settingsApp() {
             TELEGRAM_BOT_TOKEN: '', TELEGRAM_ADMIN_CHAT_ID: '',
             DB_CONNECTION: '', DB_HOST: '', DB_PORT: '', DB_DATABASE: '',
         },
-        saving: { openai: false, anthropic: false, gemini: false, system: false, webhook: false },
+        saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false },
+        testing:    { openai: false, anthropic: false, gemini: false },
+        testResult: { openai: null, anthropic: null, gemini: null },
         toast: { show: false, message: '', error: false },
         webhookResult: '',
         sysWarning: '',
@@ -301,6 +339,21 @@ function settingsApp() {
                 }
             } catch(e) { this.showToast('Error: ' + e.message, true); }
             this.saving[provider] = false;
+        },
+
+        async testConnection(provider) {
+            this.testing[provider] = true;
+            this.testResult[provider] = null;
+            try {
+                const r = await apiPost('/dashboard/api/test-connection', { provider });
+                this.testResult[provider] = r;
+                if (r.success) {
+                    this.config[provider + '_configured'] = true;
+                }
+            } catch(e) {
+                this.testResult[provider] = { success: false, message: e.message };
+            }
+            this.testing[provider] = false;
         },
 
         async saveSysSettings() {

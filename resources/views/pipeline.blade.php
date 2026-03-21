@@ -184,6 +184,7 @@
                         <th class="pb-2 text-left pr-3">Status</th>
                         <th class="pb-2 text-left pr-3">Tokens</th>
                         <th class="pb-2 text-left pr-3">Latency</th>
+                        <th class="pb-2 text-left pr-3">RAG / Cache</th>
                         <th class="pb-2 text-left">When</th>
                     </tr>
                 </thead>
@@ -210,11 +211,24 @@
                             </td>
                             <td class="py-2 pr-3 text-slate-500 text-xs" x-text="step.tokens_used ? step.tokens_used + ' tok' : '—'"></td>
                             <td class="py-2 pr-3 text-slate-500 text-xs" x-text="step.latency_ms ? step.latency_ms + 'ms' : '—'"></td>
+                            <td class="py-2 pr-3 text-xs">
+                                <template x-if="step.knowledge_chunks_used && step.knowledge_chunks_used.length > 0">
+                                    <span class="badge bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                                          :title="'Chunk IDs: ' + (step.knowledge_chunks_used || []).join(', ')"
+                                          x-text="step.knowledge_chunks_used.length + ' chunk' + (step.knowledge_chunks_used.length > 1 ? 's' : '')"></span>
+                                </template>
+                                <template x-if="step.from_cache">
+                                    <span class="badge bg-amber-500/20 text-amber-400 border border-amber-500/30 ml-1">cached</span>
+                                </template>
+                                <template x-if="!step.knowledge_chunks_used?.length && !step.from_cache">
+                                    <span class="text-slate-700">—</span>
+                                </template>
+                            </td>
                             <td class="py-2 text-slate-600 text-xs" x-text="relativeTime(step.created_at)"></td>
                         </tr>
                     </template>
                     <tr x-show="allSteps.length === 0">
-                        <td colspan="8" class="py-8 text-center text-slate-500 text-sm">
+                        <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
                             No agent steps yet. Run a task from the <a href="/agent" class="text-brand-400 hover:text-brand-300">Agent page</a> to see live activity here.
                         </td>
                     </tr>

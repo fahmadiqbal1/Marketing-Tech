@@ -27,6 +27,15 @@ class AgentRunner
 
     public function run(AgentTask $task): void
     {
+        // DEPRECATED: AgentRunner uses the legacy AgentTask/agent_tasks system.
+        // New tasks should be dispatched via AgentOrchestrator → RunAgentJob → BaseAgent.
+        // This runner remains for any in-flight legacy tasks in the queue.
+        Log::warning('[AgentRunner] DEPRECATED legacy agent runner executing task', [
+            'task_id'  => $task->id,
+            'provider' => $task->ai_provider,
+            'notice'   => 'Migrate callers to AgentOrchestrator::dispatch() / RunAgentJob',
+        ]);
+
         Log::info("[AgentRunner] Starting task {$task->id}: {$task->user_input}");
 
         try {

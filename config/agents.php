@@ -20,12 +20,19 @@ return [
     ],
 
     'anthropic' => [
-        'api_key'       => env('ANTHROPIC_API_KEY'),
-        'default_model' => env('ANTHROPIC_DEFAULT_MODEL', 'claude-opus-4-5'),
-        'max_tokens'    => (int) env('ANTHROPIC_MAX_TOKENS', 8192),
-        'timeout'       => 90,
+        'api_key'        => env('ANTHROPIC_API_KEY'),
+        'default_model'  => env('ANTHROPIC_DEFAULT_MODEL', 'claude-opus-4-5'),
+        'max_tokens'     => (int) env('ANTHROPIC_MAX_TOKENS', 8192),
+        'timeout'        => 90,
         'retry_attempts' => 3,
         'retry_delay_ms' => 1500,
+    ],
+
+    'gemini' => [
+        'api_key'       => env('GEMINI_API_KEY'),
+        'default_model' => env('GEMINI_DEFAULT_MODEL', 'gemini-2.0-flash'),
+        'max_tokens'    => (int) env('GEMINI_MAX_TOKENS', 4096),
+        'timeout'       => 60,
     ],
 
     /*
@@ -36,11 +43,13 @@ return [
     */
     'agents' => [
         'marketing' => [
-            'class'         => \App\Agents\MarketingAgent::class,
-            'queue'         => 'marketing',
-            'model'         => 'gpt-4o',
-            'provider'      => 'openai',
-            'max_steps'     => 15,
+            'class'                => \App\Agents\MarketingAgent::class,
+            'queue'                => 'marketing',
+            'model'                => 'gpt-4o',
+            'provider'             => 'openai',
+            'max_steps'            => 15,
+            'rate_limit_per_minute'=> (int) env('AGENT_MARKETING_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_MARKETING_TOOL_CACHE_TTL', 300),
             'system_prompt' => <<<'PROMPT'
 You are a senior marketing strategist and campaign manager. You have access to tools to:
 - Create and schedule email campaigns
@@ -56,11 +65,13 @@ PROMPT,
         ],
 
         'content' => [
-            'class'         => \App\Agents\ContentAgent::class,
-            'queue'         => 'content',
-            'model'         => 'claude-opus-4-5',
-            'provider'      => 'anthropic',
-            'max_steps'     => 20,
+            'class'                => \App\Agents\ContentAgent::class,
+            'queue'                => 'content',
+            'model'                => 'claude-opus-4-5',
+            'provider'             => 'anthropic',
+            'max_steps'            => 20,
+            'rate_limit_per_minute'=> (int) env('AGENT_CONTENT_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_CONTENT_TOOL_CACHE_TTL', 60),
             'system_prompt' => <<<'PROMPT'
 You are an expert content strategist and writer. You produce high-quality, SEO-optimised content including:
 - Blog posts and articles
@@ -78,11 +89,13 @@ PROMPT,
         ],
 
         'media' => [
-            'class'         => \App\Agents\MediaAgent::class,
-            'queue'         => 'media',
-            'model'         => 'gpt-4o',
-            'provider'      => 'openai',
-            'max_steps'     => 10,
+            'class'                => \App\Agents\MediaAgent::class,
+            'queue'                => 'media',
+            'model'                => 'gpt-4o',
+            'provider'             => 'openai',
+            'max_steps'            => 10,
+            'rate_limit_per_minute'=> (int) env('AGENT_MEDIA_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_MEDIA_TOOL_CACHE_TTL', 0),
             'system_prompt' => <<<'PROMPT'
 You are a professional media production specialist. You can:
 - Process and transcode video files (FFmpeg)
@@ -99,11 +112,13 @@ PROMPT,
         ],
 
         'hiring' => [
-            'class'         => \App\Agents\HiringAgent::class,
-            'queue'         => 'hiring',
-            'model'         => 'claude-opus-4-5',
-            'provider'      => 'anthropic',
-            'max_steps'     => 20,
+            'class'                => \App\Agents\HiringAgent::class,
+            'queue'                => 'hiring',
+            'model'                => 'claude-opus-4-5',
+            'provider'             => 'anthropic',
+            'max_steps'            => 20,
+            'rate_limit_per_minute'=> (int) env('AGENT_HIRING_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_HIRING_TOOL_CACHE_TTL', 120),
             'system_prompt' => <<<'PROMPT'
 You are an expert recruiter and talent acquisition specialist. You can:
 - Parse and score CVs/resumes against job requirements
@@ -121,11 +136,13 @@ PROMPT,
         ],
 
         'growth' => [
-            'class'         => \App\Agents\GrowthAgent::class,
-            'queue'         => 'growth',
-            'model'         => 'gpt-4o',
-            'provider'      => 'openai',
-            'max_steps'     => 25,
+            'class'                => \App\Agents\GrowthAgent::class,
+            'queue'                => 'growth',
+            'model'                => 'gpt-4o',
+            'provider'             => 'openai',
+            'max_steps'            => 25,
+            'rate_limit_per_minute'=> (int) env('AGENT_GROWTH_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_GROWTH_TOOL_CACHE_TTL', 600),
             'system_prompt' => <<<'PROMPT'
 You are a growth engineer and data analyst. You design, run, and analyse experiments to optimise business metrics. You can:
 - Design A/B and multivariate experiments
@@ -143,11 +160,13 @@ PROMPT,
         ],
 
         'knowledge' => [
-            'class'         => \App\Agents\KnowledgeAgent::class,
-            'queue'         => 'knowledge',
-            'model'         => 'claude-opus-4-5',
-            'provider'      => 'anthropic',
-            'max_steps'     => 20,
+            'class'                => \App\Agents\KnowledgeAgent::class,
+            'queue'                => 'knowledge',
+            'model'                => 'claude-opus-4-5',
+            'provider'             => 'anthropic',
+            'max_steps'            => 20,
+            'rate_limit_per_minute'=> (int) env('AGENT_KNOWLEDGE_RATE_LIMIT', 0),
+            'tool_cache_ttl'       => (int) env('AGENT_KNOWLEDGE_TOOL_CACHE_TTL', 300),
             'system_prompt' => <<<'PROMPT'
 You are a knowledge management specialist. You maintain and curate the organisation's knowledge base and context graph. You can:
 - Store facts, documents, and learnings with semantic embeddings
