@@ -30,6 +30,30 @@ class VectorStoreService
         string  $category = 'general',
         ?string $source   = null,
     ): string {
+        // Soft growth cap: prevent unbounded accumulation (50k entries)
+        $totalEntries = KnowledgeBase::whereNull('parent_id')->count();
+        if ($totalEntries >= 50000) {
+            Log::warning('VectorStoreService: knowledge base soft cap reached — pruning oldest 1000 low-access entries', [
+                'total' => $totalEntries,
+            ]);
+            // Prune oldest entries with zero accesses first, then by age
+            $toPrune = KnowledgeBase::whereNull('parent_id')
+                ->where('access_count', 0)
+                ->orderBy('created_at')
+                ->limit(1000)
+                ->pluck('id');
+
+            if ($toPrune->isEmpty()) {
+                // Fall back to pruning by age if all have accesses
+                $toPrune = KnowledgeBase::whereNull('parent_id')
+                    ->orderBy('created_at')
+                    ->limit(1000)
+                    ->pluck('id');
+            }
+
+            KnowledgeBase::whereIn('id', $toPrune)->delete();
+        }
+
         // Compute content hash for deduplication (1000 chars = lower collision risk)
         $normalised  = strtolower(preg_replace('/\s+/', ' ', trim($content)));
         $contentHash = md5(mb_substr($normalised, 0, 1000, 'UTF-8'));

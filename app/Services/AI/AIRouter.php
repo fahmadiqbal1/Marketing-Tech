@@ -197,8 +197,10 @@ class AIRouter
                 $response = $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
                 return $response['choices'][0]['message']['content'] ?? '';
             } catch (\Throwable $e) {
-                Log::error('Custom AI platform failed, falling back to OpenAI', [
-                    'platform' => $custom->name, 'error' => $e->getMessage(),
+                Log::warning('AIRouter: custom platform fallback triggered', [
+                    'platform'      => $custom->name,
+                    'error'         => $e->getMessage(),
+                    'fallback_to'   => 'openai/gpt-4o',
                 ]);
                 return $this->openai->complete($messages[0]['content'], 'gpt-4o', $maxTokens, $temperature);
             }
@@ -217,8 +219,10 @@ class AIRouter
             try {
                 return $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
             } catch (\Throwable $e) {
-                Log::error('Custom AI platform chat failed, falling back to OpenAI', [
-                    'platform' => $custom->name, 'error' => $e->getMessage(),
+                Log::warning('AIRouter: custom platform chat fallback triggered', [
+                    'platform'    => $custom->name,
+                    'error'       => $e->getMessage(),
+                    'fallback_to' => 'openai/gpt-4o',
                 ]);
                 return $this->openai->chat($messages, 'gpt-4o', $system ?? '', $tools, $maxTokens, $temperature);
             }
@@ -262,6 +266,17 @@ class AIRouter
 
     private function callCustomPlatform(CustomAiPlatform $platform, string $model, array $messages, ?string $system, int $maxTokens, float $temperature): array
     {
+        // Circuit breaker: skip provider if it has failed 5+ consecutive times in the last 5 min
+        $cbKey = "provider_failures_{$platform->name}";
+        $failures = (int) Cache::get($cbKey, 0);
+        if ($failures >= 5) {
+            Log::warning('AIRouter: circuit breaker open — custom platform skipped', [
+                'platform'  => $platform->name,
+                'failures'  => $failures,
+            ]);
+            throw new \RuntimeException("Provider {$platform->name} temporarily disabled (circuit breaker open after {$failures} failures)");
+        }
+
         $apiKey = config($platform->api_key_env) ?? env($platform->api_key_env, '');
 
         $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json'];
@@ -277,21 +292,40 @@ class AIRouter
             array_unshift($body['messages'], ['role' => 'system', 'content' => $system]);
         }
 
-        $response = Http::withHeaders($headers)
-            ->timeout(30)
-            ->retry(1, 0)
-            ->post(rtrim($platform->api_base_url, '/') . '/chat/completions', $body);
+        try {
+            $response = Http::withHeaders($headers)
+                ->timeout(30)
+                ->retry(1, 0)
+                ->post(rtrim($platform->api_base_url, '/') . '/chat/completions', $body);
 
-        if ($response->failed()) {
-            throw new \RuntimeException("Custom platform {$platform->name} responded HTTP {$response->status()}: " . ($response->json('error.message') ?? 'Unknown error'));
+            if ($response->failed()) {
+                throw new \RuntimeException("Custom platform {$platform->name} responded HTTP {$response->status()}: " . ($response->json('error.message') ?? 'Unknown error'));
+            }
+
+            $data = $response->json();
+            if (empty($data['choices'][0]['message']['content'])) {
+                throw new \RuntimeException("Custom platform {$platform->name} returned invalid response shape");
+            }
+
+            // Success: reset circuit breaker
+            Cache::forget($cbKey);
+            return $data;
+
+        } catch (\Throwable $e) {
+            // Increment failure counter; expire in 5 minutes (window resets after recovery)
+            $newCount = $failures + 1;
+            Cache::put($cbKey, $newCount, 300);
+
+            if ($newCount >= 5) {
+                Log::error('AIRouter: circuit breaker OPENED for custom platform', [
+                    'platform' => $platform->name,
+                    'failures' => $newCount,
+                    'error'    => $e->getMessage(),
+                ]);
+            }
+
+            throw $e;
         }
-
-        $data = $response->json();
-        if (empty($data['choices'][0]['message']['content'])) {
-            throw new \RuntimeException("Custom platform {$platform->name} returned invalid response shape");
-        }
-
-        return $data;
     }
 
     private function selectModel(string $prompt, string $preference): string

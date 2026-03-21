@@ -7,6 +7,7 @@ use App\Models\ContentPerformance;
 use App\Models\ContentVariation;
 use App\Models\GeneratedOutput;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -338,6 +339,50 @@ class IterationEngineService
             'is_winner'       => false,
             'created_at'      => now(),
         ]);
+    }
+
+    /**
+     * Atomically create a ContentVariation and its linked GeneratedOutput in a
+     * single transaction. If either insert fails, both are rolled back — no orphans.
+     *
+     * @return array{variation: ContentVariation, output: GeneratedOutput}
+     */
+    public function storeVariationWithOutput(
+        string  $agentJobId,
+        string  $label,
+        string  $content,
+        string  $outputType      = 'content',
+        array   $metadata        = [],
+        ?string $parentOutputId  = null,
+    ): array {
+        return DB::transaction(function () use ($agentJobId, $label, $content, $outputType, $metadata, $parentOutputId) {
+            $variation = ContentVariation::create([
+                'agent_job_id'    => $agentJobId,
+                'variation_label' => strtoupper($label),
+                'content'         => $content,
+                'metadata'        => $metadata,
+                'is_winner'       => false,
+                'created_at'      => now(),
+            ]);
+
+            $version = (int) GeneratedOutput::where('agent_job_id', $agentJobId)
+                ->where('type', $outputType)
+                ->max('version') + 1;
+
+            $output = GeneratedOutput::create([
+                'agent_job_id'         => $agentJobId,
+                'parent_output_id'     => $parentOutputId,
+                'content_variation_id' => $variation->id,
+                'type'                 => $outputType,
+                'content'              => $content,
+                'version'              => $version,
+                'is_winner'            => false,
+                'metadata'             => array_merge($metadata, ['variation_label' => strtoupper($label)]),
+                'created_at'           => now(),
+            ]);
+
+            return ['variation' => $variation, 'output' => $output];
+        });
     }
 
     /**
