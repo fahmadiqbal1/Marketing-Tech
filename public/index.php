@@ -4,6 +4,19 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
+foreach ([
+    __DIR__.'/../storage/app/temp',
+    __DIR__.'/../storage/framework/cache/data',
+    __DIR__.'/../storage/framework/sessions',
+    __DIR__.'/../storage/framework/testing',
+    __DIR__.'/../storage/framework/views',
+    __DIR__.'/../storage/logs',
+] as $directory) {
+    if (! is_dir($directory)) {
+        @mkdir($directory, 0755, true);
+    }
+}
+
 // If the application is in maintenance mode...
 if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;

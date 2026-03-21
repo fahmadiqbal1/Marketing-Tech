@@ -3,7 +3,9 @@
 @section('subtitle', 'Live platform status and activity')
 
 @section('content')
-<div x-data="overviewApp()" x-init="init()" x-cloak>
+<div x-data="overviewApp()" x-init="init()" x-cloak class="space-y-4">
+    <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
+    <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
     {{-- ── Stat cards ─────────────────────────────────────────── --}}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -149,6 +151,7 @@
 <script>
 function overviewApp() {
     return {
+        ...dashboardState(),
         stats: {},
         statusChartInstance: null,
         costChartInstance: null,
@@ -168,11 +171,11 @@ function overviewApp() {
 
         async load() {
             try {
-                const r = await fetch('/dashboard/api/stats');
-                this.stats = await r.json();
+                const data = this.applyMeta(await apiGet('/dashboard/api/stats'));
+                this.stats = data;
                 this.updateCharts();
                 updateTimestamp();
-            } catch(e) { console.error(e); }
+            } catch (error) { this.handleError(error); }
         },
 
         buildCharts() {
@@ -229,12 +232,11 @@ function overviewApp() {
         async loadCosts() {
             if (!this.costChartInstance) return;
             try {
-                const r = await fetch('/dashboard/api/ai-costs?days=7');
-                const d = await r.json();
+                const d = this.applyMeta(await apiGet('/dashboard/api/ai-costs?days=7'));
                 this.costChartInstance.data.labels = (d.daily ?? []).map(x => x.date);
                 this.costChartInstance.data.datasets[0].data = (d.daily ?? []).map(x => x.cost);
                 this.costChartInstance.update();
-            } catch(e) {}
+            } catch (error) { this.handleError(error); }
         },
 
         statusBadge, relativeTime

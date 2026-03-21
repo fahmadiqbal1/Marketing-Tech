@@ -6,6 +6,7 @@ use App\Services\ApiCredentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 
 class SettingsController extends Controller
 {
@@ -19,10 +20,10 @@ class SettingsController extends Controller
 
     /** Provider mapping for secrets */
     private const PROVIDER_MAP = [
-        'OPENAI_API_KEY'           => 'openai',
-        'ANTHROPIC_API_KEY'        => 'anthropic',
-        'TELEGRAM_BOT_TOKEN'       => 'telegram',
-        'TELEGRAM_WEBHOOK_SECRET'  => 'telegram',
+        'OPENAI_API_KEY' => 'openai',
+        'ANTHROPIC_API_KEY' => 'anthropic',
+        'TELEGRAM_BOT_TOKEN' => 'telegram',
+        'TELEGRAM_WEBHOOK_SECRET' => 'telegram',
     ];
 
     private string $envPath;
@@ -40,21 +41,22 @@ class SettingsController extends Controller
     public function show(): JsonResponse
     {
         return response()->json([
-            'APP_URL'                  => env('APP_URL', ''),
-            'APP_DEBUG'                => env('APP_DEBUG', false),
-            'APP_ENV'                  => env('APP_ENV', 'local'),
-            'OPENAI_API_KEY'           => $this->maskOrEmpty('OPENAI_API_KEY'),
-            'ANTHROPIC_API_KEY'        => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
-            'TELEGRAM_BOT_TOKEN'       => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
-            'TELEGRAM_WEBHOOK_SECRET'  => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
-            'TELEGRAM_ALLOWED_USERS'   => env('TELEGRAM_ALLOWED_USERS', ''),
-            'TELEGRAM_ADMIN_CHAT_ID'   => env('TELEGRAM_ADMIN_CHAT_ID', ''),
-            'DB_HOST'                  => env('DB_HOST', ''),
-            'DB_PORT'                  => env('DB_PORT', '5432'),
-            'DB_DATABASE'              => env('DB_DATABASE', ''),
-            'DB_USERNAME'              => env('DB_USERNAME', ''),
-            'QUEUE_CONNECTION'         => env('QUEUE_CONNECTION', 'database'),
-            'CACHE_DRIVER'             => env('CACHE_DRIVER', 'file'),
+            'APP_URL' => env('APP_URL', ''),
+            'APP_DEBUG' => env('APP_DEBUG', false),
+            'APP_ENV' => env('APP_ENV', 'local'),
+            'OPENAI_API_KEY' => $this->maskOrEmpty('OPENAI_API_KEY'),
+            'ANTHROPIC_API_KEY' => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
+            'TELEGRAM_BOT_TOKEN' => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
+            'TELEGRAM_WEBHOOK_SECRET' => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
+            'TELEGRAM_ALLOWED_USERS' => env('TELEGRAM_ALLOWED_USERS', ''),
+            'TELEGRAM_ADMIN_CHAT_ID' => env('TELEGRAM_ADMIN_CHAT_ID', ''),
+            'DB_CONNECTION' => env('DB_CONNECTION', 'pgsql'),
+            'DB_HOST' => env('DB_HOST', ''),
+            'DB_PORT' => env('DB_PORT', '5432'),
+            'DB_DATABASE' => env('DB_DATABASE', ''),
+            'DB_USERNAME' => env('DB_USERNAME', ''),
+            'QUEUE_CONNECTION' => env('QUEUE_CONNECTION', 'redis'),
+            'CACHE_STORE' => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
         ]);
     }
 
@@ -64,6 +66,7 @@ class SettingsController extends Controller
         $nonSecretAllowed = [
             'APP_URL', 'APP_DEBUG', 'APP_ENV',
             'TELEGRAM_ALLOWED_USERS', 'TELEGRAM_ADMIN_CHAT_ID',
+            'QUEUE_CONNECTION', 'CACHE_STORE',
         ];
 
         $data = $request->only(array_merge($secretFields, $nonSecretAllowed));
@@ -72,18 +75,25 @@ class SettingsController extends Controller
             return response()->json(['error' => 'No valid fields provided'], 422);
         }
 
-        // ── Store secrets in encrypted DB (never touch .env) ──────────
+        $warnings = [];
+
         foreach ($secretFields as $field) {
-            if (isset($data[$field]) && ! str_contains((string) $data[$field], '****')) {
+            if (! isset($data[$field]) || str_contains((string) $data[$field], '****')) {
+                unset($data[$field]);
+                continue;
+            }
+
+            try {
                 $provider = self::PROVIDER_MAP[$field] ?? 'other';
                 $this->credentials->store($provider, $field, (string) $data[$field]);
-                unset($data[$field]);
-            } else {
-                unset($data[$field]);
+            } catch (\Throwable $e) {
+                $warnings[] = "Unable to store {$field} in the database: {$e->getMessage()}";
+                Log::warning('Settings secret save failed', ['field' => $field, 'error' => $e->getMessage()]);
             }
+
+            unset($data[$field]);
         }
 
-        // ── Write non-secret fields to .env ───────────────────────────
         if (! empty($data) && file_exists($this->envPath)) {
             $env = file_get_contents($this->envPath);
 
@@ -91,12 +101,14 @@ class SettingsController extends Controller
                 if (str_contains((string) $value, '****')) {
                     continue;
                 }
+
                 $escaped = $this->escapeEnvValue((string) $value);
 
                 if (preg_match("/^{$key}=/m", $env)) {
                     $env = preg_replace("/^{$key}=.*/m", "{$key}={$escaped}", $env);
                 } else {
-                    $env .= "\n{$key}={$escaped}";
+                    $env .= "
+{$key}={$escaped}";
                 }
             }
 
@@ -105,28 +117,30 @@ class SettingsController extends Controller
 
         try {
             Artisan::call('config:clear');
-        } catch (\Throwable) {
-            // non-fatal
+        } catch (\Throwable $e) {
+            $warnings[] = 'Configuration was saved, but the config cache could not be cleared.';
+            Log::warning('config:clear failed after settings update', ['error' => $e->getMessage()]);
         }
 
-        return response()->json(['saved' => true]);
+        return response()->json([
+            'saved' => true,
+            'warnings' => $warnings,
+        ]);
     }
 
     public function registerWebhook(): JsonResponse
     {
         try {
-            $exit   = Artisan::call('telegram:webhook');
+            $exit = Artisan::call('telegram:webhook');
             $output = Artisan::output();
             return response()->json([
                 'success' => $exit === 0,
-                'output'  => trim($output),
+                'output' => trim($output),
             ]);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'output' => $e->getMessage()], 500);
         }
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────
 
     private function maskOrEmpty(string $envKey): string
     {

@@ -136,7 +136,7 @@ Route::middleware('auth:sanctum')->group(function () {
             $days = (int) request('days', 30);
             $rows = \App\Models\AiRequest::selectRaw(
                 "provider, model, COUNT(*) as requests, SUM(tokens_in) as total_tokens_in,
-                 SUM(tokens_out) as total_tokens_out, ROUND(SUM(cost_usd)::numeric, 4) as total_cost_usd"
+                 SUM(tokens_out) as total_tokens_out, SUM(cost_usd) as total_cost_usd"
             )
             ->where('requested_at', '>=', now()->subDays($days))
             ->groupBy('provider', 'model')

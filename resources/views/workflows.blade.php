@@ -3,7 +3,9 @@
 @section('subtitle', 'All workflow runs with status and logs')
 
 @section('content')
-<div x-data="workflowsApp()" x-init="init()" x-cloak>
+<div x-data="workflowsApp()" x-init="init()" x-cloak class="space-y-4">
+    <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
+    <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
     {{-- ── Filters ──────────────────────────────────────────────── --}}
     <div class="flex flex-wrap items-center gap-3 mb-5">
@@ -180,6 +182,7 @@
 <script>
 function workflowsApp() {
     return {
+        ...dashboardState(),
         workflows: [], filter: '', typeFilter: '', search: '',
         loading: false, total: 0, page: 1, lastPage: 1,
         expanded: null, detail: null, detailLoading: false,
@@ -205,13 +208,12 @@ function workflowsApp() {
             if (this.typeFilter) params.set('type', this.typeFilter);
             if (this.search)     params.set('search', this.search);
             try {
-                const r = await fetch('/dashboard/api/workflows?' + params);
-                const d = await r.json();
+                const d = this.applyMeta(await apiGet('/dashboard/api/workflows?' + params));
                 this.workflows = d.data ?? [];
                 this.total     = d.total ?? 0;
                 this.lastPage  = d.last_page ?? 1;
                 updateTimestamp();
-            } catch(e) { console.error(e); }
+            } catch (error) { this.handleError(error); }
             this.loading = false;
         },
 
@@ -221,9 +223,8 @@ function workflowsApp() {
             this.detail       = null;
             this.detailLoading = true;
             try {
-                const r = await fetch('/dashboard/api/workflows/' + id);
-                this.detail = await r.json();
-            } catch(e) {}
+                this.detail = this.applyMeta(await apiGet('/dashboard/api/workflows/' + id));
+            } catch (error) { this.handleError(error); }
             this.detailLoading = false;
         },
 
