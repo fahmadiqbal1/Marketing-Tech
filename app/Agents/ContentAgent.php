@@ -242,10 +242,11 @@ PROMPT;
                 // Soft guard: skip if this job already has 5+ variations stored
                 $existingCount = \App\Models\ContentVariation::where('agent_job_id', $job->id)->count();
 
-                // Store all three variations (with deduplication by normalised content hash)
+                // Store all three variations atomically (ContentVariation + GeneratedOutput in one transaction)
                 foreach (['A', 'B', 'C'] as $label) {
                     if ($existingCount >= 5) {
-                        break; // Variation limit reached
+                        Log::warning('ContentAgent: variation limit reached', ['job_id' => $job->id, 'limit' => 5]);
+                        break;
                     }
 
                     $v       = $parsed[$label];
@@ -260,10 +261,12 @@ PROMPT;
                         continue;
                     }
 
-                    $this->iterationEngine->storeVariation(
+                    // Atomic: variation + output created together or not at all
+                    $this->iterationEngine->storeVariationWithOutput(
                         agentJobId: $job->id,
                         label:      $label,
                         content:    $content,
+                        outputType: 'content',
                         metadata:   [
                             'tone'       => $v['tone']       ?? null,
                             'hook_type'  => $v['hook_type']  ?? null,
@@ -282,10 +285,12 @@ PROMPT;
                     'raw'    => substr($raw, 0, 200),
                 ]);
                 $primaryContent = $raw;
-                $this->iterationEngine->storeVariation(
+                // Atomic: variation + output in one transaction
+                $this->iterationEngine->storeVariationWithOutput(
                     agentJobId: $job->id,
                     label:      'A',
                     content:    $raw,
+                    outputType: 'content',
                     metadata:   [
                         'tone'       => $tone,
                         'word_count' => str_word_count($raw),

@@ -132,15 +132,45 @@ class SettingsController extends Controller
 
     public function registerWebhook(): JsonResponse
     {
+        // Validate prerequisites before calling the Artisan command
+        $botToken = $this->credentials->retrieve('TELEGRAM_BOT_TOKEN');
+        if (empty($botToken)) {
+            return response()->json([
+                'success' => false,
+                'output'  => 'Telegram bot token is not configured. Add TELEGRAM_BOT_TOKEN in Settings first.',
+            ], 422);
+        }
+
+        $appUrl = env('APP_URL', '');
+        if (empty($appUrl) || $appUrl === 'http://localhost') {
+            return response()->json([
+                'success' => false,
+                'output'  => 'APP_URL is not set to a public URL. Update APP_URL in Application Settings first.',
+            ], 422);
+        }
+
         try {
             $exit   = Artisan::call('telegram:webhook');
             $output = Artisan::output();
+
+            if ($exit !== 0) {
+                Log::error('Webhook registration failed', [
+                    'exit_code' => $exit,
+                    'output'    => trim($output),
+                    'app_url'   => $appUrl,
+                ]);
+            }
+
             return response()->json([
                 'success' => $exit === 0,
                 'output'  => trim($output),
             ]);
         } catch (\Throwable $e) {
-            return response()->json(['success' => false, 'output' => $e->getMessage()], 500);
+            Log::error('Webhook registration exception', [
+                'error'   => $e->getMessage(),
+                'app_url' => $appUrl,
+            ]);
+            return response()->json(['success' => false, 'output' => $e->getMessage()], 422);
         }
     }
 

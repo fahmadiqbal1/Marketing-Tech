@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\DB;
 class KnowledgeBase extends Model {
     use HasUuids;
     protected $table = 'knowledge_base';
-    protected $fillable = ['title','content','category','tags','source','embedding','chunk_index','parent_id'];
+    protected $fillable = ['title','content','category','tags','source','embedding','chunk_index','parent_id','content_hash'];
     protected $casts = ['tags'=>'array'];
     public static function semanticSearch(array $embedding, int $topK=5, ?string $category=null): \Illuminate\Support\Collection {
         $vec = '['.implode(',', $embedding).']';

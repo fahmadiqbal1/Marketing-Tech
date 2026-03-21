@@ -23,7 +23,77 @@
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
-            <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+
+            {{-- Mode Toggle --}}
+            <div class="flex border-b border-slate-800 px-6">
+                <button @click="importMode = 'manual'"
+                        class="py-3 px-4 text-sm font-medium border-b-2 transition"
+                        :class="importMode === 'manual' ? 'border-brand-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'">
+                    Manual Entry
+                </button>
+                <button @click="importMode = 'github'"
+                        class="py-3 px-4 text-sm font-medium border-b-2 transition"
+                        :class="importMode === 'github' ? 'border-brand-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'">
+                    GitHub Import
+                </button>
+            </div>
+
+            {{-- GitHub Import Form --}}
+            <div x-show="importMode === 'github'" class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+                <p class="text-xs text-slate-500">Import files from a public or private GitHub repository into the knowledge base. Files are queued for background processing.</p>
+                <div>
+                    <label class="text-xs text-slate-400 uppercase mb-1 block">Repository URL <span class="text-red-400">*</span></label>
+                    <input type="text" x-model="githubImport.repoUrl"
+                           placeholder="https://github.com/owner/repo"
+                           class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs text-slate-400 uppercase mb-1 block">Category</label>
+                        <select x-model="githubImport.category"
+                                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+                            <option value="general">General</option>
+                            <option value="brand">Brand</option>
+                            <option value="marketing">Marketing</option>
+                            <option value="content">Content</option>
+                            <option value="technical">Technical</option>
+                            <option value="agent-skills">Agent Skills</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-400 uppercase mb-1 block">Branch</label>
+                        <input type="text" x-model="githubImport.branch" placeholder="main"
+                               class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 uppercase mb-1 block">GitHub Token (optional, for private repos)</label>
+                    <input type="password" x-model="githubImport.token"
+                           placeholder="ghp_..."
+                           class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-400 space-y-1">
+                    <p class="font-semibold text-slate-300">Import limits:</p>
+                    <p>• Max 200 files per import (md, txt, php, js, py, json, yaml)</p>
+                    <p>• Max 200 KB per file, 200,000 chars total per repo</p>
+                    <p>• Vendor, node_modules, and dist directories are skipped</p>
+                    <p>• Duplicates are automatically skipped via content hash</p>
+                </div>
+                <div x-show="githubResult" class="rounded-lg px-3 py-2 text-xs"
+                     :class="githubResult.error ? 'bg-red-500/10 text-red-400 border border-red-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'"
+                     x-text="githubResult.message || githubResult.error"></div>
+            </div>
+            <div x-show="importMode === 'github'" class="px-6 py-4 border-t border-slate-800 flex gap-3">
+                <button @click="addPanel = false"
+                        class="flex-1 py-2 border border-slate-700 text-slate-400 text-sm rounded-lg hover:border-slate-500 hover:text-white transition">Cancel</button>
+                <button @click="importGitHub()" :disabled="importing"
+                        class="flex-1 py-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                    <span x-text="importing ? 'Queuing...' : 'Import Repository'"></span>
+                </button>
+            </div>
+
+            {{-- Manual Entry Form --}}
+            <div x-show="importMode === 'manual'" class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                 <div>
                     <label class="text-xs text-slate-400 uppercase mb-1 block">Title <span class="text-red-400">*</span></label>
                     <input type="text" x-model="newEntry.title"
@@ -32,10 +102,10 @@
                 </div>
                 <div>
                     <label class="text-xs text-slate-400 uppercase mb-1 block">Content <span class="text-red-400">*</span></label>
-                    <textarea x-model="newEntry.content" rows="10"
+                    <textarea x-model="newEntry.content" rows="16"
                               placeholder="Paste or type the knowledge content here. Long content will be auto-chunked and embedded."
                               class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition resize-none font-mono leading-relaxed"></textarea>
-                    <p class="text-xs text-slate-600 mt-1" x-text="(newEntry.content || '').length + ' chars — chunks at 1000 chars'"></p>
+                    <p class="text-xs text-slate-600 mt-1" x-text="(newEntry.content || '').length + ' chars — will auto-chunk for embedding'"></p>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -50,6 +120,7 @@
                             <option value="growth">Growth</option>
                             <option value="product">Product</option>
                             <option value="technical">Technical</option>
+                            <option value="agent-skills">Agent Skills</option>
                         </select>
                     </div>
                     <div>
@@ -67,7 +138,7 @@
                     <p>4. Agents automatically retrieve the top-3 relevant chunks before each task</p>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t border-slate-800 flex gap-3">
+            <div x-show="importMode === 'manual'" class="px-6 py-4 border-t border-slate-800 flex gap-3">
                 <button @click="addPanel = false"
                         class="flex-1 py-2 border border-slate-700 text-slate-400 text-sm rounded-lg hover:border-slate-500 hover:text-white transition">Cancel</button>
                 <button @click="createEntry()" :disabled="adding"
@@ -224,6 +295,10 @@ function knowledgeApp() {
         totalEntries: 0,
         addPanel: false,
         adding: false,
+        importing: false,
+        importMode: 'manual',
+        githubImport: { repoUrl: '', category: 'general', branch: 'main', token: '' },
+        githubResult: null,
         toast: { show: false, message: '', error: false },
         newEntry: { title: '', content: '', category: 'general', tagsRaw: '' },
 
@@ -314,6 +389,34 @@ function knowledgeApp() {
         showToast(message, error = false) {
             this.toast = { show: true, message, error };
             setTimeout(() => this.toast.show = false, 3500);
+        },
+
+        async importGitHub() {
+            if (!this.githubImport.repoUrl.trim()) {
+                this.showToast('Repository URL is required.', true);
+                return;
+            }
+            this.importing = true;
+            this.githubResult = null;
+            try {
+                const r = await apiPost('/dashboard/api/knowledge/github', {
+                    repo_url: this.githubImport.repoUrl,
+                    category: this.githubImport.category,
+                    branch:   this.githubImport.branch || 'main',
+                    token:    this.githubImport.token || null,
+                });
+
+                if (r.queued) {
+                    this.githubResult = { message: r.message || 'Import queued. Files will appear shortly.' };
+                    this.githubImport = { repoUrl: '', category: 'general', branch: 'main', token: '' };
+                    this.showToast('GitHub import queued successfully.');
+                } else {
+                    this.githubResult = { error: r.error || 'Failed to queue import.' };
+                }
+            } catch(e) {
+                this.githubResult = { error: 'Error: ' + e.message };
+            }
+            this.importing = false;
         },
 
         relativeTime,

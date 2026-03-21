@@ -3,6 +3,9 @@
 namespace App\Services\AI;
 
 use App\Models\AiRequest;
+use App\Models\CustomAiPlatform;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AIRouter
@@ -188,6 +191,21 @@ class AIRouter
 
     private function callProvider(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature): string
     {
+        $custom = $this->resolveCustomPlatform($provider);
+        if ($custom) {
+            try {
+                $response = $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
+                return $response['choices'][0]['message']['content'] ?? '';
+            } catch (\Throwable $e) {
+                Log::warning('AIRouter: custom platform fallback triggered', [
+                    'platform'      => $custom->name,
+                    'error'         => $e->getMessage(),
+                    'fallback_to'   => 'openai/gpt-4o',
+                ]);
+                return $this->openai->complete($messages[0]['content'], 'gpt-4o', $maxTokens, $temperature);
+            }
+        }
+
         if ($provider === 'anthropic') {
             return $this->anthropic->complete($messages[0]['content'], $model, $maxTokens, $temperature);
         }
@@ -196,6 +214,20 @@ class AIRouter
 
     private function callProviderChat(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature, array $tools): array
     {
+        $custom = $this->resolveCustomPlatform($provider);
+        if ($custom) {
+            try {
+                return $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
+            } catch (\Throwable $e) {
+                Log::warning('AIRouter: custom platform chat fallback triggered', [
+                    'platform'    => $custom->name,
+                    'error'       => $e->getMessage(),
+                    'fallback_to' => 'openai/gpt-4o',
+                ]);
+                return $this->openai->chat($messages, 'gpt-4o', $system ?? '', $tools, $maxTokens, $temperature);
+            }
+        }
+
         if ($provider === 'anthropic') {
             return $this->anthropic->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature);
         }
@@ -204,7 +236,96 @@ class AIRouter
 
     private function providerForModel(string $model): string
     {
-        return str_starts_with($model, 'claude') ? 'anthropic' : 'openai';
+        if (str_starts_with($model, 'claude')) {
+            return 'anthropic';
+        }
+
+        // Check if this model belongs to a custom platform (cached 5 min)
+        $customPlatform = Cache::remember('custom_platform_for_model_' . md5($model), 300, function () use ($model) {
+            return CustomAiPlatform::where('default_model', $model)->where('is_active', true)->first();
+        });
+
+        if ($customPlatform) {
+            return 'custom:' . $customPlatform->name;
+        }
+
+        return 'openai';
+    }
+
+    private function resolveCustomPlatform(string $provider): ?CustomAiPlatform
+    {
+        if (! str_starts_with($provider, 'custom:')) {
+            return null;
+        }
+
+        $name = substr($provider, 7);
+        return Cache::remember('custom_platform_' . $name, 300, function () use ($name) {
+            return CustomAiPlatform::where('name', $name)->where('is_active', true)->first();
+        });
+    }
+
+    private function callCustomPlatform(CustomAiPlatform $platform, string $model, array $messages, ?string $system, int $maxTokens, float $temperature): array
+    {
+        // Circuit breaker: skip provider if it has failed 5+ consecutive times in the last 5 min
+        $cbKey = "provider_failures_{$platform->name}";
+        $failures = (int) Cache::get($cbKey, 0);
+        if ($failures >= 5) {
+            Log::warning('AIRouter: circuit breaker open — custom platform skipped', [
+                'platform'  => $platform->name,
+                'failures'  => $failures,
+            ]);
+            throw new \RuntimeException("Provider {$platform->name} temporarily disabled (circuit breaker open after {$failures} failures)");
+        }
+
+        $apiKey = config($platform->api_key_env) ?? env($platform->api_key_env, '');
+
+        $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json'];
+        if ($platform->auth_type === 'x-api-key') {
+            $authHeader = $platform->auth_header ?: 'X-API-Key';
+            $headers[$authHeader] = $apiKey;
+        } else {
+            $headers['Authorization'] = "Bearer {$apiKey}";
+        }
+
+        $body = ['model' => $model, 'messages' => $messages, 'max_tokens' => $maxTokens, 'temperature' => $temperature];
+        if ($system) {
+            array_unshift($body['messages'], ['role' => 'system', 'content' => $system]);
+        }
+
+        try {
+            $response = Http::withHeaders($headers)
+                ->timeout(30)
+                ->retry(1, 0)
+                ->post(rtrim($platform->api_base_url, '/') . '/chat/completions', $body);
+
+            if ($response->failed()) {
+                throw new \RuntimeException("Custom platform {$platform->name} responded HTTP {$response->status()}: " . ($response->json('error.message') ?? 'Unknown error'));
+            }
+
+            $data = $response->json();
+            if (empty($data['choices'][0]['message']['content'])) {
+                throw new \RuntimeException("Custom platform {$platform->name} returned invalid response shape");
+            }
+
+            // Success: reset circuit breaker
+            Cache::forget($cbKey);
+            return $data;
+
+        } catch (\Throwable $e) {
+            // Increment failure counter; expire in 5 minutes (window resets after recovery)
+            $newCount = $failures + 1;
+            Cache::put($cbKey, $newCount, 300);
+
+            if ($newCount >= 5) {
+                Log::error('AIRouter: circuit breaker OPENED for custom platform', [
+                    'platform' => $platform->name,
+                    'failures' => $newCount,
+                    'error'    => $e->getMessage(),
+                ]);
+            }
+
+            throw $e;
+        }
     }
 
     private function selectModel(string $prompt, string $preference): string

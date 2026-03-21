@@ -1,0 +1,243 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Services\Knowledge\VectorStoreService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * IngestGitHubRepo — queued job that ingests files from a public or private
+ * GitHub repository into the knowledge base.
+ *
+ * Safety limits (all configurable via constructor):
+ *  - Max files per run: 200
+ *  - Max file size: 200 KB per file
+ *  - Max total chars per repo: 200,000
+ *  - Max entries per repo: 500
+ *  - Rate limiting: pauses when GitHub rate limit < 10 remaining
+ *
+ * Queued on the 'low' queue to avoid blocking agent jobs ('high' queue).
+ * Per-file errors are logged and skipped — one bad file won't kill the import.
+ */
+class IngestGitHubRepo implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $timeout = 300;
+    public int $tries   = 2;
+    public array $backoff = [30, 120];
+
+    private const MAX_FILES       = 200;
+    private const MAX_FILE_SIZE   = 200 * 1024;  // 200 KB in bytes
+    private const MAX_TOTAL_CHARS = 200_000;
+    private const MAX_ENTRIES     = 500;
+
+    private const ALLOWED_EXTENSIONS = ['md', 'txt', 'php', 'js', 'ts', 'py', 'json', 'yaml', 'yml'];
+
+    private const SKIP_DIRS = ['vendor/', 'node_modules/', 'dist/', '.git/', 'coverage/', '.next/', 'build/'];
+
+    public function __construct(
+        private readonly string  $repoUrl,
+        private readonly string  $category    = 'general',
+        private readonly array   $extensions  = self::ALLOWED_EXTENSIONS,
+        private readonly ?string $githubToken = null,
+        private readonly ?string $branch      = 'main',
+    ) {
+        $this->onQueue('low');
+    }
+
+    public function handle(VectorStoreService $vectorStore): void
+    {
+        ['owner' => $owner, 'repo' => $repo] = $this->parseRepoUrl();
+
+        $headers = ['Accept' => 'application/vnd.github+json', 'X-GitHub-Api-Version' => '2022-11-28'];
+        if ($this->githubToken) {
+            $headers['Authorization'] = "Bearer {$this->githubToken}";
+        }
+
+        // Fetch the repository file tree
+        $branch    = $this->resolveBranch($owner, $repo, $headers);
+        $treeUrl   = "https://api.github.com/repos/{$owner}/{$repo}/git/trees/{$branch}?recursive=1";
+        $treeResp  = Http::withHeaders($headers)->timeout(30)->get($treeUrl);
+
+        if ($treeResp->failed()) {
+            Log::error("IngestGitHubRepo: failed to fetch tree", [
+                'repo'   => "{$owner}/{$repo}",
+                'status' => $treeResp->status(),
+            ]);
+            $this->fail(new \RuntimeException("GitHub tree fetch failed: HTTP {$treeResp->status()}"));
+            return;
+        }
+
+        $tree = $treeResp->json('tree') ?? [];
+
+        // Filter to relevant files
+        $files = $this->filterFiles($tree);
+
+        $ingested   = 0;
+        $skipped    = 0;
+        $failed     = 0;
+        $totalChars = 0;
+
+        foreach ($files as $file) {
+            if ($ingested >= self::MAX_FILES || $ingested + $skipped >= self::MAX_ENTRIES) {
+                Log::info("IngestGitHubRepo: limit reached, stopping", ['ingested' => $ingested]);
+                break;
+            }
+            if ($totalChars >= self::MAX_TOTAL_CHARS) {
+                Log::info("IngestGitHubRepo: total char limit reached", ['chars' => $totalChars]);
+                break;
+            }
+
+            // Respect GitHub rate limit
+            $this->checkRateLimit($headers);
+
+            try {
+                $rawUrl  = "https://raw.githubusercontent.com/{$owner}/{$repo}/{$branch}/{$file['path']}";
+                $content = Http::withHeaders($headers)->timeout(15)->get($rawUrl)->body();
+
+                if (strlen($content) > self::MAX_FILE_SIZE) {
+                    Log::debug("IngestGitHubRepo: skipping oversized file", ['path' => $file['path'], 'size' => strlen($content)]);
+                    $skipped++;
+                    continue;
+                }
+
+                if (empty(trim($content))) {
+                    $skipped++;
+                    continue;
+                }
+
+                $title    = "{$owner}/{$repo}/{$file['path']}";
+                $category = $this->categorise($file['path']);
+
+                $vectorStore->store(
+                    title:    $title,
+                    content:  $content,
+                    tags:     ['github', $repo, $owner],
+                    category: $category,
+                    source:   $rawUrl,
+                );
+
+                $totalChars += strlen($content);
+                $ingested++;
+
+            } catch (\Throwable $e) {
+                // Per-file error: log and continue — one bad file won't kill the import
+                Log::warning("IngestGitHubRepo: file failed", [
+                    'path'  => $file['path'],
+                    'error' => $e->getMessage(),
+                ]);
+                $failed++;
+            }
+        }
+
+        Log::info("IngestGitHubRepo: completed", [
+            'repo'      => "{$owner}/{$repo}",
+            'ingested'  => $ingested,
+            'skipped'   => $skipped,
+            'failed'    => $failed,
+            'chars'     => $totalChars,
+        ]);
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────
+
+    private function parseRepoUrl(): array
+    {
+        // Support: https://github.com/owner/repo or github.com/owner/repo
+        $clean = preg_replace('#^https?://(www\.)?github\.com/#', '', $this->repoUrl);
+        $clean = trim($clean, '/');
+        $parts = explode('/', $clean);
+
+        if (count($parts) < 2) {
+            throw new \InvalidArgumentException("Invalid GitHub URL: {$this->repoUrl}");
+        }
+
+        return ['owner' => $parts[0], 'repo' => $parts[1]];
+    }
+
+    private function resolveBranch(string $owner, string $repo, array $headers): string
+    {
+        if ($this->branch !== 'main') {
+            return $this->branch;
+        }
+
+        // Try main first, then master as fallback
+        foreach (['main', 'master'] as $candidate) {
+            $resp = Http::withHeaders($headers)->timeout(10)
+                ->get("https://api.github.com/repos/{$owner}/{$repo}/branches/{$candidate}");
+            if ($resp->successful()) {
+                return $candidate;
+            }
+        }
+
+        return 'main';
+    }
+
+    private function filterFiles(array $tree): array
+    {
+        return array_filter($tree, function ($item) {
+            if (($item['type'] ?? '') !== 'blob') {
+                return false;
+            }
+
+            $path = $item['path'] ?? '';
+
+            // Skip blacklisted directories
+            foreach (self::SKIP_DIRS as $dir) {
+                if (str_starts_with($path, $dir) || str_contains($path, "/{$dir}")) {
+                    return false;
+                }
+            }
+
+            // Check allowed extension
+            $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            return in_array($ext, $this->extensions, true);
+        });
+    }
+
+    private function categorise(string $path): string
+    {
+        $lower = strtolower($path);
+
+        if (str_starts_with($lower, 'docs/') || str_contains($lower, '/docs/') || str_ends_with($lower, '.md') || str_contains($lower, 'readme')) {
+            return 'general';
+        }
+        if (str_contains($lower, 'marketing') || str_contains($lower, 'campaign')) {
+            return 'marketing';
+        }
+        if (str_contains($lower, 'content') || str_contains($lower, 'blog')) {
+            return 'content';
+        }
+
+        return 'technical';
+    }
+
+    private function checkRateLimit(array $headers): void
+    {
+        static $callCount = 0;
+        $callCount++;
+
+        // Check rate limit every 25 files to avoid extra API calls
+        if ($callCount % 25 !== 0) {
+            return;
+        }
+
+        $resp = Http::withHeaders($headers)->timeout(5)->get('https://api.github.com/rate_limit');
+        if ($resp->successful()) {
+            $remaining = $resp->json('rate.remaining') ?? 999;
+            if ($remaining < 10) {
+                $resetAt = $resp->json('rate.reset') ?? (time() + 60);
+                $sleep   = max(1, $resetAt - time() + 5);
+                Log::warning("IngestGitHubRepo: rate limit low, sleeping", ['remaining' => $remaining, 'sleep' => $sleep]);
+                sleep(min($sleep, 120)); // cap sleep at 2 minutes
+            }
+        }
+    }
+}

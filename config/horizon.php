@@ -11,7 +11,7 @@ return [
     'use'     => 'default',
     'prefix'  => env('HORIZON_PREFIX', 'ops:horizon:'),
 
-    'middleware' => ['auth'],
+    'middleware' => ['web'],
 
     'waits'  => ['redis:default' => 60],
     'trim'   => [
@@ -112,15 +112,35 @@ return [
                 'tries'        => 3,
                 'timeout'      => 180,
             ],
-            // Agent tasks: long timeout (660s), 2 parallel workers, 3 retries
+            // Agent tasks: isolated from default queue — never starved by ingestion
             'supervisor-agents' => [
                 'connection'   => 'redis',
-                'queue'        => ['agents', 'default'],
+                'queue'        => ['agents'],
                 'balance'      => 'auto',
-                'minProcesses' => 1,
-                'maxProcesses' => 4,
+                'minProcesses' => 2,
+                'maxProcesses' => 10,
                 'tries'        => 3,
                 'timeout'      => 660,   // must exceed RunAgentTask::$timeout (600s)
+                'memory'       => 256,
+            ],
+            // General work (webhooks, notifications, misc)
+            'supervisor-default' => [
+                'connection'   => 'redis',
+                'queue'        => ['default'],
+                'balance'      => 'auto',
+                'minProcesses' => 2,
+                'maxProcesses' => 5,
+                'tries'        => 3,
+                'timeout'      => 120,
+            ],
+            // Low-priority background ingestion (GitHub, bulk imports) — isolated
+            'supervisor-low' => [
+                'connection'   => 'redis',
+                'queue'        => ['low'],
+                'balance'      => 'simple',
+                'processes'    => 2,
+                'tries'        => 2,
+                'timeout'      => 360,
                 'memory'       => 256,
             ],
         ],
@@ -128,11 +148,20 @@ return [
         'local' => [
             'supervisor-1' => [
                 'connection'   => 'redis',
-                'queue'        => ['default', 'agents', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge'],
-                'balance'      => 'simple',
-                'processes'    => 2,
+                'queue'        => ['agents', 'default', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge'],
+                'balance'      => 'auto',
+                'minProcesses' => 2,
+                'maxProcesses' => 8,
                 'tries'        => 3,
                 'timeout'      => 660,
+            ],
+            'supervisor-low' => [
+                'connection'   => 'redis',
+                'queue'        => ['low'],
+                'balance'      => 'simple',
+                'processes'    => 2,
+                'tries'        => 2,
+                'timeout'      => 360,
             ],
         ],
     ],

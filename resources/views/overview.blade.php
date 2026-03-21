@@ -179,41 +179,57 @@ function overviewApp() {
         },
 
         buildCharts() {
-            // Status donut
-            const sCtx = document.getElementById('statusChart')?.getContext('2d');
-            if (sCtx) {
-                this.statusChartInstance = new Chart(sCtx, {
-                    type: 'doughnut',
-                    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0 }] },
-                    options: {
-                        cutout: '65%',
-                        plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 8 } } },
-                    }
-                });
-            }
+            if (!window.Chart) return;
 
-            // Cost bar chart
-            const cCtx = document.getElementById('costChart')?.getContext('2d');
-            if (cCtx) {
-                this.costChartInstance = new Chart(cCtx, {
-                    type: 'bar',
-                    data: { labels: [], datasets: [{ label: 'USD', data: [], backgroundColor: 'rgba(139,92,246,0.6)', borderRadius: 4 }] },
-                    options: {
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } },
-                            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => '$' + v } },
-                        }
+            this.$nextTick(() => {
+                // Status donut
+                const sCtx = document.getElementById('statusChart')?.getContext('2d');
+                if (sCtx) {
+                    if (this.statusChartInstance) {
+                        this.statusChartInstance.destroy();
+                        this.statusChartInstance = null;
                     }
-                });
-                // Load cost data
-                this.loadCosts();
-                setInterval(() => this.loadCosts(), 30000);
-            }
+                    this.statusChartInstance = new Chart(sCtx, {
+                        type: 'doughnut',
+                        data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0 }] },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '65%',
+                            plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 8 } } },
+                        }
+                    });
+                }
+
+                // Cost bar chart
+                const cCtx = document.getElementById('costChart')?.getContext('2d');
+                if (cCtx) {
+                    if (this.costChartInstance) {
+                        this.costChartInstance.destroy();
+                        this.costChartInstance = null;
+                    }
+                    this.costChartInstance = new Chart(cCtx, {
+                        type: 'bar',
+                        data: { labels: [], datasets: [{ label: 'USD', data: [], backgroundColor: 'rgba(139,92,246,0.6)', borderRadius: 4 }] },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+                                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => '$' + v } },
+                            }
+                        }
+                    });
+                    // Load cost data
+                    this.loadCosts();
+                    setInterval(() => this.loadCosts(), 30000);
+                }
+            });
         },
 
         updateCharts() {
-            if (!this.statusChartInstance) return;
+            if (!this.statusChartInstance?.canvas) return;
             const wf = this.stats.workflows ?? {};
             const colorMap = {
                 completed: '#34d399', failed: '#f87171', cancelled: '#64748b',
@@ -230,7 +246,7 @@ function overviewApp() {
         },
 
         async loadCosts() {
-            if (!this.costChartInstance) return;
+            if (!this.costChartInstance?.canvas) return;
             try {
                 const d = this.applyMeta(await apiGet('/dashboard/api/ai-costs?days=7'));
                 this.costChartInstance.data.labels = (d.daily ?? []).map(x => x.date);
