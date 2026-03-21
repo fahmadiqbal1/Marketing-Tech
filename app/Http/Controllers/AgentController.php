@@ -53,6 +53,7 @@ class AgentController extends Controller
             'model'           => 'nullable|string|max:100',
             'type'            => 'nullable|string|in:marketing,content,media,hiring,growth,knowledge',
             'idempotency_key' => 'nullable|string|max:64',
+            'campaign_id'     => 'nullable|uuid',
         ]);
 
         $provider = $validated['provider'] ?? config('agent_system.default_provider', 'openai');
@@ -106,6 +107,7 @@ class AgentController extends Controller
             'instruction'       => $validated['prompt'],
             'short_description' => Str::limit($validated['prompt'], 80),
             'status'            => 'pending',
+            'campaign_id'       => $validated['campaign_id'] ?? null,
             'metadata'          => [],
         ]);
 
@@ -123,22 +125,31 @@ class AgentController extends Controller
         ], 202);
     }
 
-    public function status(string $id): JsonResponse
+    public function status(Request $request, string $id): JsonResponse
     {
-        $job = AgentJob::with('agentSteps')->findOrFail($id);
+        $afterStep = (int) $request->query('after_step', -1);
+
+        $job = AgentJob::findOrFail($id);
+
+        $stepsQuery = $job->agentSteps();
+        if ($afterStep >= 0) {
+            $stepsQuery->where('step_number', '>', $afterStep);
+        }
+        $steps = $stepsQuery->get();
 
         return response()->json([
             'task_id'          => $job->id,
             'status'           => $job->status,
+            'campaign_id'      => $job->campaign_id,
             // backward-compat field names expected by the frontend
             'current_step'     => $job->steps_taken,
             'user_input'       => $job->instruction,
             'final_output'     => $this->parseFinalOutput($job->result),
             'error_message'    => $job->error_message,
             'total_tokens'     => $job->total_tokens ?? 0,
-            'total_latency_ms' => null, // not tracked at job level
+            'total_latency_ms' => null,
             'ai_provider'      => $job->ai_provider,
-            'steps'            => $job->agentSteps->map(fn(AgentStep $s) => [
+            'steps'            => $steps->map(fn(AgentStep $s) => [
                 'id'                    => $s->id,
                 'step_number'           => $s->step_number,
                 'agent_name'            => $s->agent_name,
@@ -147,7 +158,10 @@ class AgentController extends Controller
                 'parameters'            => $s->parameters,
                 'result'                => $s->result,
                 'knowledge_chunks_used' => $s->knowledge_chunks_used,
+                'knowledge_scores'      => $s->knowledge_scores,
                 'from_cache'            => $s->from_cache,
+                'tool_success'          => $s->tool_success,
+                'tool_error'            => $s->tool_error,
                 'status'                => $s->status,
                 'tokens_used'           => $s->tokens_used,
                 'latency_ms'            => $s->latency_ms,

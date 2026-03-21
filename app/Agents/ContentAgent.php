@@ -4,6 +4,14 @@ namespace App\Agents;
 
 use App\Models\AgentJob;
 use App\Models\ContentItem;
+use App\Services\AI\AnthropicService;
+use App\Services\AI\GeminiService;
+use App\Services\AI\OpenAIService;
+use App\Services\ApiCredentialService;
+use App\Services\CampaignContextService;
+use App\Services\IterationEngineService;
+use App\Services\Knowledge\VectorStoreService;
+use App\Services\Telegram\TelegramBotService;
 use Illuminate\Support\Facades\Log;
 
 class ContentAgent extends BaseAgent
@@ -11,12 +19,16 @@ class ContentAgent extends BaseAgent
     protected string $agentType = 'content';
 
     public function __construct(
-        \App\Services\AI\OpenAIService            $openai,
-        \App\Services\AI\AnthropicService          $anthropic,
-        \App\Services\Telegram\TelegramBotService   $telegram,
-        \App\Services\Knowledge\VectorStoreService  $knowledge,
+        OpenAIService          $openai,
+        AnthropicService       $anthropic,
+        GeminiService          $gemini,
+        TelegramBotService     $telegram,
+        VectorStoreService     $knowledge,
+        ApiCredentialService   $credentials,
+        IterationEngineService $iterationEngine,
+        CampaignContextService $campaignContext,
     ) {
-        parent::__construct($openai, $anthropic, $telegram, $knowledge);
+        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
     }
 
 
@@ -177,12 +189,12 @@ class ContentAgent extends BaseAgent
             'press_release'       => 500,
         ];
 
-        $wordCount   = $args['word_count'] ?: ($platformDefaults[$args['type']] ?? 500);
-        $keywords    = ! empty($args['keywords']) ? 'Target SEO keywords: ' . implode(', ', $args['keywords']) : '';
-        $audience    = $args['audience']    ?? 'general professional audience';
-        $tone        = $args['tone']        ?? 'professional';
-        $brandVoice  = $args['brand_voice'] ?? '';
-        $cta         = $args['cta']         ? "Include a natural call-to-action: {$args['cta']}" : '';
+        $wordCount  = $args['word_count'] ?: ($platformDefaults[$args['type']] ?? 500);
+        $keywords   = ! empty($args['keywords']) ? 'Target SEO keywords: ' . implode(', ', $args['keywords']) : '';
+        $audience   = $args['audience']    ?? 'general professional audience';
+        $tone       = $args['tone']        ?? 'professional';
+        $brandVoice = $args['brand_voice'] ?? '';
+        $cta        = $args['cta']         ? "Include a natural call-to-action: {$args['cta']}" : '';
 
         $typeInstructions = match ($args['type']) {
             'social_twitter'   => "Write a Twitter/X thread. Each tweet max 280 chars. Number each tweet. Make it engaging and shareable.",
@@ -200,27 +212,85 @@ class ContentAgent extends BaseAgent
 {$typeInstructions}
 
 Topic: {$args['topic']}
-Tone: {$tone}
-Target word count: ~{$wordCount} words
+Target word count: ~{$wordCount} words per variation
 Target audience: {$audience}
 {$keywords}
 {$brandVoice}
 {$cta}
 
-Write the content now. No preamble, no "Here is your content:" — start directly.
+Generate THREE distinct variations (A, B, C) with different hooks, tones, and structures.
+Return ONLY a valid JSON object — no preamble, no markdown fences — in exactly this shape:
+{
+  "A": {"label":"A","content":"...","tone":"professional","hook_type":"question","structure":"listicle"},
+  "B": {"label":"B","content":"...","tone":"casual","hook_type":"statistic","structure":"narrative"},
+  "C": {"label":"C","content":"...","tone":"urgent","hook_type":"bold_claim","structure":"problem_solution"}
+}
+Each "content" value must be the full piece of content.
 PROMPT;
-            $content = $this->anthropic->complete(
+
+            $raw = $this->anthropic->complete(
                 $generationPrompt,
                 config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'),
-                4096,
-                0.75
+                8192,
+                0.8
             );
 
+            // Parse variations JSON
+            $parsed = json_decode(trim($raw), true);
+
+            if (is_array($parsed) && isset($parsed['A'], $parsed['B'], $parsed['C'])) {
+                // Store all three variations (with deduplication by content hash)
+                foreach (['A', 'B', 'C'] as $label) {
+                    $v       = $parsed[$label];
+                    $content = $v['content'] ?? '';
+
+                    // Skip storing if identical content already saved for this job
+                    $hash   = md5(substr($content, 0, 200));
+                    $exists = \App\Models\ContentVariation::where('agent_job_id', $job->id)
+                        ->whereRaw("md5(substr(content, 1, 200)) = ?", [$hash])
+                        ->exists();
+                    if ($exists) {
+                        continue;
+                    }
+
+                    $this->iterationEngine->storeVariation(
+                        agentJobId: $job->id,
+                        label:      $label,
+                        content:    $content,
+                        metadata:   [
+                            'tone'       => $v['tone']       ?? null,
+                            'hook_type'  => $v['hook_type']  ?? null,
+                            'structure'  => $v['structure']  ?? null,
+                            'word_count' => str_word_count($content),
+                        ],
+                    );
+                }
+
+                $primaryContent = $parsed['A']['content'];
+            } else {
+                // Fallback: treat raw response as single piece of content
+                Log::warning('ContentAgent: variation JSON parse failed, using raw response as variation A', [
+                    'job_id' => $job->id,
+                    'raw'    => substr($raw, 0, 200),
+                ]);
+                $primaryContent = $raw;
+                $this->iterationEngine->storeVariation(
+                    agentJobId: $job->id,
+                    label:      'A',
+                    content:    $raw,
+                    metadata:   [
+                        'tone'       => $tone,
+                        'word_count' => str_word_count($raw),
+                    ],
+                );
+            }
+
             return $this->toolResult(true, [
-                'content'    => $content,
-                'type'       => $args['type'],
-                'word_count' => str_word_count($content),
-                'char_count' => strlen($content),
+                'content'         => $primaryContent,
+                'type'            => $args['type'],
+                'word_count'      => str_word_count($primaryContent),
+                'char_count'      => strlen($primaryContent),
+                'variations_stored' => is_array($parsed) && isset($parsed['A']) ? 3 : 1,
             ]);
 
         } catch (\Throwable $e) {

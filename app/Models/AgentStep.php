@@ -17,7 +17,10 @@ class AgentStep extends Model
         'parameters',
         'result',
         'knowledge_chunks_used',
+        'knowledge_scores',
         'from_cache',
+        'tool_success',
+        'tool_error',
         'status',
         'tokens_used',
         'latency_ms',
@@ -25,14 +28,16 @@ class AgentStep extends Model
     ];
 
     protected $casts = [
-        'parameters'           => 'array',
-        'result'               => 'array',
-        'knowledge_chunks_used'=> 'array',
-        'from_cache'           => 'boolean',
-        'tokens_used'          => 'integer',
-        'latency_ms'           => 'integer',
-        'retry_count'          => 'integer',
-        'step_number'          => 'integer',
+        'parameters'            => 'array',
+        'result'                => 'array',
+        'knowledge_chunks_used' => 'array',
+        'knowledge_scores'      => 'array',
+        'from_cache'            => 'boolean',
+        'tool_success'          => 'boolean',
+        'tokens_used'           => 'integer',
+        'latency_ms'            => 'integer',
+        'retry_count'           => 'integer',
+        'step_number'           => 'integer',
     ];
 
     public function task(): BelongsTo

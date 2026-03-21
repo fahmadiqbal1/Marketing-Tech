@@ -182,6 +182,7 @@
                         <th class="pb-2 text-left pr-3">Action / Tool</th>
                         <th class="pb-2 text-left pr-3">Thought</th>
                         <th class="pb-2 text-left pr-3">Status</th>
+                        <th class="pb-2 text-left pr-3">Tool Result</th>
                         <th class="pb-2 text-left pr-3">Tokens</th>
                         <th class="pb-2 text-left pr-3">Latency</th>
                         <th class="pb-2 text-left pr-3">RAG / Cache</th>
@@ -190,7 +191,7 @@
                 </thead>
                 <tbody>
                     <template x-for="(step, idx) in allSteps.slice(0, 40)" :key="step.id || idx">
-                        <tr class="border-b border-slate-800/40 hover:bg-slate-800/20 transition">
+                        <tr class="border-b border-slate-800/40 hover:bg-slate-800/20 transition" :class="step.tool_success === false ? 'bg-red-900/10' : ''">
                             <td class="py-2 pr-3 text-slate-600 text-xs" x-text="step.step_number || '–'"></td>
                             <td class="py-2 pr-3">
                                 <span class="badge text-xs"
@@ -208,14 +209,28 @@
                             <td class="py-2 pr-3 text-slate-400 text-xs max-w-xs truncate" x-text="step.thought || '—'"></td>
                             <td class="py-2 pr-3">
                                 <span class="badge text-xs" :class="statusBadgeClass(step.status)" x-text="step.status"></span>
+                                <template x-if="step.status === 'failed' && step.id">
+                                    <button @click="skipStep(step.id)" class="ml-1 text-xs text-slate-500 hover:text-amber-400 transition" title="Mark as skipped">skip</button>
+                                </template>
+                            </td>
+                            <td class="py-2 pr-3 text-xs">
+                                <template x-if="step.tool_success === true">
+                                    <span class="text-emerald-400 font-bold" title="Tool succeeded">✓</span>
+                                </template>
+                                <template x-if="step.tool_success === false">
+                                    <span class="text-red-400 font-bold" :title="step.tool_error || 'Tool failed'">✗</span>
+                                </template>
+                                <template x-if="step.tool_success === null || step.tool_success === undefined">
+                                    <span class="text-slate-700">—</span>
+                                </template>
                             </td>
                             <td class="py-2 pr-3 text-slate-500 text-xs" x-text="step.tokens_used ? step.tokens_used + ' tok' : '—'"></td>
                             <td class="py-2 pr-3 text-slate-500 text-xs" x-text="step.latency_ms ? step.latency_ms + 'ms' : '—'"></td>
                             <td class="py-2 pr-3 text-xs">
                                 <template x-if="step.knowledge_chunks_used && step.knowledge_chunks_used.length > 0">
                                     <span class="badge bg-purple-500/20 text-purple-400 border border-purple-500/30"
-                                          :title="'Chunk IDs: ' + (step.knowledge_chunks_used || []).join(', ')"
-                                          x-text="step.knowledge_chunks_used.length + ' chunk' + (step.knowledge_chunks_used.length > 1 ? 's' : '')"></span>
+                                          :title="'Chunks: ' + (step.knowledge_chunks_used || []).join(', ')"
+                                          x-text="step.knowledge_chunks_used.length + ' chunk' + (step.knowledge_chunks_used.length > 1 ? 's' : '') + (avgScore(step.knowledge_scores) ? ' @ ' + avgScore(step.knowledge_scores) : '')"></span>
                                 </template>
                                 <template x-if="step.from_cache">
                                     <span class="badge bg-amber-500/20 text-amber-400 border border-amber-500/30 ml-1">cached</span>
@@ -228,7 +243,7 @@
                         </tr>
                     </template>
                     <tr x-show="allSteps.length === 0">
-                        <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
+                        <td colspan="10" class="py-8 text-center text-slate-500 text-sm">
                             No agent steps yet. Run a task from the <a href="/agent" class="text-brand-400 hover:text-brand-300">Agent page</a> to see live activity here.
                         </td>
                     </tr>
@@ -329,8 +344,27 @@ function pipelineApp() {
                 running:   'bg-blue-500/20 text-blue-400 border border-blue-500/30',
                 pending:   'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
                 paused:    'bg-orange-500/20 text-orange-400 border border-orange-500/30',
+                skipped:   'bg-slate-500/20 text-slate-400 border border-slate-700',
             };
             return map[status] || 'bg-slate-500/20 text-slate-400 border border-slate-700';
+        },
+
+        async skipStep(stepId) {
+            try {
+                await apiPost('/dashboard/api/pipeline/steps/' + stepId + '/skip', {});
+                // Update local status
+                this.allSteps.forEach(s => { if (s.id === stepId) s.status = 'skipped'; });
+            } catch(e) {
+                console.error('Skip step error:', e);
+            }
+        },
+
+        avgScore(knowledgeScores) {
+            if (!knowledgeScores || !knowledgeScores.length) return null;
+            const scores = knowledgeScores.map(k => typeof k === 'object' ? k.score : k).filter(v => v != null);
+            if (!scores.length) return null;
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            return avg.toFixed(2);
         },
 
         relativeTime, // from layout

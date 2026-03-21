@@ -5,7 +5,15 @@ namespace App\Agents;
 use App\Models\AgentJob;
 use App\Models\Experiment;
 use App\Models\Campaign;
+use App\Services\AI\AnthropicService;
+use App\Services\AI\GeminiService;
+use App\Services\AI\OpenAIService;
+use App\Services\ApiCredentialService;
+use App\Services\CampaignContextService;
 use App\Services\Growth\ExperimentationEngine;
+use App\Services\IterationEngineService;
+use App\Services\Knowledge\VectorStoreService;
+use App\Services\Telegram\TelegramBotService;
 use Illuminate\Support\Facades\Log;
 
 class GrowthAgent extends BaseAgent
@@ -13,13 +21,17 @@ class GrowthAgent extends BaseAgent
     protected string $agentType = 'growth';
 
     public function __construct(
-        \App\Services\AI\OpenAIService            $openai,
-        \App\Services\AI\AnthropicService         $anthropic,
-        \App\Services\Telegram\TelegramBotService  $telegram,
-        \App\Services\Knowledge\VectorStoreService $knowledge,
-        private readonly ExperimentationEngine     $experiments,
+        OpenAIService          $openai,
+        AnthropicService       $anthropic,
+        GeminiService          $gemini,
+        TelegramBotService     $telegram,
+        VectorStoreService     $knowledge,
+        ApiCredentialService   $credentials,
+        IterationEngineService $iterationEngine,
+        CampaignContextService $campaignContext,
+        private readonly ExperimentationEngine $experiments,
     ) {
-        parent::__construct($openai, $anthropic, $telegram, $knowledge);
+        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
     }
 
     protected function executeTool(string $name, array $args, AgentJob $job): mixed
