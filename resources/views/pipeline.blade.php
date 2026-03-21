@@ -115,23 +115,60 @@
                 </div>
 
                 {{-- Queue + Steps Meta --}}
-                <div class="flex items-center gap-2 mb-3">
+                <div class="flex flex-wrap items-center gap-2 mb-3">
                     <span class="badge text-xs bg-slate-700/60 text-slate-400 border border-slate-700">queue: <span x-text="agent.queue"></span></span>
                     <span class="badge text-xs bg-slate-700/60 text-slate-400 border border-slate-700">max <span x-text="agent.max_steps"></span> steps</span>
                     <span x-show="agent.active_jobs > 0"
                           class="badge text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                           x-text="agent.active_jobs + ' running'"></span>
+                    {{-- Knowledge count badge --}}
+                    <span x-show="agent.knowledge_count > 0"
+                          class="badge text-xs bg-violet-500/20 text-violet-400 border border-violet-500/30"
+                          x-text="agent.knowledge_count + ' knowledge items'"></span>
+                    <span x-show="agent.knowledge_count === 0"
+                          class="badge text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          title="Add entries in the Knowledge tab">⚠ no knowledge</span>
                 </div>
 
                 {{-- Capabilities / Tools --}}
                 <div class="mb-3">
                     <p class="text-xs font-semibold text-slate-500 uppercase mb-1.5">Capabilities</p>
                     <div class="flex flex-wrap gap-1.5">
-                        <template x-for="tool in agent.tools" :key="tool">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700/60 hover:border-slate-600 transition cursor-default"
-                                  x-text="tool.replace(/_/g,' ')"></span>
+                        <template x-if="agent.tools && agent.tools.length > 0">
+                            <template x-for="tool in agent.tools" :key="tool">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700/60 hover:border-slate-600 transition cursor-default"
+                                      x-text="tool.replace(/_/g,' ')"></span>
+                            </template>
+                        </template>
+                        <template x-if="!agent.tools || agent.tools.length === 0">
+                            <span class="text-xs text-amber-400 italic">No capabilities defined</span>
                         </template>
                     </div>
+                </div>
+
+                {{-- Instructions Preview --}}
+                <div class="mb-3">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <p class="text-xs font-semibold text-slate-500 uppercase">Instructions</p>
+                        <button x-show="agent.system_prompt"
+                                @click="agent._showPrompt = !agent._showPrompt"
+                                class="text-xs text-slate-500 hover:text-slate-300 transition">
+                            <span x-text="agent._showPrompt ? 'hide ▲' : 'show ▼'"></span>
+                        </button>
+                    </div>
+                    <template x-if="!agent.system_prompt">
+                        <p class="text-xs text-amber-400 italic">No instructions configured — add a system prompt via the edit button above</p>
+                    </template>
+                    <template x-if="agent.system_prompt">
+                        <div>
+                            <p class="text-xs text-slate-400 italic truncate"
+                               x-text="agent.system_prompt.length > 120 ? agent.system_prompt.substring(0, 120) + '…' : agent.system_prompt"></p>
+                            <div x-show="agent._showPrompt" class="mt-2 p-3 bg-slate-900/70 rounded-xl border border-slate-800">
+                                <p class="text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed"
+                                   x-text="agent.system_prompt"></p>
+                            </div>
+                        </div>
+                    </template>
                 </div>
 
                 {{-- Recent Steps Mini-Feed --}}
