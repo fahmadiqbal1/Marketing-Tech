@@ -26,6 +26,7 @@
                     class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500"
                     :disabled="isRunning">
                 <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
                 <option value="gemini">Gemini</option>
             </select>
 

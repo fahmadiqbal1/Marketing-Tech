@@ -14,15 +14,17 @@ class SettingsController extends Controller
     private const SECRET_FIELDS = [
         'OPENAI_API_KEY',
         'ANTHROPIC_API_KEY',
+        'GEMINI_API_KEY',
         'TELEGRAM_BOT_TOKEN',
         'TELEGRAM_WEBHOOK_SECRET',
     ];
 
     /** Provider mapping for secrets */
     private const PROVIDER_MAP = [
-        'OPENAI_API_KEY' => 'openai',
-        'ANTHROPIC_API_KEY' => 'anthropic',
-        'TELEGRAM_BOT_TOKEN' => 'telegram',
+        'OPENAI_API_KEY'          => 'openai',
+        'ANTHROPIC_API_KEY'       => 'anthropic',
+        'GEMINI_API_KEY'          => 'gemini',
+        'TELEGRAM_BOT_TOKEN'      => 'telegram',
         'TELEGRAM_WEBHOOK_SECRET' => 'telegram',
     ];
 
@@ -41,22 +43,23 @@ class SettingsController extends Controller
     public function show(): JsonResponse
     {
         return response()->json([
-            'APP_URL' => env('APP_URL', ''),
-            'APP_DEBUG' => env('APP_DEBUG', false),
-            'APP_ENV' => env('APP_ENV', 'local'),
-            'OPENAI_API_KEY' => $this->maskOrEmpty('OPENAI_API_KEY'),
-            'ANTHROPIC_API_KEY' => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
-            'TELEGRAM_BOT_TOKEN' => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
+            'APP_URL'                 => env('APP_URL', ''),
+            'APP_DEBUG'               => env('APP_DEBUG', false),
+            'APP_ENV'                 => env('APP_ENV', 'local'),
+            'OPENAI_API_KEY'          => $this->maskOrEmpty('OPENAI_API_KEY'),
+            'ANTHROPIC_API_KEY'       => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
+            'GEMINI_API_KEY'          => $this->maskOrEmpty('GEMINI_API_KEY'),
+            'TELEGRAM_BOT_TOKEN'      => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
             'TELEGRAM_WEBHOOK_SECRET' => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
-            'TELEGRAM_ALLOWED_USERS' => env('TELEGRAM_ALLOWED_USERS', ''),
-            'TELEGRAM_ADMIN_CHAT_ID' => env('TELEGRAM_ADMIN_CHAT_ID', ''),
-            'DB_CONNECTION' => env('DB_CONNECTION', 'pgsql'),
-            'DB_HOST' => env('DB_HOST', ''),
-            'DB_PORT' => env('DB_PORT', '5432'),
-            'DB_DATABASE' => env('DB_DATABASE', ''),
-            'DB_USERNAME' => env('DB_USERNAME', ''),
-            'QUEUE_CONNECTION' => env('QUEUE_CONNECTION', 'redis'),
-            'CACHE_STORE' => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
+            'TELEGRAM_ALLOWED_USERS'  => env('TELEGRAM_ALLOWED_USERS', ''),
+            'TELEGRAM_ADMIN_CHAT_ID'  => env('TELEGRAM_ADMIN_CHAT_ID', ''),
+            'DB_CONNECTION'           => env('DB_CONNECTION', 'pgsql'),
+            'DB_HOST'                 => env('DB_HOST', ''),
+            'DB_PORT'                 => env('DB_PORT', '5432'),
+            'DB_DATABASE'             => env('DB_DATABASE', ''),
+            'DB_USERNAME'             => env('DB_USERNAME', ''),
+            'QUEUE_CONNECTION'        => env('QUEUE_CONNECTION', 'redis'),
+            'CACHE_STORE'             => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
         ]);
     }
 
@@ -107,8 +110,7 @@ class SettingsController extends Controller
                 if (preg_match("/^{$key}=/m", $env)) {
                     $env = preg_replace("/^{$key}=.*/m", "{$key}={$escaped}", $env);
                 } else {
-                    $env .= "
-{$key}={$escaped}";
+                    $env .= "\n{$key}={$escaped}";
                 }
             }
 
@@ -123,7 +125,7 @@ class SettingsController extends Controller
         }
 
         return response()->json([
-            'saved' => true,
+            'saved'    => true,
             'warnings' => $warnings,
         ]);
     }
@@ -131,11 +133,11 @@ class SettingsController extends Controller
     public function registerWebhook(): JsonResponse
     {
         try {
-            $exit = Artisan::call('telegram:webhook');
+            $exit   = Artisan::call('telegram:webhook');
             $output = Artisan::output();
             return response()->json([
                 'success' => $exit === 0,
-                'output' => trim($output),
+                'output'  => trim($output),
             ]);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'output' => $e->getMessage()], 500);
