@@ -6,11 +6,8 @@
     <meta name="csrf-token" content="{{ csrf_token() }}" />
     <title>@yield('title', 'Dashboard') — Autonomous Ops</title>
 
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -19,7 +16,7 @@
                     fontFamily: { sans: ['Inter', 'sans-serif'] },
                     colors: {
                         brand: {
-                            50:  '#f5f3ff',
+                            50: '#f5f3ff',
                             400: '#a78bfa',
                             500: '#8b5cf6',
                             600: '#7c3aed',
@@ -30,11 +27,7 @@
             }
         }
     </script>
-
-    <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
     <style>
@@ -128,7 +121,6 @@
             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             Settings
         </a>
-
         <a href="/horizon" target="_blank" class="sidebar-link">
             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
             Horizon Queue
@@ -140,9 +132,9 @@
     <div class="px-4 py-3 border-t border-slate-800">
         <div class="flex items-center gap-2">
             <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
-            <span class="text-xs text-slate-400">System running</span>
+            <span class="text-xs text-slate-400">Dashboard shell online</span>
         </div>
-        <p class="text-xs text-slate-600 mt-0.5">v0.1.0 — Local dev</p>
+        <p class="text-xs text-slate-600 mt-0.5">Degrades gracefully when services are unavailable.</p>
     </div>
 </aside>
 
@@ -172,7 +164,6 @@
 </div>
 
 <script>
-    // Global helpers
     function updateTimestamp() {
         const el = document.getElementById('last-updated');
         if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -180,22 +171,21 @@
 
     function statusBadge(status) {
         const map = {
-            completed:        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
-            failed:           'bg-red-500/20 text-red-400 border border-red-500/30',
-            cancelled:        'bg-slate-500/20 text-slate-400 border border-slate-500/30',
-            owner_approval:   'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-            pending:          'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-            running:          'bg-blue-500/20 text-blue-400 border border-blue-500/30',
-            draft:            'bg-slate-500/20 text-slate-400 border border-slate-500/30',
-            ready:            'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
-            published:        'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
-            active:           'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
-            paused:           'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-            error:            'bg-red-500/20 text-red-400 border border-red-500/30',
-            warning:          'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-            info:             'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+            completed:      'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+            failed:         'bg-red-500/20 text-red-400 border border-red-500/30',
+            cancelled:      'bg-slate-500/20 text-slate-400 border border-slate-500/30',
+            owner_approval: 'bg-orange-500/20 text-orange-400 border border-orange-500/30',
+            pending:        'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
+            running:        'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+            draft:          'bg-slate-500/20 text-slate-400 border border-slate-500/30',
+            ready:          'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30',
+            published:      'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+            active:         'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+            paused:         'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
+            error:          'bg-red-500/20 text-red-400 border border-red-500/30',
+            warning:        'bg-orange-500/20 text-orange-400 border border-orange-500/30',
+            info:           'bg-blue-500/20 text-blue-400 border border-blue-500/30',
         };
-        // active workflow states
         ['intake','context_retrieval','planning','task_execution','review','execution','observation','learning'].forEach(s => {
             map[s] = 'bg-violet-500/20 text-violet-400 border border-violet-500/30';
         });
@@ -205,23 +195,67 @@
     function relativeTime(dateStr) {
         if (!dateStr) return '–';
         const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+        if (Number.isNaN(diff)) return dateStr;
         if (diff < 60) return diff + 's ago';
-        if (diff < 3600) return Math.floor(diff/60) + 'm ago';
-        if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
-        return Math.floor(diff/86400) + 'd ago';
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return Math.floor(diff / 86400) + 'd ago';
     }
 
     function csrfToken() {
         return document.querySelector('meta[name="csrf-token"]')?.content ?? '';
     }
 
+    async function apiGet(url) {
+        const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const text = await response.text();
+        let data = {};
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch {
+            throw new Error(text || `Request failed with status ${response.status}`);
+        }
+        if (!response.ok) {
+            throw new Error(data.message || `Request failed with status ${response.status}`);
+        }
+        return data;
+    }
+
     async function apiPost(url, data = {}) {
-        const r = await fetch(url, {
+        const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
             body: JSON.stringify(data),
         });
-        return r.json();
+        const text = await response.text();
+        const payload = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+            throw new Error(payload.message || `Request failed with status ${response.status}`);
+        }
+        return payload;
+    }
+
+    function dashboardState() {
+        return {
+            warning: '',
+            error: '',
+            applyMeta(data) {
+                this.warning = data?.meta?.warning ?? '';
+                return data;
+            },
+            handleError(error) {
+                this.error = error?.message ?? 'Something went wrong while loading data.';
+                console.error(error);
+            },
+            clearMessages() {
+                this.warning = '';
+                this.error = '';
+            }
+        }
     }
 </script>
 

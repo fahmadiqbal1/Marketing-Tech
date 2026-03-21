@@ -1,11 +1,11 @@
 @extends('layouts.app')
 @section('title', 'Settings')
-@section('subtitle', 'Configure AI platforms and system preferences')
+@section('subtitle', 'Configure AI platforms, system preferences, and integrations')
 
 @section('content')
 <div x-data="settingsApp()" x-init="init()" x-cloak>
 
-    {{-- ── Success / Error Banner ──────────────────────────────────── --}}
+    {{-- ── Toast ──────────────────────────────────────────────────────── --}}
     <template x-if="toast.show">
         <div class="fixed top-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-sm font-medium transition-all"
              :class="toast.error ? 'bg-red-500/20 border border-red-500/40 text-red-300' : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'">
@@ -150,9 +150,7 @@
                 <tbody>
                     <template x-for="agent in agents" :key="agent.name">
                         <tr class="border-b border-slate-800/50">
-                            <td class="py-2.5 pr-4">
-                                <span class="font-medium text-white capitalize" x-text="agent.name"></span>
-                            </td>
+                            <td class="py-2.5 pr-4 font-medium text-white capitalize" x-text="agent.name"></td>
                             <td class="py-2.5 pr-4">
                                 <span class="badge text-xs"
                                       :class="{
@@ -172,25 +170,25 @@
         </div>
     </div>
 
-    {{-- ── Telegram & Other Settings ────────────────────────────────── --}}
+    {{-- ── Telegram Integration ─────────────────────────────────────── --}}
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Telegram Integration</h2>
     <div class="stat-card mb-8">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div>
                 <label class="text-xs text-slate-400 mb-1 block">Bot Token</label>
-                <input type="password" x-model="forms.telegram.bot_token" placeholder="1234567890:AAF..."
+                <input type="password" x-model="sysForm.TELEGRAM_BOT_TOKEN" placeholder="1234567890:AAF..."
                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
             </div>
             <div>
                 <label class="text-xs text-slate-400 mb-1 block">Admin Chat ID</label>
-                <input type="text" x-model="forms.telegram.admin_chat_id" placeholder="123456789"
+                <input type="text" x-model="sysForm.TELEGRAM_ADMIN_CHAT_ID" placeholder="123456789"
                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
             </div>
         </div>
         <div class="flex gap-3 mt-4">
-            <button @click="saveTelegram()" :disabled="saving.telegram"
+            <button @click="saveSysSettings()" :disabled="saving.system"
                     class="px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
-                <span x-text="saving.telegram ? 'Saving...' : 'Save Telegram Config'"></span>
+                <span x-text="saving.system ? 'Saving...' : 'Save Telegram Config'"></span>
             </button>
             <button @click="registerWebhook()" :disabled="saving.webhook"
                     class="px-4 py-2 border border-slate-600 hover:border-slate-500 text-slate-300 text-sm font-medium rounded-lg transition disabled:opacity-50">
@@ -200,6 +198,40 @@
         <p x-show="webhookResult" class="mt-2 text-xs text-slate-400" x-text="webhookResult"></p>
     </div>
 
+    {{-- ── System / Application Settings ──────────────────────────── --}}
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Application Settings</h2>
+    <div class="stat-card mb-8">
+        <div x-show="sysWarning" class="mb-3 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-sm text-orange-200" x-text="sysWarning"></div>
+        <div x-show="sysSuccess" class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200" x-text="sysSuccess"></div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+            <div>
+                <label class="text-xs text-slate-400 mb-1 block">APP_URL</label>
+                <input x-model="sysForm.APP_URL" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 mb-1 block">APP_ENV</label>
+                <input x-model="sysForm.APP_ENV" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 mb-1 block">QUEUE_CONNECTION</label>
+                <input x-model="sysForm.QUEUE_CONNECTION" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+            </div>
+        </div>
+        <div class="stat-card bg-slate-900/60 mb-4">
+            <p class="text-xs font-semibold text-slate-500 uppercase mb-3">Database Overview (read-only)</p>
+            <div class="grid grid-cols-4 gap-3 text-sm text-slate-300">
+                <div><div class="text-slate-500 text-xs uppercase mb-1">Connection</div><div x-text="sysForm.DB_CONNECTION || '–'"></div></div>
+                <div><div class="text-slate-500 text-xs uppercase mb-1">Host</div><div x-text="sysForm.DB_HOST || '–'"></div></div>
+                <div><div class="text-slate-500 text-xs uppercase mb-1">Port</div><div x-text="sysForm.DB_PORT || '–'"></div></div>
+                <div><div class="text-slate-500 text-xs uppercase mb-1">Database</div><div x-text="sysForm.DB_DATABASE || '–'"></div></div>
+            </div>
+        </div>
+        <button @click="saveSysSettings()" :disabled="saving.system"
+                class="px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+            <span x-text="saving.system ? 'Saving...' : 'Save Application Settings'"></span>
+        </button>
+    </div>
+
 </div>
 @endsection
 
@@ -207,40 +239,42 @@
 <script>
 function settingsApp() {
     return {
-        config: {
-            openai_configured: false,
-            anthropic_configured: false,
-            gemini_configured: false,
-        },
+        config: { openai_configured: false, anthropic_configured: false, gemini_configured: false },
         agents: [],
         forms: {
             openai:    { api_key: '', model: 'gpt-4o' },
             anthropic: { api_key: '', model: 'claude-opus-4-5' },
             gemini:    { api_key: '', model: 'gemini-2.0-flash' },
-            telegram:  { bot_token: '', admin_chat_id: '' },
         },
-        saving: { openai: false, anthropic: false, gemini: false, telegram: false, webhook: false },
+        sysForm: {
+            APP_URL: '', APP_ENV: '', QUEUE_CONNECTION: '', CACHE_STORE: '',
+            TELEGRAM_BOT_TOKEN: '', TELEGRAM_ADMIN_CHAT_ID: '',
+            DB_CONNECTION: '', DB_HOST: '', DB_PORT: '', DB_DATABASE: '',
+        },
+        saving: { openai: false, anthropic: false, gemini: false, system: false, webhook: false },
         toast: { show: false, message: '', error: false },
         webhookResult: '',
+        sysWarning: '',
+        sysSuccess: '',
 
         async init() {
-            // Load config status
             try {
                 const r = await fetch('/agent/config');
                 this.config = await r.json();
             } catch(e) {}
 
-            // Load agent assignments from pipeline endpoint
             try {
                 const r = await fetch('/dashboard/api/pipeline');
                 const d = await r.json();
                 this.agents = (d.agents || []).map(a => ({
-                    name: a.name,
-                    provider: a.provider,
-                    model: a.model,
-                    queue: a.queue,
-                    max_steps: a.max_steps,
+                    name: a.name, provider: a.provider, model: a.model,
+                    queue: a.queue, max_steps: a.max_steps,
                 }));
+            } catch(e) {}
+
+            try {
+                const d = await apiGet('/dashboard/api/settings');
+                this.sysForm = { ...this.sysForm, ...d };
             } catch(e) {}
         },
 
@@ -253,38 +287,28 @@ function settingsApp() {
             this.saving[provider] = true;
             try {
                 const r = await apiPost('/dashboard/api/platform', {
-                    provider,
-                    api_key: form.api_key,
-                    model: form.model,
+                    provider, api_key: form.api_key, model: form.model,
                 });
                 if (r.saved) {
                     this.config[provider + '_configured'] = true;
                     form.api_key = '';
                     this.showToast(provider.charAt(0).toUpperCase() + provider.slice(1) + ' config saved.');
-                } else {
-                    this.showToast('Save failed.', true);
                 }
-            } catch(e) {
-                this.showToast('Error: ' + e.message, true);
-            }
+            } catch(e) { this.showToast('Error: ' + e.message, true); }
             this.saving[provider] = false;
         },
 
-        async saveTelegram() {
-            this.saving.telegram = true;
+        async saveSysSettings() {
+            this.saving.system = true;
+            this.sysWarning = '';
+            this.sysSuccess = '';
             try {
-                const data = {};
-                if (this.forms.telegram.bot_token) data.TELEGRAM_BOT_TOKEN = this.forms.telegram.bot_token;
-                if (this.forms.telegram.admin_chat_id) data.TELEGRAM_ADMIN_CHAT_ID = this.forms.telegram.admin_chat_id;
-                const r = await apiPost('/dashboard/api/settings', data);
-                if (r.saved) {
-                    this.forms.telegram.bot_token = '';
-                    this.showToast('Telegram config saved.');
-                }
-            } catch(e) {
-                this.showToast('Error: ' + e.message, true);
-            }
-            this.saving.telegram = false;
+                const r = await apiPost('/dashboard/api/settings', this.sysForm);
+                this.sysWarning = (r.warnings ?? []).join(' ');
+                this.sysSuccess = 'Settings saved.';
+                this.showToast('Settings saved.');
+            } catch(e) { this.showToast('Error: ' + e.message, true); }
+            this.saving.system = false;
         },
 
         async registerWebhook() {
@@ -293,9 +317,7 @@ function settingsApp() {
                 const r = await apiPost('/dashboard/api/settings/telegram/webhook');
                 this.webhookResult = r.output || (r.success ? 'Webhook registered.' : 'Failed.');
                 this.showToast(r.success ? 'Webhook registered.' : 'Webhook failed.', !r.success);
-            } catch(e) {
-                this.showToast('Error: ' + e.message, true);
-            }
+            } catch(e) { this.showToast('Error: ' + e.message, true); }
             this.saving.webhook = false;
         },
 
