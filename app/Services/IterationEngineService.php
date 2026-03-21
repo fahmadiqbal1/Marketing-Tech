@@ -602,6 +602,47 @@ class IterationEngineService
         }
     }
 
+    // ─── Circuit Breaker ──────────────────────────────────────────────
+
+    private const CIRCUIT_BREAKER_THRESHOLD = 5;    // consecutive failures to trip
+    private const CIRCUIT_BREAKER_BLOCK_TTL  = 120; // seconds to block after tripping
+    private const CIRCUIT_BREAKER_STREAK_TTL = 600; // streak resets after 10 min inactivity
+
+    /**
+     * Check if a tool is currently blocked by the circuit breaker.
+     */
+    public function isToolBlocked(string $toolName): bool
+    {
+        return (bool) Cache::get("tool:blocked:{$toolName}");
+    }
+
+    /**
+     * Record a tool outcome and trip the circuit breaker if the threshold is exceeded.
+     * Call this after every tool execution (success or failure).
+     */
+    public function recordToolOutcome(string $toolName, bool $success): void
+    {
+        $streakKey = "tool:fail_streak:{$toolName}";
+
+        if ($success) {
+            Cache::forget($streakKey);
+            return;
+        }
+
+        $streak = (int) Cache::get($streakKey, 0) + 1;
+        Cache::put($streakKey, $streak, self::CIRCUIT_BREAKER_STREAK_TTL);
+
+        if ($streak >= self::CIRCUIT_BREAKER_THRESHOLD) {
+            Cache::put("tool:blocked:{$toolName}", true, self::CIRCUIT_BREAKER_BLOCK_TTL);
+            Cache::forget($streakKey);
+            Log::warning('IterationEngineService: circuit breaker tripped', [
+                'tool'          => $toolName,
+                'streak'        => $streak,
+                'blocked_for_s' => self::CIRCUIT_BREAKER_BLOCK_TTL,
+            ]);
+        }
+    }
+
     // ─── Cache Management ─────────────────────────────────────────────
 
     public function bustPromptCache(): void

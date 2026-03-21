@@ -253,19 +253,28 @@ abstract class BaseAgent
                         ->orderByDesc('created_at')
                         ->value('id');
 
-                    // Link to variation A if one exists (precise winner sync later)
+                    // Link to any existing variation for this job (earliest wins)
                     $contentVariationId = \App\Models\ContentVariation::where('agent_job_id', $job->id)
-                        ->where('variation_label', 'A')
+                        ->orderBy('created_at')
                         ->value('id');
 
-                    $this->iterationEngine->storeOutput(
-                        agentJobId:           $job->id,
-                        content:              $result,
-                        type:                 $outputType,
-                        metadata:             ['agent_type' => $this->agentType, 'steps' => $stepCount],
-                        parentOutputId:       $parentOutputId,
-                        contentVariationId:   $contentVariationId,
-                    );
+                    if ($contentVariationId) {
+                        $this->iterationEngine->storeOutput(
+                            agentJobId:           $job->id,
+                            content:              $result,
+                            type:                 $outputType,
+                            metadata:             ['agent_type' => $this->agentType, 'steps' => $stepCount],
+                            parentOutputId:       $parentOutputId,
+                            contentVariationId:   $contentVariationId,
+                        );
+                    } else {
+                        // No variation to link — ContentAgent already stored outputs atomically.
+                        // Other agent types don't produce GeneratedOutput entries.
+                        Log::debug('BaseAgent: skipping storeOutput — no variation found for job', [
+                            'job_id'     => $job->id,
+                            'agent_type' => $this->agentType,
+                        ]);
+                    }
                 } catch (\Throwable $e) {
                     Log::warning('Failed to store generated output', ['trace_id' => $traceId, 'error' => $e->getMessage()]);
                 }
@@ -326,6 +335,16 @@ abstract class BaseAgent
      */
     private function executeToolWithReliability(string $name, array $args, AgentJob $job): array
     {
+        // Circuit breaker check — fail fast if tool is temporarily blocked
+        if ($this->iterationEngine->isToolBlocked($name)) {
+            Log::warning('BaseAgent: tool blocked by circuit breaker, skipping', [
+                'tool'       => $name,
+                'job_id'     => $job->id,
+                'agent_type' => $this->agentType,
+            ]);
+            return [$this->toolResult(false, null, "Tool {$name} is temporarily disabled due to repeated failures."), false, 'circuit_breaker'];
+        }
+
         $attempt   = 0;
         $lastError = null;
 
@@ -351,10 +370,12 @@ abstract class BaseAgent
                     throw new \RuntimeException("Tool {$name} returned empty result");
                 }
 
+                $this->iterationEngine->recordToolOutcome($name, true);
                 return [$result, true, null];
 
             } catch (\Throwable $e) {
                 $lastError = $e->getMessage();
+                $this->iterationEngine->recordToolOutcome($name, false);
                 Log::warning('Tool execution failed, retrying', [
                     'tool'    => $name,
                     'attempt' => $attempt,

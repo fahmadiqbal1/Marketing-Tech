@@ -2,9 +2,10 @@
 namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 class KnowledgeBase extends Model {
-    use HasUuids;
+    use HasUuids, SoftDeletes;
     protected $table = 'knowledge_base';
     protected $fillable = ['title','content','category','tags','source','embedding','chunk_index','parent_id','content_hash'];
     protected $casts = ['tags'=>'array'];
