@@ -174,6 +174,13 @@ class PipelineActionController extends Controller
             ], 422);
         }
 
+        // Audit trail for manual winner promotions
+        Log::warning('Winner manually promoted', [
+            'job_id'       => $id,
+            'winner_id'    => $winner->id,
+            'winner_label' => $winner->variation_label,
+        ]);
+
         return response()->json([
             'message'          => 'Winner promoted.',
             'job_id'           => $id,
@@ -220,10 +227,15 @@ class PipelineActionController extends Controller
             ], 422);
         }
 
-        $excerpt     = Str::limit($winnerContent, 500);
+        // Enforce global prompt size cap: winner excerpt may not bloat the instruction
+        // Budget = 8000 chars total - original instruction length - overhead
+        $maxExcerpt  = max(100, 8000 - strlen($job->instruction) - 100);
+        $excerpt     = Str::limit($winnerContent, $maxExcerpt);
         $instruction = $job->instruction
             . "\n\nBase your response on this winning content:\n"
             . $excerpt;
+
+        $sourceVariationId = $winnerVariation?->id;
 
         $newJob = AgentJob::create([
             'agent_type'  => $job->agent_type,
@@ -239,10 +251,11 @@ class PipelineActionController extends Controller
         RunAgentJob::dispatch($newJob->id)->onQueue($queue);
 
         return response()->json([
-            'message'    => 'New job created from winner.',
-            'new_job_id' => $newJob->id,
-            'source_job' => $id,
-            'status'     => 'pending',
+            'message'              => 'New job created from winner.',
+            'new_job_id'           => $newJob->id,
+            'source_job'           => $id,
+            'source_variation_id'  => $sourceVariationId,
+            'status'               => 'pending',
         ], 201);
     }
 }

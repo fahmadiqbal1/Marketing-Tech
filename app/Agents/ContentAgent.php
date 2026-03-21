@@ -239,15 +239,22 @@ PROMPT;
             $parsed = json_decode(trim($raw), true);
 
             if (is_array($parsed) && isset($parsed['A'], $parsed['B'], $parsed['C'])) {
-                // Store all three variations (with deduplication by content hash)
+                // Soft guard: skip if this job already has 5+ variations stored
+                $existingCount = \App\Models\ContentVariation::where('agent_job_id', $job->id)->count();
+
+                // Store all three variations (with deduplication by normalised content hash)
                 foreach (['A', 'B', 'C'] as $label) {
+                    if ($existingCount >= 5) {
+                        break; // Variation limit reached
+                    }
+
                     $v       = $parsed[$label];
                     $content = $v['content'] ?? '';
 
-                    // Skip storing if identical content already saved for this job
-                    $hash   = md5(substr($content, 0, 200));
+                    // Stronger hash: normalise whitespace over first 500 chars
+                    $hash   = md5(preg_replace('/\s+/', ' ', substr($content, 0, 500)));
                     $exists = \App\Models\ContentVariation::where('agent_job_id', $job->id)
-                        ->whereRaw("md5(substr(content, 1, 200)) = ?", [$hash])
+                        ->whereRaw("md5(regexp_replace(substr(content, 1, 500), '\s+', ' ', 'g')) = ?", [$hash])
                         ->exists();
                     if ($exists) {
                         continue;
@@ -264,6 +271,7 @@ PROMPT;
                             'word_count' => str_word_count($content),
                         ],
                     );
+                    $existingCount++;
                 }
 
                 $primaryContent = $parsed['A']['content'];
