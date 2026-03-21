@@ -72,7 +72,17 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        // Ensure temp directory exists
-        @mkdir(storage_path('app/temp'), 0755, true);
+        foreach ([
+            storage_path('app/temp'),
+            storage_path('framework/cache/data'),
+            storage_path('framework/sessions'),
+            storage_path('framework/testing'),
+            storage_path('framework/views'),
+            storage_path('logs'),
+        ] as $directory) {
+            if (! is_dir($directory)) {
+                @mkdir($directory, 0755, true);
+            }
+        }
     }
 }
