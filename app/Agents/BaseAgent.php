@@ -419,19 +419,57 @@ abstract class BaseAgent
     // ─── Message Building ─────────────────────────────────────────
 
     /**
+     * Per-section character limits (applied before the global budget guard).
+     * Using mb_substr/mb_strlen consistently for UTF-8 correctness.
+     */
+    private const SECTION_LIMITS = [
+        'rag'      => 2500,
+        'patterns' => 1500,
+        'global'   => 1000,
+        'campaign' => 1500,
+        'failures' => 800,
+    ];
+
+    /**
+     * Total context budget in characters.
+     * 2000 chars reserved for the LLM response, leaving 6000 usable.
+     */
+    private const MAX_CONTEXT_CHARS    = 8000;
+    private const RESERVED_FOR_RESPONSE = 2000;
+
+    /** Running total of injected context chars for this request. */
+    private int $promptUsed = 0;
+
+    /**
+     * Trim a section to its per-section limit, then check against the global
+     * budget. Returns trimmed text, or empty string if budget exhausted.
+     * All length operations use mb_* for UTF-8 safety.
+     */
+    private function addSection(string $section, string $text): string
+    {
+        $sectionMax   = self::SECTION_LIMITS[$section] ?? 1500;
+        $trimmed      = mb_substr($text, 0, $sectionMax, 'UTF-8');
+        $usableBudget = self::MAX_CONTEXT_CHARS - self::RESERVED_FOR_RESPONSE;
+
+        if (($this->promptUsed + mb_strlen($trimmed, 'UTF-8')) > $usableBudget) {
+            return '';
+        }
+
+        $this->promptUsed += mb_strlen($trimmed, 'UTF-8');
+        return $trimmed;
+    }
+
+    /**
      * Returns [messages array, knowledge_scores array [{id, score}]].
      *
-     * Hard cap of MAX_CONTEXT_CHARS total injected context (excludes the final
-     * instruction). Sections are added in priority order; injection stops once
-     * the cap is reached to prevent bloating the context window.
+     * Sections are added in priority order with per-section caps plus a global
+     * usable budget of 6000 chars (8000 total minus 2000 reserved for response).
      */
-    private const MAX_CONTEXT_CHARS = 8000;
-
     private function buildInitialMessages(AgentJob $job): array
     {
-        $messages        = [];
-        $knowledgeScores = [];
-        $contextChars    = 0; // running total of injected context chars
+        $this->promptUsed = 0; // reset budget for this run
+        $messages         = [];
+        $knowledgeScores  = [];
 
         // ── 1. RAG context (filtered by similarity threshold, deduplicated) ──
         $rawContext = $this->knowledge->search($job->instruction, topK: 5);
@@ -442,7 +480,7 @@ abstract class BaseAgent
             $similarity = (float) ($item['similarity'] ?? 0.0);
             if ($similarity < $this->ragThreshold) continue;
 
-            $hash = md5(substr($item['content'] ?? '', 0, 200));
+            $hash = md5(mb_substr($item['content'] ?? '', 0, 200, 'UTF-8'));
             if (isset($seen[$hash])) continue;
             $seen[$hash] = true;
 
@@ -458,72 +496,81 @@ abstract class BaseAgent
                 $sanitized    = $this->iterationEngine->sanitizeForPrompt($item['content'] ?? '');
                 $contextText .= "- {$sanitized}\n";
             }
-            $contextChars += strlen($contextText);
-            $messages[] = ['role' => 'user',      'content' => $contextText];
-            $messages[] = ['role' => 'assistant',  'content' => 'I have reviewed the relevant knowledge context and will use it to inform my response.'];
+            $trimmed = $this->addSection('rag', $contextText);
+            if (! empty($trimmed)) {
+                $messages[] = ['role' => 'user',      'content' => $trimmed];
+                $messages[] = ['role' => 'assistant',  'content' => 'I have reviewed the relevant knowledge context and will use it to inform my response.'];
+            }
         }
 
         // ── 2. Iteration engine: inject high-performing patterns (per-agent) ──
-        if ($contextChars < self::MAX_CONTEXT_CHARS) {
-            $patterns = $this->iterationEngine->getPromptContext($this->agentType);
-            if (! empty($patterns)) {
-                $contextChars += strlen($patterns);
-                $messages[] = ['role' => 'user',      'content' => $patterns];
+        $patterns = $this->iterationEngine->getPromptContext($this->agentType);
+        if (! empty($patterns)) {
+            $trimmed = $this->addSection('patterns', $patterns);
+            if (! empty($trimmed)) {
+                $messages[] = ['role' => 'user',      'content' => $trimmed];
                 $messages[] = ['role' => 'assistant',  'content' => 'I will apply these proven high-performing patterns to maximise effectiveness.'];
             }
         }
 
         // ── 3. Global cross-agent patterns ────────────────────────────────
-        if ($contextChars < self::MAX_CONTEXT_CHARS) {
-            $globalPatterns = $this->iterationEngine->getGlobalPatterns();
-            if (! empty($globalPatterns)) {
-                $contextChars += strlen($globalPatterns);
-                $messages[] = ['role' => 'user',      'content' => $globalPatterns];
+        $globalPatterns = $this->iterationEngine->getGlobalPatterns();
+        if (! empty($globalPatterns)) {
+            $trimmed = $this->addSection('global', $globalPatterns);
+            if (! empty($trimmed)) {
+                $messages[] = ['role' => 'user',      'content' => $trimmed];
                 $messages[] = ['role' => 'assistant',  'content' => 'I have noted these global high-performing patterns and will incorporate them.'];
             }
         }
 
         // ── 4. Campaign context: inject prior campaign work ───────────────
-        if ($contextChars < self::MAX_CONTEXT_CHARS && ! empty($job->campaign_id)) {
+        if (! empty($job->campaign_id)) {
             $rawCampaignCtx = $this->campaignContext->getCampaignContext($job->campaign_id);
             if (! empty($rawCampaignCtx)) {
-                // Remaining budget for campaign context (min 500 chars or remaining)
-                $campaignBudget = max(500, self::MAX_CONTEXT_CHARS - $contextChars);
-                $campaignCtx    = $this->iterationEngine->sanitizeForPrompt($rawCampaignCtx, $campaignBudget);
-                $contextChars  += strlen($campaignCtx);
-                $messages[]     = ['role' => 'user',      'content' => $campaignCtx];
-                $messages[]     = ['role' => 'assistant',  'content' => 'I have reviewed the campaign history and will ensure continuity with prior work.'];
+                $campaignCtx = $this->iterationEngine->sanitizeForPrompt($rawCampaignCtx, self::SECTION_LIMITS['campaign']);
+                $trimmed     = $this->addSection('campaign', $campaignCtx);
+                if (! empty($trimmed)) {
+                    $messages[] = ['role' => 'user',      'content' => $trimmed];
+                    $messages[] = ['role' => 'assistant',  'content' => 'I have reviewed the campaign history and will ensure continuity with prior work.'];
+                }
             }
         }
 
         // ── 5. Failure context (retry awareness — max 3 most recent failures) ──
-        if ($contextChars < self::MAX_CONTEXT_CHARS) {
-            $failedSteps = \App\Models\AgentStep::where('agent_job_id', $job->id)
-                ->where(function ($q) {
-                    $q->where('tool_success', false)->orWhere('status', 'failed');
-                })
-                ->orderByDesc('created_at')
-                ->limit(3)
-                ->get();
+        $failedSteps = \App\Models\AgentStep::where('agent_job_id', $job->id)
+            ->where(function ($q) {
+                $q->where('tool_success', false)->orWhere('status', 'failed');
+            })
+            ->orderByDesc('created_at')
+            ->limit(3)
+            ->get();
 
-            if ($failedSteps->isNotEmpty()) {
-                $failureLines = [];
-                foreach ($failedSteps as $step) {
-                    $rawError = $step->tool_error ?? $step->thought ?? 'Unknown error';
+        if ($failedSteps->isNotEmpty()) {
+            $failureLines = [];
+            foreach ($failedSteps as $step) {
+                $rawError = $step->tool_error ?? $step->thought ?? 'Unknown error';
 
-                    // Strip file paths and Laravel exception class names to reduce noise
-                    $cleaned = preg_replace('/\/[a-zA-Z0-9_.\/]+\.[a-zA-Z]+/', '[path]', $rawError);
-                    $cleaned = preg_replace('/[A-Z][a-zA-Z]+Exception/', '[Exception]', $cleaned ?? $rawError);
-                    $cleaned = preg_replace('/App\\\\[A-Za-z\\\\]+/', '[Class]', $cleaned ?? $rawError);
-                    $cleaned = trim($cleaned ?? $rawError);
+                // Strip file paths and Laravel exception class names to reduce noise
+                $cleaned = preg_replace('/\/[a-zA-Z0-9_.\/]+\.[a-zA-Z]+/', '[path]', $rawError);
+                $cleaned = preg_replace('/[A-Z][a-zA-Z]+Exception/', '[Exception]', $cleaned ?? $rawError);
+                $cleaned = preg_replace('/App\\\\[A-Za-z\\\\]+/', '[Class]', $cleaned ?? $rawError);
+                $cleaned = trim($cleaned ?? $rawError);
 
-                    $sanitizedError = $this->iterationEngine->sanitizeForPrompt($cleaned, 200);
-                    $failureLines[] = "- Tool/Step '{$step->action}' failed: {$sanitizedError}";
-                }
-                $failureContext = "[PREVIOUS ATTEMPT FAILURES — avoid repeating these mistakes]\n"
-                    . implode("\n", $failureLines);
-                $contextChars  += strlen($failureContext);
-                $messages[] = ['role' => 'user',      'content' => $failureContext];
+                // Summarize with actionable hint instead of raw dump
+                $reason = mb_substr($cleaned, 0, 80, 'UTF-8');
+                $hint   = match (true) {
+                    str_contains(strtolower($reason), 'timeout')    => 'Retry with smaller input or fallback.',
+                    str_contains(strtolower($reason), 'rate limit') => 'Wait before retrying.',
+                    str_contains(strtolower($reason), '404')        => 'Resource not found, verify input.',
+                    default                                          => 'Review input and retry.',
+                };
+                $failureLines[] = "- {$step->action} failed ({$reason}). {$hint}";
+            }
+            $failureContext = "[PREVIOUS ATTEMPT FAILURES — avoid repeating these mistakes]\n"
+                . implode("\n", $failureLines);
+            $trimmed = $this->addSection('failures', $failureContext);
+            if (! empty($trimmed)) {
+                $messages[] = ['role' => 'user',      'content' => $trimmed];
                 $messages[] = ['role' => 'assistant',  'content' => 'I understand these previous failures and will avoid repeating the same mistakes.'];
             }
         }

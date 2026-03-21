@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
+use App\Models\CustomAiPlatform;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
 use App\Models\ContentVariation;
@@ -20,6 +22,8 @@ use App\Workflows\WorkflowDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * DashboardController – thin controller.
@@ -132,6 +136,14 @@ class DashboardController extends Controller
 
     public function apiPipeline(): JsonResponse
     {
+        // Fail fast if schema is not fully migrated — prevents silent degradation
+        if (! Schema::hasColumn('agent_steps', 'agent_job_id')) {
+            Log::critical('Schema mismatch: agent_job_id missing from agent_steps. Run: php artisan migrate');
+            return response()->json([
+                'error' => 'System not fully migrated. Please run: php artisan migrate',
+            ], 500);
+        }
+
         $agentDefs = config('agents.agents', []);
 
         // Recent steps across all agents (last 60)
@@ -273,6 +285,39 @@ class DashboardController extends Controller
         }
     }
 
+    public function apiKnowledgeGitHub(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'repo_url'     => 'required|string|url',
+            'category'     => 'nullable|string|max:100',
+            'github_token' => 'nullable|string|max:255',
+            'branch'       => 'nullable|string|max:100',
+        ]);
+
+        // Ensure it's a GitHub URL
+        if (! str_contains($validated['repo_url'], 'github.com')) {
+            return response()->json(['error' => 'Only GitHub repository URLs are supported.'], 422);
+        }
+
+        $token = ! empty($validated['github_token'])
+            ? $validated['github_token']
+            : $this->credentials->retrieve('GITHUB_TOKEN');
+
+        IngestGitHubRepo::dispatch(
+            repoUrl:      $validated['repo_url'],
+            category:     $validated['category'] ?? 'general',
+            extensions:   ['md', 'txt', 'php', 'js', 'ts', 'py', 'json', 'yaml', 'yml'],
+            githubToken:  $token,
+            branch:       $validated['branch'] ?? 'main',
+        )->onQueue('low');
+
+        return response()->json([
+            'dispatched' => true,
+            'message'    => 'Import queued. Files will appear in the knowledge base shortly.',
+            'repo'       => $validated['repo_url'],
+        ]);
+    }
+
     public function apiKnowledgeDelete(string $id): JsonResponse
     {
         // Delete the entry and all its chunks
@@ -290,7 +335,7 @@ class DashboardController extends Controller
     public function testConnection(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'provider' => 'required|string|in:openai,anthropic,gemini',
+            'provider' => 'required|string|max:100',
         ]);
 
         $provider = $validated['provider'];
@@ -348,7 +393,33 @@ class DashboardController extends Controller
                     break;
 
                 default:
-                    throw new \RuntimeException("Unknown provider: {$provider}");
+                    // Custom platform
+                    $platform = CustomAiPlatform::where('name', $provider)->where('is_active', true)->first();
+                    if (! $platform) {
+                        throw new \RuntimeException("Unknown provider: {$provider}");
+                    }
+                    $apiKey = $this->credentials->retrieve($platform->api_key_env) ?? '';
+                    if (empty($apiKey)) {
+                        throw new \RuntimeException("API key for {$platform->name} is not configured.");
+                    }
+                    $headers = ['Content-Type' => 'application/json'];
+                    if ($platform->auth_type === 'x-api-key') {
+                        $headers[$platform->auth_header ?: 'X-API-Key'] = $apiKey;
+                    } else {
+                        $headers['Authorization'] = "Bearer {$apiKey}";
+                    }
+                    $resp = Http::withHeaders($headers)->timeout(10)->post(
+                        rtrim($platform->api_base_url, '/') . '/chat/completions',
+                        ['model' => $platform->default_model, 'messages' => [['role' => 'user', 'content' => 'ping']], 'max_tokens' => 5]
+                    );
+                    if ($resp->failed()) {
+                        throw new \RuntimeException("{$platform->name} responded HTTP {$resp->status()}");
+                    }
+                    if (empty($resp->json('choices.0.message.content'))) {
+                        throw new \RuntimeException("{$platform->name} returned unexpected response shape");
+                    }
+                    $message = "Connected to {$platform->name}.";
+                    break;
             }
 
             $latencyMs = (int) round(microtime(true) * 1000) - $start;
@@ -394,16 +465,18 @@ class DashboardController extends Controller
     public function savePlatform(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'provider' => 'required|string|in:openai,anthropic,gemini',
+            'provider' => 'required|string|max:100',
             'api_key'  => 'required|string|min:10',
             'model'    => 'nullable|string|max:100',
         ]);
 
         $provider = $validated['provider'];
-        $envKey   = match($provider) {
+
+        $envKey = match($provider) {
             'anthropic' => 'ANTHROPIC_API_KEY',
             'gemini'    => 'GEMINI_API_KEY',
-            default     => 'OPENAI_API_KEY',
+            'openai'    => 'OPENAI_API_KEY',
+            default     => CustomAiPlatform::where('name', $provider)->value('api_key_env') ?? 'OPENAI_API_KEY',
         };
 
         $this->credentials->store($provider, $envKey, $validated['api_key']);
@@ -418,5 +491,49 @@ class DashboardController extends Controller
         }
 
         return response()->json(['saved' => true, 'provider' => $provider]);
+    }
+
+    // ── API: Custom AI Platforms ──────────────────────────────────────
+
+    public function apiCustomPlatforms(): JsonResponse
+    {
+        $platforms = CustomAiPlatform::orderBy('name')->get()->map(fn ($p) => [
+            'id'           => $p->id,
+            'name'         => $p->name,
+            'website_url'  => $p->website_url,
+            'api_base_url' => $p->api_base_url,
+            'default_model' => $p->default_model,
+            'api_key_env'  => $p->api_key_env,
+            'auth_type'    => $p->auth_type,
+            'is_active'    => $p->is_active,
+            'configured'   => ! empty($this->credentials->retrieve($p->api_key_env)),
+        ]);
+
+        return response()->json(['data' => $platforms]);
+    }
+
+    public function apiCustomPlatformCreate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'          => 'required|string|max:80|unique:custom_ai_platforms,name',
+            'website_url'   => 'nullable|url|max:255',
+            'api_base_url'  => 'required|url|max:255',
+            'default_model' => 'required|string|max:100',
+            'api_key_env'   => 'required|string|max:100|regex:/^[A-Z0-9_]+$/',
+            'auth_type'     => 'required|in:bearer,x-api-key',
+            'auth_header'   => 'nullable|string|max:100',
+        ]);
+
+        $platform = CustomAiPlatform::create($validated);
+
+        return response()->json(['created' => true, 'id' => $platform->id], 201);
+    }
+
+    public function apiCustomPlatformDelete(string $id): JsonResponse
+    {
+        $platform = CustomAiPlatform::findOrFail($id);
+        $platform->delete();
+
+        return response()->json(['deleted' => true]);
     }
 }

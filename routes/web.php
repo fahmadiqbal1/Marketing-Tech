@@ -87,10 +87,14 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::get('/pipeline',                   [DashboardController::class, 'apiPipeline']);
         Route::get('/knowledge',                  [DashboardController::class, 'apiKnowledge']);
         Route::post('/knowledge',                 [DashboardController::class, 'apiKnowledgeCreate']);
+        Route::post('/knowledge/github',          [DashboardController::class, 'apiKnowledgeGitHub']);
         Route::delete('/knowledge/{id}',          [DashboardController::class, 'apiKnowledgeDelete']);
         Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
         Route::post('/platform',                  [DashboardController::class, 'savePlatform']);
         Route::post('/test-connection',           [DashboardController::class, 'testConnection']);
+        Route::get('/custom-platforms',           [DashboardController::class, 'apiCustomPlatforms']);
+        Route::post('/custom-platforms',          [DashboardController::class, 'apiCustomPlatformCreate']);
+        Route::delete('/custom-platforms/{id}',   [DashboardController::class, 'apiCustomPlatformDelete']);
 
         // Pipeline actions (Phase 4)
         Route::post('/pipeline/steps/{id}/skip',           [PipelineActionController::class, 'skipStep']);

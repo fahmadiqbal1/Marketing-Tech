@@ -11,7 +11,7 @@ return [
     'use'     => 'default',
     'prefix'  => env('HORIZON_PREFIX', 'ops:horizon:'),
 
-    'middleware' => ['auth'],
+    'middleware' => ['web'],
 
     'waits'  => ['redis:default' => 60],
     'trim'   => [
@@ -123,6 +123,16 @@ return [
                 'timeout'      => 660,   // must exceed RunAgentTask::$timeout (600s)
                 'memory'       => 256,
             ],
+            // Low-priority background ingestion (GitHub, bulk imports)
+            'supervisor-low' => [
+                'connection'   => 'redis',
+                'queue'        => ['low'],
+                'balance'      => 'simple',
+                'processes'    => 1,
+                'tries'        => 2,
+                'timeout'      => 360,
+                'memory'       => 256,
+            ],
         ],
 
         'local' => [
@@ -133,6 +143,14 @@ return [
                 'processes'    => 2,
                 'tries'        => 3,
                 'timeout'      => 660,
+            ],
+            'supervisor-low' => [
+                'connection'   => 'redis',
+                'queue'        => ['low'],
+                'balance'      => 'simple',
+                'processes'    => 1,
+                'tries'        => 2,
+                'timeout'      => 360,
             ],
         ],
     ],

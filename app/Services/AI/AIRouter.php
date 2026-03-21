@@ -3,6 +3,9 @@
 namespace App\Services\AI;
 
 use App\Models\AiRequest;
+use App\Models\CustomAiPlatform;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AIRouter
@@ -188,6 +191,19 @@ class AIRouter
 
     private function callProvider(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature): string
     {
+        $custom = $this->resolveCustomPlatform($provider);
+        if ($custom) {
+            try {
+                $response = $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
+                return $response['choices'][0]['message']['content'] ?? '';
+            } catch (\Throwable $e) {
+                Log::error('Custom AI platform failed, falling back to OpenAI', [
+                    'platform' => $custom->name, 'error' => $e->getMessage(),
+                ]);
+                return $this->openai->complete($messages[0]['content'], 'gpt-4o', $maxTokens, $temperature);
+            }
+        }
+
         if ($provider === 'anthropic') {
             return $this->anthropic->complete($messages[0]['content'], $model, $maxTokens, $temperature);
         }
@@ -196,6 +212,18 @@ class AIRouter
 
     private function callProviderChat(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature, array $tools): array
     {
+        $custom = $this->resolveCustomPlatform($provider);
+        if ($custom) {
+            try {
+                return $this->callCustomPlatform($custom, $model, $messages, $system, $maxTokens, $temperature);
+            } catch (\Throwable $e) {
+                Log::error('Custom AI platform chat failed, falling back to OpenAI', [
+                    'platform' => $custom->name, 'error' => $e->getMessage(),
+                ]);
+                return $this->openai->chat($messages, 'gpt-4o', $system ?? '', $tools, $maxTokens, $temperature);
+            }
+        }
+
         if ($provider === 'anthropic') {
             return $this->anthropic->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature);
         }
@@ -204,7 +232,66 @@ class AIRouter
 
     private function providerForModel(string $model): string
     {
-        return str_starts_with($model, 'claude') ? 'anthropic' : 'openai';
+        if (str_starts_with($model, 'claude')) {
+            return 'anthropic';
+        }
+
+        // Check if this model belongs to a custom platform (cached 5 min)
+        $customPlatform = Cache::remember('custom_platform_for_model_' . md5($model), 300, function () use ($model) {
+            return CustomAiPlatform::where('default_model', $model)->where('is_active', true)->first();
+        });
+
+        if ($customPlatform) {
+            return 'custom:' . $customPlatform->name;
+        }
+
+        return 'openai';
+    }
+
+    private function resolveCustomPlatform(string $provider): ?CustomAiPlatform
+    {
+        if (! str_starts_with($provider, 'custom:')) {
+            return null;
+        }
+
+        $name = substr($provider, 7);
+        return Cache::remember('custom_platform_' . $name, 300, function () use ($name) {
+            return CustomAiPlatform::where('name', $name)->where('is_active', true)->first();
+        });
+    }
+
+    private function callCustomPlatform(CustomAiPlatform $platform, string $model, array $messages, ?string $system, int $maxTokens, float $temperature): array
+    {
+        $apiKey = config($platform->api_key_env) ?? env($platform->api_key_env, '');
+
+        $headers = ['Content-Type' => 'application/json', 'Accept' => 'application/json'];
+        if ($platform->auth_type === 'x-api-key') {
+            $authHeader = $platform->auth_header ?: 'X-API-Key';
+            $headers[$authHeader] = $apiKey;
+        } else {
+            $headers['Authorization'] = "Bearer {$apiKey}";
+        }
+
+        $body = ['model' => $model, 'messages' => $messages, 'max_tokens' => $maxTokens, 'temperature' => $temperature];
+        if ($system) {
+            array_unshift($body['messages'], ['role' => 'system', 'content' => $system]);
+        }
+
+        $response = Http::withHeaders($headers)
+            ->timeout(30)
+            ->retry(1, 0)
+            ->post(rtrim($platform->api_base_url, '/') . '/chat/completions', $body);
+
+        if ($response->failed()) {
+            throw new \RuntimeException("Custom platform {$platform->name} responded HTTP {$response->status()}: " . ($response->json('error.message') ?? 'Unknown error'));
+        }
+
+        $data = $response->json();
+        if (empty($data['choices'][0]['message']['content'])) {
+            throw new \RuntimeException("Custom platform {$platform->name} returned invalid response shape");
+        }
+
+        return $data;
     }
 
     private function selectModel(string $prompt, string $preference): string

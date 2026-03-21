@@ -49,7 +49,7 @@ class CampaignContextService
     private function buildContext(string $campaignId): string
     {
         $jobs = AgentJob::where('campaign_id', $campaignId)
-            ->whereIn('status', ['completed', 'running'])
+            ->where('status', 'completed')
             ->orderByDesc('created_at')
             ->limit(5)
             ->get(['id', 'agent_type', 'instruction', 'result', 'steps_taken', 'created_at']);

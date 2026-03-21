@@ -7,4 +7,5 @@
  */
 return [
     App\Providers\AgentSystemServiceProvider::class,
+    App\Providers\HorizonServiceProvider::class,
 ];

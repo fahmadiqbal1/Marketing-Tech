@@ -206,6 +206,101 @@
         </div>
     </div>
 
+    {{-- ── Custom AI Platforms ──────────────────────────────────────── --}}
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Custom AI Platforms</h2>
+    <div class="stat-card mb-8">
+        <p class="text-xs text-slate-500 mb-4">Connect any OpenAI-compatible API endpoint (local models, Together.ai, Fireworks, etc.). On failure, agents automatically fall back to the default built-in provider.</p>
+
+        {{-- Existing platforms list --}}
+        <div x-show="customPlatforms.length > 0" class="mb-4 space-y-2">
+            <template x-for="p in customPlatforms" :key="p.id">
+                <div class="flex items-center justify-between px-3 py-2.5 bg-slate-800/60 border border-slate-700/50 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-2 h-2 rounded-full" :class="p.configured ? 'bg-emerald-400' : 'bg-slate-600'"></div>
+                        <div>
+                            <p class="text-sm font-medium text-white" x-text="p.name"></p>
+                            <p class="text-xs text-slate-500 font-mono" x-text="p.api_base_url + ' · ' + p.default_model"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="badge text-xs" :class="p.configured ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700 text-slate-400 border border-slate-600'"
+                              x-text="p.configured ? 'Key Set' : 'No Key'"></span>
+                        <button @click="deleteCustomPlatform(p.id)"
+                                class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        {{-- Add new custom platform form --}}
+        <div x-show="!showAddCustomPlatform">
+            <button @click="showAddCustomPlatform = true"
+                    class="px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 text-sm rounded-lg transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                Add Custom Platform
+            </button>
+        </div>
+
+        <div x-show="showAddCustomPlatform" class="border border-slate-700/60 rounded-lg p-4 space-y-3">
+            <p class="text-xs font-semibold text-slate-300 uppercase">New Custom Platform</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Platform Name <span class="text-red-400">*</span></label>
+                    <input type="text" x-model="customForm.name" placeholder="e.g. Together AI"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Website (optional)</label>
+                    <input type="url" x-model="customForm.website_url" placeholder="https://together.ai"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+            </div>
+            <div>
+                <label class="text-xs text-slate-400 mb-1 block">API Base URL <span class="text-red-400">*</span></label>
+                <input type="url" x-model="customForm.api_base_url" placeholder="https://api.together.xyz/v1"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Default Model <span class="text-red-400">*</span></label>
+                    <input type="text" x-model="customForm.default_model" placeholder="meta-llama/Llama-3-8b-chat-hf"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">API Key Env Var <span class="text-red-400">*</span></label>
+                    <input type="text" x-model="customForm.api_key_env" placeholder="TOGETHER_API_KEY"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition font-mono">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Auth Type</label>
+                    <select x-model="customForm.auth_type"
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+                        <option value="bearer">Bearer Token</option>
+                        <option value="x-api-key">Custom Header</option>
+                    </select>
+                </div>
+                <div x-show="customForm.auth_type === 'x-api-key'">
+                    <label class="text-xs text-slate-400 mb-1 block">Header Name</label>
+                    <input type="text" x-model="customForm.auth_header" placeholder="X-API-Key"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <button @click="showAddCustomPlatform = false; customForm = { name:'', website_url:'', api_base_url:'', default_model:'', api_key_env:'', auth_type:'bearer', auth_header:'' }"
+                        class="px-3 py-2 border border-slate-700 text-slate-400 text-sm rounded-lg hover:border-slate-500 hover:text-white transition">Cancel</button>
+                <button @click="addCustomPlatform()" :disabled="saving.customPlatform"
+                        class="px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
+                    <span x-text="saving.customPlatform ? 'Adding...' : 'Add Platform'"></span>
+                </button>
+            </div>
+            <div x-show="customPlatformError" class="text-xs text-red-400 mt-1" x-text="customPlatformError"></div>
+        </div>
+    </div>
+
     {{-- ── Telegram Integration ─────────────────────────────────────── --}}
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Telegram Integration</h2>
     <div class="stat-card mb-8">
@@ -287,13 +382,17 @@ function settingsApp() {
             TELEGRAM_BOT_TOKEN: '', TELEGRAM_ADMIN_CHAT_ID: '',
             DB_CONNECTION: '', DB_HOST: '', DB_PORT: '', DB_DATABASE: '',
         },
-        saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false },
+        saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false, customPlatform: false },
         testing:    { openai: false, anthropic: false, gemini: false },
         testResult: { openai: null, anthropic: null, gemini: null },
         toast: { show: false, message: '', error: false },
         webhookResult: '',
         sysWarning: '',
         sysSuccess: '',
+        customPlatforms: [],
+        showAddCustomPlatform: false,
+        customPlatformError: '',
+        customForm: { name: '', website_url: '', api_base_url: '', default_model: '', api_key_env: '', auth_type: 'bearer', auth_header: '' },
 
         async init() {
             try {
@@ -318,6 +417,52 @@ function settingsApp() {
                 this.sysForm = { ...this.sysForm, ...d };
             } catch(e) {
                 this.sysWarning = 'Could not load system settings: ' + e.message;
+            }
+
+            await this.loadCustomPlatforms();
+        },
+
+        async loadCustomPlatforms() {
+            try {
+                const d = await apiGet('/dashboard/api/custom-platforms');
+                this.customPlatforms = d.data || [];
+            } catch(e) {
+                console.warn('Could not load custom platforms:', e.message);
+            }
+        },
+
+        async addCustomPlatform() {
+            this.customPlatformError = '';
+            if (!this.customForm.name.trim() || !this.customForm.api_base_url.trim() || !this.customForm.default_model.trim() || !this.customForm.api_key_env.trim()) {
+                this.customPlatformError = 'Name, API Base URL, Default Model and API Key Env are required.';
+                return;
+            }
+            this.saving.customPlatform = true;
+            try {
+                const r = await apiPost('/dashboard/api/custom-platforms', this.customForm);
+                if (r.created) {
+                    this.showAddCustomPlatform = false;
+                    this.customForm = { name: '', website_url: '', api_base_url: '', default_model: '', api_key_env: '', auth_type: 'bearer', auth_header: '' };
+                    this.showToast('Custom platform added.');
+                    await this.loadCustomPlatforms();
+                }
+            } catch(e) {
+                this.customPlatformError = e.message || 'Failed to add platform.';
+            }
+            this.saving.customPlatform = false;
+        },
+
+        async deleteCustomPlatform(id) {
+            if (!confirm('Remove this custom platform?')) return;
+            try {
+                await fetch('/dashboard/api/custom-platforms/' + id, {
+                    method: 'DELETE',
+                    headers: { 'X-CSRF-TOKEN': csrfToken() },
+                });
+                this.showToast('Platform removed.');
+                await this.loadCustomPlatforms();
+            } catch(e) {
+                this.showToast('Error: ' + e.message, true);
             }
         },
 
