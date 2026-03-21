@@ -112,16 +112,27 @@ return [
                 'tries'        => 3,
                 'timeout'      => 180,
             ],
+            // Agent tasks: long timeout (660s), 2 parallel workers, 3 retries
+            'supervisor-agents' => [
+                'connection'   => 'redis',
+                'queue'        => ['agents', 'default'],
+                'balance'      => 'auto',
+                'minProcesses' => 1,
+                'maxProcesses' => 4,
+                'tries'        => 3,
+                'timeout'      => 660,   // must exceed RunAgentTask::$timeout (600s)
+                'memory'       => 256,
+            ],
         ],
 
         'local' => [
             'supervisor-1' => [
                 'connection'   => 'redis',
-                'queue'        => ['default', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge'],
+                'queue'        => ['default', 'agents', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge'],
                 'balance'      => 'simple',
                 'processes'    => 2,
                 'tries'        => 3,
-                'timeout'      => 600,
+                'timeout'      => 660,
             ],
         ],
     ],

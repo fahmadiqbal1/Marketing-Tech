@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgentController;
+use App\Http\Middleware\CheckAgentToken;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -12,22 +13,22 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('agent')->name('agent.')->group(function () {
 
-    // UI
-    Route::get('/',           [AgentController::class, 'index'])->name('index');
+    // UI (no auth required)
+    Route::get('/', [AgentController::class, 'index'])->name('index');
 
-    // Task lifecycle
-    Route::post('/run',          [AgentController::class, 'run'])->name('run');
-    Route::get('/status/{id}',   [AgentController::class, 'status'])->name('status')
+    // Read-only (status / listing / config — no auth required)
+    Route::get('/status/{id}', [AgentController::class, 'status'])->name('status')
         ->where('id', '[0-9]+');
-    Route::post('/pause/{id}',   [AgentController::class, 'pause'])->name('pause')
-        ->where('id', '[0-9]+');
-    Route::post('/resume/{id}',  [AgentController::class, 'resume'])->name('resume')
-        ->where('id', '[0-9]+');
+    Route::get('/tasks',  [AgentController::class, 'taskList'])->name('tasks');
+    Route::get('/config', [AgentController::class, 'getConfig'])->name('config');
 
-    // Task listing
-    Route::get('/tasks',         [AgentController::class, 'taskList'])->name('tasks');
-
-    // API key management
-    Route::post('/update-api',   [AgentController::class, 'updateApi'])->name('update-api');
-    Route::get('/config',        [AgentController::class, 'getConfig'])->name('config');
+    // State-mutating endpoints: throttled + optional token auth
+    Route::middleware(['throttle:10,1', CheckAgentToken::class])->group(function () {
+        Route::post('/run',          [AgentController::class, 'run'])->name('run');
+        Route::post('/pause/{id}',   [AgentController::class, 'pause'])->name('pause')
+            ->where('id', '[0-9]+');
+        Route::post('/resume/{id}',  [AgentController::class, 'resume'])->name('resume')
+            ->where('id', '[0-9]+');
+        Route::post('/update-api',   [AgentController::class, 'updateApi'])->name('update-api');
+    });
 });

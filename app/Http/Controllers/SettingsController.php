@@ -2,15 +2,32 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ApiCredentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 
 class SettingsController extends Controller
 {
+    /** Fields that ARE API secrets → stored in DB (never written to .env) */
+    private const SECRET_FIELDS = [
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'TELEGRAM_BOT_TOKEN',
+        'TELEGRAM_WEBHOOK_SECRET',
+    ];
+
+    /** Provider mapping for secrets */
+    private const PROVIDER_MAP = [
+        'OPENAI_API_KEY'           => 'openai',
+        'ANTHROPIC_API_KEY'        => 'anthropic',
+        'TELEGRAM_BOT_TOKEN'       => 'telegram',
+        'TELEGRAM_WEBHOOK_SECRET'  => 'telegram',
+    ];
+
     private string $envPath;
 
-    public function __construct()
+    public function __construct(private readonly ApiCredentialService $credentials)
     {
         $this->envPath = base_path('.env');
     }
@@ -26,10 +43,10 @@ class SettingsController extends Controller
             'APP_URL'                  => env('APP_URL', ''),
             'APP_DEBUG'                => env('APP_DEBUG', false),
             'APP_ENV'                  => env('APP_ENV', 'local'),
-            'OPENAI_API_KEY'           => $this->mask(env('OPENAI_API_KEY', '')),
-            'ANTHROPIC_API_KEY'        => $this->mask(env('ANTHROPIC_API_KEY', '')),
-            'TELEGRAM_BOT_TOKEN'       => $this->mask(env('TELEGRAM_BOT_TOKEN', '')),
-            'TELEGRAM_WEBHOOK_SECRET'  => $this->mask(env('TELEGRAM_WEBHOOK_SECRET', '')),
+            'OPENAI_API_KEY'           => $this->maskOrEmpty('OPENAI_API_KEY'),
+            'ANTHROPIC_API_KEY'        => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
+            'TELEGRAM_BOT_TOKEN'       => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
+            'TELEGRAM_WEBHOOK_SECRET'  => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
             'TELEGRAM_ALLOWED_USERS'   => env('TELEGRAM_ALLOWED_USERS', ''),
             'TELEGRAM_ADMIN_CHAT_ID'   => env('TELEGRAM_ADMIN_CHAT_ID', ''),
             'DB_HOST'                  => env('DB_HOST', ''),
@@ -43,37 +60,48 @@ class SettingsController extends Controller
 
     public function update(Request $request): JsonResponse
     {
-        $allowed = [
+        $secretFields = self::SECRET_FIELDS;
+        $nonSecretAllowed = [
             'APP_URL', 'APP_DEBUG', 'APP_ENV',
-            'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
-            'TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET',
             'TELEGRAM_ALLOWED_USERS', 'TELEGRAM_ADMIN_CHAT_ID',
         ];
 
-        $data = $request->only($allowed);
+        $data = $request->only(array_merge($secretFields, $nonSecretAllowed));
 
         if (empty($data)) {
             return response()->json(['error' => 'No valid fields provided'], 422);
         }
 
-        $env = file_get_contents($this->envPath);
-
-        foreach ($data as $key => $value) {
-            // Skip masked placeholders — user didn't change them
-            if (str_contains((string) $value, '****')) {
-                continue;
-            }
-
-            $escaped = $this->escapeEnvValue((string) $value);
-
-            if (preg_match("/^{$key}=/m", $env)) {
-                $env = preg_replace("/^{$key}=.*/m", "{$key}={$escaped}", $env);
+        // ── Store secrets in encrypted DB (never touch .env) ──────────
+        foreach ($secretFields as $field) {
+            if (isset($data[$field]) && ! str_contains((string) $data[$field], '****')) {
+                $provider = self::PROVIDER_MAP[$field] ?? 'other';
+                $this->credentials->store($provider, $field, (string) $data[$field]);
+                unset($data[$field]);
             } else {
-                $env .= "\n{$key}={$escaped}";
+                unset($data[$field]);
             }
         }
 
-        file_put_contents($this->envPath, $env);
+        // ── Write non-secret fields to .env ───────────────────────────
+        if (! empty($data) && file_exists($this->envPath)) {
+            $env = file_get_contents($this->envPath);
+
+            foreach ($data as $key => $value) {
+                if (str_contains((string) $value, '****')) {
+                    continue;
+                }
+                $escaped = $this->escapeEnvValue((string) $value);
+
+                if (preg_match("/^{$key}=/m", $env)) {
+                    $env = preg_replace("/^{$key}=.*/m", "{$key}={$escaped}", $env);
+                } else {
+                    $env .= "\n{$key}={$escaped}";
+                }
+            }
+
+            file_put_contents($this->envPath, $env);
+        }
 
         try {
             Artisan::call('config:clear');
@@ -99,6 +127,12 @@ class SettingsController extends Controller
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
+
+    private function maskOrEmpty(string $envKey): string
+    {
+        $value = $this->credentials->retrieve($envKey) ?? '';
+        return $this->mask($value);
+    }
 
     private function mask(string $value): string
     {

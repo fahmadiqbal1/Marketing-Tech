@@ -20,8 +20,14 @@ class AgentSystemServiceProvider extends ServiceProvider
             'agent_system'
         );
 
-        // Bind AgentRunner as singleton
-        $this->app->singleton(\App\AgentSystem\AgentRunner::class);
+        // Bind AgentRunner as singleton with injected dependencies
+        $this->app->singleton(\App\AgentSystem\AgentRunner::class, function ($app) {
+            return new \App\AgentSystem\AgentRunner(
+                costCalc:          $app->make(\App\Services\AI\CostCalculatorService::class),
+                credentialService: $app->make(\App\Services\ApiCredentialService::class),
+                memory:            $app->make(\App\Services\MemoryService::class),
+            );
+        });
     }
 
     public function boot(): void

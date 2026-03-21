@@ -5,26 +5,29 @@ namespace App\Http\Controllers;
 use App\Jobs\RunAgentTask;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
+use App\Services\ApiCredentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
 /**
- * AgentController – handles all HTTP endpoints for the Master Agent System.
+ * AgentController – thin HTTP layer for the Master Agent System.
  *
- * Routes (defined in routes/agent.php):
- *   GET  /agent              → index()       renders Blade UI
- *   POST /agent/run          → run()         creates & queues a task
- *   GET  /agent/status/{id}  → status()      polls task progress
- *   POST /agent/pause/{id}   → pause()       pauses a running task
- *   POST /agent/resume/{id}  → resume()      resumes a paused task
- *   GET  /agent/tasks        → taskList()    list recent tasks
- *   POST /agent/update-api   → updateApi()   update AI credentials
- *   GET  /agent/config       → getConfig()   get current AI config
+ * Routes (routes/agent.php):
+ *   GET  /agent              → index()
+ *   POST /agent/run          → run()        (throttled + CheckAgentToken)
+ *   GET  /agent/status/{id}  → status()
+ *   POST /agent/pause/{id}   → pause()
+ *   POST /agent/resume/{id}  → resume()
+ *   GET  /agent/tasks        → taskList()
+ *   POST /agent/update-api   → updateApi()
+ *   GET  /agent/config       → getConfig()
  */
 class AgentController extends Controller
 {
+    public function __construct(private readonly ApiCredentialService $credentials) {}
+
     // ─────────────────────────────────────────────────────────────────────
     // Page
     // ─────────────────────────────────────────────────────────────────────
@@ -42,26 +45,40 @@ class AgentController extends Controller
     public function run(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'prompt'   => 'required|string|max:2000',
-            'provider' => 'nullable|string|in:openai,gemini',
-            'model'    => 'nullable|string|max:100',
+            'prompt'          => 'required|string|max:2000',
+            'provider'        => 'nullable|string|in:openai,gemini',
+            'model'           => 'nullable|string|max:100',
+            'idempotency_key' => 'nullable|string|max:64',
         ]);
 
         $provider = $validated['provider'] ?? config('agent_system.default_provider', 'openai');
 
-        // Validate that an API key exists for the chosen provider
-        $apiKey = $provider === 'gemini'
-            ? config('agent_system.gemini_api_key')
-            : config('agent_system.openai_api_key');
+        // ── Idempotency check ─────────────────────────────────────────
+        if (! empty($validated['idempotency_key'])) {
+            $cacheKey = 'agent:idem:' . $validated['idempotency_key'];
+            $existing = Cache::get($cacheKey);
+            if ($existing) {
+                return response()->json([
+                    'task_id' => $existing,
+                    'status'  => 'existing',
+                    'message' => 'Idempotency key matched existing task.',
+                ], 200);
+            }
+        }
+
+        // ── Validate API key exists ───────────────────────────────────
+        $envKey = $provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+        $apiKey = $this->credentials->retrieve($envKey);
 
         if (empty($apiKey) || str_contains($apiKey, 'CHANGE_ME')) {
             return response()->json([
-                'error'          => 'API key not configured.',
+                'error'            => 'API key not configured.',
                 'api_needs_update' => true,
-                'provider'       => $provider,
+                'provider'         => $provider,
             ], 422);
         }
 
+        // ── Create task ───────────────────────────────────────────────
         $task = AgentTask::create([
             'user_input'  => $validated['prompt'],
             'status'      => 'pending',
@@ -71,10 +88,15 @@ class AgentController extends Controller
 
         RunAgentTask::dispatch($task);
 
+        // Store idempotency key → task mapping (1 hour)
+        if (! empty($validated['idempotency_key'])) {
+            Cache::put('agent:idem:' . $validated['idempotency_key'], $task->id, 3600);
+        }
+
         return response()->json([
             'task_id' => $task->id,
             'status'  => 'queued',
-            'message' => 'Task queued successfully. Poll /agent/status/' . $task->id . ' for progress.',
+            'message' => 'Task queued. Poll /agent/status/' . $task->id . ' for progress.',
         ], 202);
     }
 
@@ -83,15 +105,15 @@ class AgentController extends Controller
         $task = AgentTask::with('steps')->findOrFail($id);
 
         return response()->json([
-            'task_id'         => $task->id,
-            'status'          => $task->status,
-            'current_step'    => $task->current_step,
-            'user_input'      => $task->user_input,
-            'final_output'    => $task->final_output,
-            'error_message'   => $task->error_message,
-            'total_tokens'    => $task->total_tokens,
-            'total_latency_ms'=> $task->total_latency_ms,
-            'steps'           => $task->steps->map(fn(AgentStep $s) => [
+            'task_id'          => $task->id,
+            'status'           => $task->status,
+            'current_step'     => $task->current_step,
+            'user_input'       => $task->user_input,
+            'final_output'     => $task->final_output,
+            'error_message'    => $task->error_message,
+            'total_tokens'     => $task->total_tokens,
+            'total_latency_ms' => $task->total_latency_ms,
+            'steps'            => $task->steps->map(fn (AgentStep $s) => [
                 'id'          => $s->id,
                 'step_number' => $s->step_number,
                 'agent_name'  => $s->agent_name,
@@ -105,8 +127,8 @@ class AgentController extends Controller
                 'retry_count' => $s->retry_count,
                 'created_at'  => $s->created_at?->toIso8601String(),
             ]),
-            'created_at'  => $task->created_at?->toIso8601String(),
-            'updated_at'  => $task->updated_at?->toIso8601String(),
+            'created_at' => $task->created_at?->toIso8601String(),
+            'updated_at' => $task->updated_at?->toIso8601String(),
         ]);
     }
 
@@ -151,7 +173,7 @@ class AgentController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // API key management
+    // API key management (no .env writes — uses encrypted DB store)
     // ─────────────────────────────────────────────────────────────────────
 
     public function updateApi(Request $request): JsonResponse
@@ -163,33 +185,25 @@ class AgentController extends Controller
         ]);
 
         $provider = $validated['provider'] ?? 'openai';
+        $envKey   = $provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
 
-        // Write to .env file (safe for local dev)
-        $this->writeEnvValue(
-            $provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY',
-            $validated['api_key']
-        );
+        $this->credentials->store($provider, $envKey, $validated['api_key']);
 
         if (! empty($validated['model'])) {
-            $this->writeEnvValue(
-                $provider === 'gemini' ? 'AGENT_GEMINI_MODEL' : 'AGENT_OPENAI_MODEL',
-                $validated['model']
-            );
+            $modelEnvKey = $provider === 'gemini' ? 'AGENT_GEMINI_MODEL' : 'AGENT_OPENAI_MODEL';
+            $this->credentials->store($provider, $modelEnvKey, $validated['model']);
         }
 
-        // Clear config cache so new values take effect
-        \Artisan::call('config:clear');
-
         return response()->json([
-            'message'  => 'API key updated successfully.',
+            'message'  => 'API key stored securely.',
             'provider' => $provider,
         ]);
     }
 
     public function getConfig(): JsonResponse
     {
-        $openaiKey = config('agent_system.openai_api_key', '');
-        $geminiKey = config('agent_system.gemini_api_key', '');
+        $openaiKey = $this->credentials->retrieve('OPENAI_API_KEY') ?? '';
+        $geminiKey = $this->credentials->retrieve('GEMINI_API_KEY') ?? '';
 
         return response()->json([
             'openai_configured' => ! empty($openaiKey) && ! str_contains($openaiKey, 'CHANGE_ME'),
@@ -198,31 +212,5 @@ class AgentController extends Controller
             'openai_model'      => config('agent_system.openai_model', 'gpt-4o-mini'),
             'gemini_model'      => config('agent_system.gemini_model', 'gemini-1.5-flash'),
         ]);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Private helpers
-    // ─────────────────────────────────────────────────────────────────────
-
-    private function writeEnvValue(string $key, string $value): void
-    {
-        $envPath = base_path('.env');
-
-        if (! file_exists($envPath)) {
-            return;
-        }
-
-        $content = file_get_contents($envPath);
-
-        // Escape special regex chars in value
-        $safeValue = str_replace(['\\', '/'], ['\\\\', '\\/'], $value);
-
-        if (preg_match("/^{$key}=.*/m", $content)) {
-            $content = preg_replace("/^{$key}=.*/m", "{$key}={$safeValue}", $content);
-        } else {
-            $content .= "\n{$key}={$safeValue}";
-        }
-
-        file_put_contents($envPath, $content);
     }
 }

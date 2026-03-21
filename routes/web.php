@@ -8,7 +8,34 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', fn() => redirect('/dashboard'));
 
 // ── Health ─────────────────────────────────────────────────────────────
-Route::get('/health', fn() => response()->json(['status' => 'healthy', 'timestamp' => now()->toIso8601String()]));
+Route::get('/health', function () {
+    $pendingJobs  = \Illuminate\Support\Facades\DB::table('jobs')->count();
+    $failedJobs   = \Illuminate\Support\Facades\DB::table('failed_jobs')->count();
+
+    // Last job that completed (approximated by most recent agent_task update)
+    $lastActivity = \App\Models\AgentTask::whereIn('status', ['completed', 'failed'])
+        ->latest('updated_at')
+        ->value('updated_at');
+
+    // Queue lag: time since oldest pending job was queued
+    $oldestPending = \Illuminate\Support\Facades\DB::table('jobs')
+        ->orderBy('created_at')
+        ->value('created_at');
+
+    $queueLagSeconds = $oldestPending
+        ? now()->diffInSeconds(\Illuminate\Support\Carbon\Carbon::createFromTimestamp($oldestPending))
+        : 0;
+
+    return response()->json([
+        'status'              => 'healthy',
+        'timestamp'           => now()->toIso8601String(),
+        'queue_pending_jobs'  => $pendingJobs,
+        'queue_failed_jobs'   => $failedJobs,
+        'queue_lag_seconds'   => $queueLagSeconds,
+        'last_task_activity'  => $lastActivity,
+        'worker_healthy'      => $queueLagSeconds < 300, // warn if lag > 5 min
+    ]);
+});
 
 // ── Dashboard pages ────────────────────────────────────────────────────
 Route::prefix('dashboard')->group(function () {

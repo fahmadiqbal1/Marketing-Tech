@@ -7,20 +7,6 @@ use Illuminate\Support\Facades\Log;
 
 class AIRouter
 {
-    private array $modelCosts = [
-        // Per 1M tokens: [input_cost, output_cost]
-        'gpt-4o'                => [2.50,  10.00],
-        'gpt-4o-mini'           => [0.15,   0.60],
-        'gpt-4-turbo'           => [10.00,  30.00],
-        'o1'                    => [15.00,  60.00],
-        'o1-mini'               => [3.00,   12.00],
-        'text-embedding-3-large' => [0.13,  0.00],
-        'text-embedding-3-small' => [0.02,  0.00],
-        'claude-opus-4-5'       => [15.00,  75.00],
-        'claude-sonnet-4-6'     => [3.00,   15.00],
-        'claude-haiku-4-5-20251001' => [0.25, 1.25],
-    ];
-
     private array $fallbackChain = [
         'gpt-4o'          => ['gpt-4o-mini', 'claude-haiku-4-5-20251001'],
         'claude-opus-4-5' => ['claude-sonnet-4-6', 'gpt-4o'],
@@ -28,8 +14,9 @@ class AIRouter
     ];
 
     public function __construct(
-        private readonly OpenAIService    $openai,
-        private readonly AnthropicService $anthropic,
+        private readonly OpenAIService       $openai,
+        private readonly AnthropicService    $anthropic,
+        private readonly CostCalculatorService $costCalc,
     ) {}
 
     /**
@@ -47,8 +34,8 @@ class AIRouter
         $resolvedProvider = $provider === 'auto' ? $this->providerForModel($resolvedModel) : $provider;
 
         return $this->executeWithFallback(
-            fn($m, $p) => $this->callProvider($p, $m, [
-                ['role' => 'user', 'content' => $prompt]
+            fn ($m, $p) => $this->callProvider($p, $m, [
+                ['role' => 'user', 'content' => $prompt],
             ], $system, $maxTokens, $temperature),
             $resolvedModel,
             $resolvedProvider,
@@ -76,7 +63,7 @@ class AIRouter
 
         try {
             $response = $this->executeWithFallback(
-                fn($m, $p) => $this->callProviderChat($p, $m, $messages, $system, $maxTokens, $temperature, $tools),
+                fn ($m, $p) => $this->callProviderChat($p, $m, $messages, $system, $maxTokens, $temperature, $tools),
                 $resolvedModel,
                 $resolvedProvider,
                 $agentRunId,
@@ -85,33 +72,32 @@ class AIRouter
 
             $duration = (int) ((microtime(true) - $startedAt) * 1000);
 
-            // Log successful request
             $this->logRequest(
-                provider:    $resolvedProvider,
-                model:       $resolvedModel,
-                type:        empty($tools) ? 'chat' : 'chat_tools',
-                tokensIn:    $this->extractTokensIn($response),
-                tokensOut:   $this->extractTokensOut($response),
-                durationMs:  $duration,
-                status:      'success',
-                agentRunId:  $agentRunId,
-                workflowId:  $workflowId,
+                provider:   $resolvedProvider,
+                model:      $resolvedModel,
+                type:       empty($tools) ? 'chat' : 'chat_tools',
+                tokensIn:   $this->extractTokensIn($response),
+                tokensOut:  $this->extractTokensOut($response),
+                durationMs: $duration,
+                status:     'success',
+                agentRunId: $agentRunId,
+                workflowId: $workflowId,
             );
 
             return $response;
 
         } catch (\Throwable $e) {
             $this->logRequest(
-                provider:    $resolvedProvider,
-                model:       $resolvedModel,
-                type:        'chat',
-                tokensIn:    0,
-                tokensOut:   0,
-                durationMs:  (int) ((microtime(true) - $startedAt) * 1000),
-                status:      'failed',
-                error:       $e->getMessage(),
-                agentRunId:  $agentRunId,
-                workflowId:  $workflowId,
+                provider:   $resolvedProvider,
+                model:      $resolvedModel,
+                type:       'chat',
+                tokensIn:   0,
+                tokensOut:  0,
+                durationMs: (int) ((microtime(true) - $startedAt) * 1000),
+                status:     'failed',
+                error:      $e->getMessage(),
+                agentRunId: $agentRunId,
+                workflowId: $workflowId,
             );
             throw $e;
         }
@@ -132,7 +118,7 @@ class AIRouter
                 provider:   'openai',
                 model:      $model,
                 type:       'embedding',
-                tokensIn:   is_array($text) ? count($text) * 50 : str_word_count($text) * 2, // estimate
+                tokensIn:   is_array($text) ? count($text) * 50 : str_word_count($text) * 2,
                 tokensOut:  0,
                 durationMs: (int) ((microtime(true) - $startedAt) * 1000),
                 status:     'success',
@@ -146,23 +132,17 @@ class AIRouter
         }
     }
 
-    /**
-     * Get aggregate cost for a workflow.
-     */
     public function getWorkflowCost(string $workflowId): float
     {
         return AiRequest::where('workflow_id', $workflowId)->sum('cost_usd');
     }
 
-    /**
-     * Get today's total spend.
-     */
     public function getTodaySpend(): float
     {
         return AiRequest::whereDate('requested_at', today())->sum('cost_usd');
     }
 
-    // ── Private implementation ────────────────────────────────────
+    // ── Private implementation ────────────────────────────────────────
 
     private function executeWithFallback(
         callable $callFn,
@@ -171,7 +151,7 @@ class AIRouter
         ?string  $agentRunId = null,
         ?string  $workflowId = null,
     ): mixed {
-        $attempts = [$model];
+        $attempts  = [$model];
         $fallbacks = $this->fallbackChain[$model] ?? [];
 
         foreach ($fallbacks as $fb) {
@@ -179,7 +159,6 @@ class AIRouter
                 $attempts[] = $fb;
             }
         }
-        // Add cross-provider fallbacks last
         foreach ($fallbacks as $fb) {
             if (! in_array($fb, $attempts)) {
                 $attempts[] = $fb;
@@ -190,10 +169,9 @@ class AIRouter
 
         foreach ($attempts as $i => $attemptModel) {
             $attemptProvider = $this->providerForModel($attemptModel);
-            $isFallback      = $i > 0;
 
             try {
-                if ($isFallback) {
+                if ($i > 0) {
                     Log::warning("AI Router fallback", ['from' => $model, 'to' => $attemptModel]);
                 }
                 return $callFn($attemptModel, $attemptProvider);
@@ -226,10 +204,7 @@ class AIRouter
 
     private function providerForModel(string $model): string
     {
-        if (str_starts_with($model, 'claude')) {
-            return 'anthropic';
-        }
-        return 'openai';
+        return str_starts_with($model, 'claude') ? 'anthropic' : 'openai';
     }
 
     private function selectModel(string $prompt, string $preference): string
@@ -240,17 +215,9 @@ class AIRouter
         if ($preference === 'openai') {
             return config('agents.openai.default_model', 'gpt-4o');
         }
-        // Auto: use cheaper model for short prompts
-        if (strlen($prompt) < 500) {
-            return 'gpt-4o-mini';
-        }
-        return config('agents.openai.default_model', 'gpt-4o');
-    }
-
-    private function calculateCost(string $model, int $tokensIn, int $tokensOut): float
-    {
-        [$inRate, $outRate] = $this->modelCosts[$model] ?? [1.0, 3.0];
-        return ($tokensIn * $inRate + $tokensOut * $outRate) / 1_000_000;
+        return strlen($prompt) < 500
+            ? 'gpt-4o-mini'
+            : config('agents.openai.default_model', 'gpt-4o');
     }
 
     private function logRequest(
@@ -261,11 +228,9 @@ class AIRouter
         int     $tokensOut,
         int     $durationMs,
         string  $status,
-        ?string $error      = null,
-        ?string $agentRunId = null,
-        ?string $workflowId = null,
-        bool    $usedFallback = false,
-        ?string $fallbackModel = null,
+        ?string $error       = null,
+        ?string $agentRunId  = null,
+        ?string $workflowId  = null,
     ): void {
         try {
             AiRequest::create([
@@ -276,12 +241,12 @@ class AIRouter
                 'request_type'     => $type,
                 'tokens_in'        => $tokensIn,
                 'tokens_out'       => $tokensOut,
-                'cost_usd'         => $this->calculateCost($model, $tokensIn, $tokensOut),
+                'cost_usd'         => $this->costCalc->calculate($provider, $model, $tokensIn, $tokensOut),
                 'duration_ms'      => $durationMs,
                 'status'           => $status,
                 'error_message'    => $error,
-                'used_fallback'    => $usedFallback,
-                'fallback_model'   => $fallbackModel,
+                'used_fallback'    => false,
+                'fallback_model'   => null,
                 'request_metadata' => [],
             ]);
         } catch (\Throwable $e) {

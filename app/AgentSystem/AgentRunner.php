@@ -8,20 +8,38 @@ use App\AgentSystem\Agents\MasterAgent;
 use App\AgentSystem\Gateway\AIGateway;
 use App\AgentSystem\Tools\ToolRegistry;
 use App\Models\AgentTask;
+use App\Services\AI\CostCalculatorService;
+use App\Services\ApiCredentialService;
+use App\Services\MemoryService;
 use Illuminate\Support\Facades\Log;
 
 /**
  * AgentRunner – wires together all dependencies and launches the MasterAgent.
- * Called from the queued job OR directly for synchronous execution.
+ * Called from the queued RunAgentTask job.
  */
 class AgentRunner
 {
+    public function __construct(
+        private readonly ?CostCalculatorService $costCalc          = null,
+        private readonly ?ApiCredentialService  $credentialService = null,
+        private readonly ?MemoryService         $memory            = null,
+    ) {}
+
     public function run(AgentTask $task): void
     {
         Log::info("[AgentRunner] Starting task {$task->id}: {$task->user_input}");
 
         try {
-            $gateway      = new AIGateway($task->ai_provider, model: $task->model ?: null);
+            $gateway = new AIGateway(
+                provider:          $task->ai_provider,
+                model:             $task->model ?: null,
+                costCalc:          $this->costCalc,
+                credentialService: $this->credentialService,
+            );
+
+            // Link all ai_requests logged by this gateway to this task
+            $gateway->setContext($task->id);
+
             $toolRegistry = new ToolRegistry($gateway);
             $contentAgent = new ContentAgent($gateway, $toolRegistry);
             $keywordAgent = new KeywordAgent($gateway, $toolRegistry);
@@ -32,6 +50,7 @@ class AgentRunner
                 toolRegistry: $toolRegistry,
                 contentAgent: $contentAgent,
                 keywordAgent: $keywordAgent,
+                memory:       $this->memory,
             );
 
             $master->execute();

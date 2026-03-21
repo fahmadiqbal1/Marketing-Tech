@@ -62,9 +62,10 @@ class ToolRegistry
     }
 
     /**
-     * Execute a named tool with given parameters. Returns the tool result array.
+     * Execute a named tool with a per-tool timeout guard.
+     * Prevents a single slow tool from blocking the entire job.
      */
-    public function execute(string $toolName, array $parameters): array
+    public function execute(string $toolName, array $parameters, int $timeoutSeconds = 60): array
     {
         $tool = $this->get($toolName);
 
@@ -76,6 +77,37 @@ class ToolRegistry
             ];
         }
 
+        // PCNTL alarm-based timeout (Linux / queue workers only)
+        if (function_exists('pcntl_signal') && function_exists('pcntl_alarm')) {
+            $timedOut = false;
+
+            pcntl_signal(SIGALRM, function () use (&$timedOut) {
+                $timedOut = true;
+            });
+            pcntl_alarm($timeoutSeconds);
+
+            try {
+                $result = $tool->execute($parameters);
+            } catch (\Throwable $e) {
+                pcntl_alarm(0);
+                throw $e;
+            }
+
+            pcntl_alarm(0);
+            pcntl_signal(SIGALRM, SIG_DFL);
+
+            if ($timedOut) {
+                return [
+                    'success' => false,
+                    'data'    => null,
+                    'error'   => "Tool '{$toolName}' timed out after {$timeoutSeconds}s.",
+                ];
+            }
+
+            return $result;
+        }
+
+        // Fallback (no PCNTL): execute without timeout guard
         return $tool->execute($parameters);
     }
 }
