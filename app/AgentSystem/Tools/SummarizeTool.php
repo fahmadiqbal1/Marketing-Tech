@@ -41,21 +41,27 @@ class SummarizeTool implements ToolInterface
 
         $systemPrompt = <<<PROMPT
 You are a senior marketing strategist. Create a comprehensive, professional marketing plan.
-Always respond with valid JSON in this exact structure:
+Always respond with valid JSON in this exact structure (Marketing OS canonical format):
 {
-  "title": "string",
-  "executive_summary": "string",
+  "strategy": "2-3 sentence executive strategy summary",
+  "content": [
+    {"channel": "string", "content_type": "string", "frequency": "string", "sample_content": "string", "variations": {}}
+  ],
+  "media": [
+    {"type": "image|video|creative", "brief": "string", "platform": "string"}
+  ],
+  "recommendations": [
+    {"priority": "high|medium|low", "action": "string", "timeline": "string", "expected_impact": "string"}
+  ],
+  "ads": null,
   "target_audience": "string",
   "recommended_channels": ["string"],
   "key_messages": ["string"],
-  "content_plan": [
-    {"channel": "string", "content_type": "string", "frequency": "string", "sample_content": "string"}
-  ],
   "keywords_strategy": {"primary": ["string"], "secondary": ["string"]},
   "kpis": [{"metric": "string", "target": "string"}],
-  "action_items": [{"priority": "high|medium|low", "action": "string", "timeline": "string"}],
   "budget_recommendations": "string"
 }
+Note: "ads" should remain null unless paid advertising was explicitly part of the task.
 PROMPT;
 
         $userPrompt = <<<PROMPT

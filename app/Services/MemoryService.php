@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Log;
 class MemoryService
 {
     private const MAX_ENTRIES    = 10;
-    private const MAX_VALUE_LEN  = 500;
+    private const MAX_VALUE_LEN  = 300;
 
     /**
      * Store a memory entry for a task.
