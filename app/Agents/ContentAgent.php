@@ -239,18 +239,29 @@ PROMPT;
             $parsed = json_decode(trim($raw), true);
 
             if (is_array($parsed) && isset($parsed['A'], $parsed['B'], $parsed['C'])) {
-                // Store all three variations
+                // Store all three variations (with deduplication by content hash)
                 foreach (['A', 'B', 'C'] as $label) {
-                    $v = $parsed[$label];
+                    $v       = $parsed[$label];
+                    $content = $v['content'] ?? '';
+
+                    // Skip storing if identical content already saved for this job
+                    $hash   = md5(substr($content, 0, 200));
+                    $exists = \App\Models\ContentVariation::where('agent_job_id', $job->id)
+                        ->whereRaw("md5(substr(content, 1, 200)) = ?", [$hash])
+                        ->exists();
+                    if ($exists) {
+                        continue;
+                    }
+
                     $this->iterationEngine->storeVariation(
                         agentJobId: $job->id,
                         label:      $label,
-                        content:    $v['content'] ?? '',
+                        content:    $content,
                         metadata:   [
                             'tone'       => $v['tone']       ?? null,
                             'hook_type'  => $v['hook_type']  ?? null,
                             'structure'  => $v['structure']  ?? null,
-                            'word_count' => str_word_count($v['content'] ?? ''),
+                            'word_count' => str_word_count($content),
                         ],
                     );
                 }

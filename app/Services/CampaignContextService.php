@@ -51,7 +51,7 @@ class CampaignContextService
         $jobs = AgentJob::where('campaign_id', $campaignId)
             ->whereIn('status', ['completed', 'running'])
             ->orderBy('created_at')
-            ->limit(10)
+            ->limit(5)
             ->get(['id', 'agent_type', 'instruction', 'result', 'steps_taken', 'created_at']);
 
         if ($jobs->isEmpty()) {

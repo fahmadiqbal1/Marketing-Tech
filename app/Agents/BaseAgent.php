@@ -248,11 +248,17 @@ abstract class BaseAgent
             if ($result !== null) {
                 $outputType = $this->inferOutputType();
                 try {
+                    // Link to any prior output from a previous attempt (version lineage)
+                    $parentOutputId = \App\Models\GeneratedOutput::where('agent_job_id', $job->id)
+                        ->orderByDesc('created_at')
+                        ->value('id');
+
                     $this->iterationEngine->storeOutput(
-                        agentJobId: $job->id,
-                        content:    $result,
-                        type:       $outputType,
-                        metadata:   ['agent_type' => $this->agentType, 'steps' => $stepCount],
+                        agentJobId:     $job->id,
+                        content:        $result,
+                        type:           $outputType,
+                        metadata:       ['agent_type' => $this->agentType, 'steps' => $stepCount],
+                        parentOutputId: $parentOutputId,
                     );
                 } catch (\Throwable $e) {
                     Log::warning('Failed to store generated output', ['trace_id' => $traceId, 'error' => $e->getMessage()]);
@@ -314,8 +320,20 @@ abstract class BaseAgent
      */
     private function executeToolWithReliability(string $name, array $args, AgentJob $job): array
     {
-        $attempt = 0;
+        $attempt   = 0;
         $lastError = null;
+
+        // Check historical reliability; double backoff for unreliable tools
+        $reliability  = $this->iterationEngine->getToolReliability($name);
+        $extraBackoff = ($reliability > 0.0 && $reliability < 0.6);
+
+        if ($extraBackoff) {
+            Log::warning('Low-reliability tool selected', [
+                'tool'        => $name,
+                'reliability' => $reliability,
+                'job_id'      => $job->id,
+            ]);
+        }
 
         while ($attempt <= $this->toolMaxRetries) {
             $attempt++;
@@ -339,7 +357,11 @@ abstract class BaseAgent
                 ]);
 
                 if ($attempt <= $this->toolMaxRetries) {
-                    usleep(500_000 * $attempt); // 0.5s, 1s backoff
+                    $backoffUs = 500_000 * $attempt; // 0.5s, 1s base backoff
+                    if ($extraBackoff) {
+                        $backoffUs *= 2; // Double for unreliable tools
+                    }
+                    usleep($backoffUs);
                 }
             }
         }
@@ -421,29 +443,62 @@ abstract class BaseAgent
         if (! empty($usedChunks)) {
             $contextText = "Relevant knowledge from the knowledge base:\n\n";
             foreach ($usedChunks as $item) {
-                $contextText .= "- {$item['content']}\n";
+                // Sanitize RAG content to prevent prompt injection
+                $sanitized    = $this->iterationEngine->sanitizeForPrompt($item['content'] ?? '');
+                $contextText .= "- {$sanitized}\n";
             }
             $messages[] = ['role' => 'user',      'content' => $contextText];
             $messages[] = ['role' => 'assistant',  'content' => 'I have reviewed the relevant knowledge context and will use it to inform my response.'];
         }
 
-        // ── 2. Iteration engine: inject high-performing patterns ──────────
+        // ── 2. Iteration engine: inject high-performing patterns (per-agent) ──
         $patterns = $this->iterationEngine->getPromptContext($this->agentType);
         if (! empty($patterns)) {
             $messages[] = ['role' => 'user',      'content' => $patterns];
             $messages[] = ['role' => 'assistant',  'content' => 'I will apply these proven high-performing patterns to maximise effectiveness.'];
         }
 
-        // ── 3. Campaign context: inject prior campaign work ───────────────
+        // ── 3. Global cross-agent patterns ────────────────────────────────
+        $globalPatterns = $this->iterationEngine->getGlobalPatterns();
+        if (! empty($globalPatterns)) {
+            $messages[] = ['role' => 'user',      'content' => $globalPatterns];
+            $messages[] = ['role' => 'assistant',  'content' => 'I have noted these global high-performing patterns and will incorporate them.'];
+        }
+
+        // ── 4. Campaign context: inject prior campaign work ───────────────
         if (! empty($job->campaign_id)) {
-            $campaignCtx = $this->campaignContext->getCampaignContext($job->campaign_id);
-            if (! empty($campaignCtx)) {
-                $messages[] = ['role' => 'user',      'content' => $campaignCtx];
-                $messages[] = ['role' => 'assistant',  'content' => 'I have reviewed the campaign history and will ensure continuity with prior work.'];
+            $rawCampaignCtx = $this->campaignContext->getCampaignContext($job->campaign_id);
+            if (! empty($rawCampaignCtx)) {
+                // Sanitize campaign context to prevent prompt injection
+                $campaignCtx = $this->iterationEngine->sanitizeForPrompt($rawCampaignCtx, 3000);
+                $messages[]  = ['role' => 'user',      'content' => $campaignCtx];
+                $messages[]  = ['role' => 'assistant',  'content' => 'I have reviewed the campaign history and will ensure continuity with prior work.'];
             }
         }
 
-        // ── 4. The actual instruction ─────────────────────────────────────
+        // ── 5. Failure context (retry awareness — max 3 most recent failures) ──
+        $failedSteps = \App\Models\AgentStep::where('agent_job_id', $job->id)
+            ->where(function ($q) {
+                $q->where('tool_success', false)->orWhere('status', 'failed');
+            })
+            ->orderByDesc('created_at')
+            ->limit(3)
+            ->get();
+
+        if ($failedSteps->isNotEmpty()) {
+            $failureLines = [];
+            foreach ($failedSteps as $step) {
+                $errorText      = $step->tool_error ?? $step->thought ?? 'Unknown error';
+                $sanitizedError = $this->iterationEngine->sanitizeForPrompt($errorText, 300);
+                $failureLines[] = "- Tool/Step '{$step->action}' failed: {$sanitizedError}";
+            }
+            $failureContext = "[PREVIOUS ATTEMPT FAILURES — avoid repeating these mistakes]\n"
+                . implode("\n", $failureLines);
+            $messages[] = ['role' => 'user',      'content' => $failureContext];
+            $messages[] = ['role' => 'assistant',  'content' => 'I understand these previous failures and will avoid repeating the same mistakes.'];
+        }
+
+        // ── 6. The actual instruction ─────────────────────────────────────
         $messages[] = ['role' => 'user', 'content' => $job->instruction];
 
         return [$messages, $knowledgeScores];

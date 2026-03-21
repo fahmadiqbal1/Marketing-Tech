@@ -6,10 +6,12 @@ use App\Jobs\RunAgentJob;
 use App\Models\AgentJob;
 use App\Models\AgentStep;
 use App\Models\ContentVariation;
+use App\Models\GeneratedOutput;
 use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 /**
  * PipelineActionController — actionable endpoints for pipeline management.
@@ -149,5 +151,98 @@ class PipelineActionController extends Controller
             'history'      => $this->campaignContext->getCampaignHistory($id),
             'best_assets'  => $this->campaignContext->getBestPerformingAssets($id),
         ]);
+    }
+
+    // ── Winner Promotion ──────────────────────────────────────────────
+
+    /**
+     * POST /dashboard/api/pipeline/jobs/{id}/promote-winner
+     *
+     * Manually promote the best-scoring variation as winner for a job,
+     * bypassing the statistical minimum threshold (explicit override).
+     */
+    public function promoteWinner(string $id): JsonResponse
+    {
+        $job = AgentJob::findOrFail($id);
+
+        $winner = $this->iterationEngine->selectWinnerForJob($job->id, forceSelect: true);
+
+        if ($winner === null) {
+            return response()->json([
+                'message' => 'No variations found for this job.',
+                'job_id'  => $id,
+            ], 422);
+        }
+
+        return response()->json([
+            'message'          => 'Winner promoted.',
+            'job_id'           => $id,
+            'winner_id'        => $winner->id,
+            'variation_label'  => $winner->variation_label,
+            'content_preview'  => Str::limit($winner->content, 200),
+        ]);
+    }
+
+    /**
+     * POST /dashboard/api/pipeline/jobs/{id}/rerun-from-winner
+     *
+     * Create a new AgentJob seeded with the winning content from the given job,
+     * so the next run builds on the best-performing output.
+     */
+    public function rerunFromWinner(string $id): JsonResponse
+    {
+        $job = AgentJob::findOrFail($id);
+
+        // Find winner — prefer ContentVariation winner, fall back to winner GeneratedOutput
+        $winnerContent = null;
+
+        $winnerVariation = ContentVariation::where('agent_job_id', $job->id)
+            ->where('is_winner', true)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($winnerVariation) {
+            $winnerContent = $winnerVariation->content;
+        } else {
+            $winnerOutput = GeneratedOutput::where('agent_job_id', $job->id)
+                ->where('is_winner', true)
+                ->orderByDesc('created_at')
+                ->first();
+            if ($winnerOutput) {
+                $winnerContent = $winnerOutput->content;
+            }
+        }
+
+        if ($winnerContent === null) {
+            return response()->json([
+                'message' => 'No winner found for this job. Run promote-winner first.',
+                'job_id'  => $id,
+            ], 422);
+        }
+
+        $excerpt     = Str::limit($winnerContent, 500);
+        $instruction = $job->instruction
+            . "\n\nBase your response on this winning content:\n"
+            . $excerpt;
+
+        $newJob = AgentJob::create([
+            'agent_type'  => $job->agent_type,
+            'ai_provider' => $job->ai_provider,
+            'model'       => $job->model,
+            'campaign_id' => $job->campaign_id,
+            'chat_id'     => $job->chat_id,
+            'instruction' => $instruction,
+            'status'      => 'pending',
+        ]);
+
+        $queue = config("agents.agents.{$newJob->agent_type}.queue", 'default');
+        RunAgentJob::dispatch($newJob->id)->onQueue($queue);
+
+        return response()->json([
+            'message'    => 'New job created from winner.',
+            'new_job_id' => $newJob->id,
+            'source_job' => $id,
+            'status'     => 'pending',
+        ], 201);
     }
 }

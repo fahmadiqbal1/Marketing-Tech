@@ -93,8 +93,12 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::post('/test-connection',           [DashboardController::class, 'testConnection']);
 
         // Pipeline actions (Phase 4)
-        Route::post('/pipeline/steps/{id}/skip',  [PipelineActionController::class, 'skipStep']);
-        Route::post('/pipeline/jobs/{id}/retry',  [PipelineActionController::class, 'retryJob']);
+        Route::post('/pipeline/steps/{id}/skip',           [PipelineActionController::class, 'skipStep']);
+        Route::post('/pipeline/jobs/{id}/retry',           [PipelineActionController::class, 'retryJob']);
+
+        // Winner promotion & re-run (Phase 5)
+        Route::post('/pipeline/jobs/{id}/promote-winner',  [PipelineActionController::class, 'promoteWinner']);
+        Route::post('/pipeline/jobs/{id}/rerun-from-winner', [PipelineActionController::class, 'rerunFromWinner']);
 
         // Variations & performance
         Route::get('/variations/{jobId}',         [PipelineActionController::class, 'listVariations']);
