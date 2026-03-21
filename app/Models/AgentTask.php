@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class AgentTask extends Model
 {
     protected $fillable = [
+        'campaign_id',
         'user_input',
         'status',
         'current_step',

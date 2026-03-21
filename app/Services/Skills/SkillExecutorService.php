@@ -68,22 +68,52 @@ class SkillExecutorService
     /**
      * Register all skill classes from the registry into the database.
      * Run this on deploy to sync code with DB.
+     *
+     * Governance rules enforced here (Stage 9):
+     *   - Skill names must be snake_case or kebab-case
+     *   - Skill names must NOT contain platform-specific keywords
+     *   - If a name clash exists with a different class, it is skipped (not overwritten)
      */
     public function syncRegistry(): void
     {
         $skillClasses = config('skills.registered', []);
+        $synced = 0;
+        $skipped = 0;
 
         foreach ($skillClasses as $class) {
             if (! class_exists($class)) {
                 Log::warning("Skill class not found", ['class' => $class]);
+                $skipped++;
                 continue;
             }
 
             /** @var SkillInterface $instance */
             $instance = app($class);
+            $name     = $instance->getName();
+
+            // ── Governance: validate name ──────────────────────────────
+            try {
+                $this->validateSkillName($name);
+            } catch (\InvalidArgumentException $e) {
+                Log::warning("Skill rejected by governance", ['name' => $name, 'class' => $class, 'reason' => $e->getMessage()]);
+                $skipped++;
+                continue;
+            }
+
+            // ── Governance: no class hijacking ─────────────────────────
+            $existing = SkillRegistry::where('name', $name)->first();
+            if ($existing && $existing->class !== $class) {
+                Log::warning("Skill name clash — skipping to prevent overwrite", [
+                    'name'          => $name,
+                    'existing_class'=> $existing->class,
+                    'new_class'     => $class,
+                ]);
+                $skipped++;
+                continue;
+            }
 
             SkillRegistry::updateOrCreate(
-                ['name' => $instance->getName()],
+                ['name' => $name],
                 [
                     'class'          => $class,
                     'description'    => $instance->getDescription(),
@@ -91,9 +121,38 @@ class SkillExecutorService
                     'is_active'      => true,
                 ]
             );
+
+            $synced++;
         }
 
-        Log::info("Skills registry synced", ['count' => count($skillClasses)]);
+        Log::info("Skills registry synced", ['synced' => $synced, 'skipped' => $skipped]);
+    }
+
+    /**
+     * Validate that a skill name is platform-agnostic and properly formatted.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function validateSkillName(string $name): void
+    {
+        $platformKeywords = [
+            'instagram', 'linkedin', 'tiktok', 'twitter', 'facebook',
+            'youtube', 'pinterest', 'snapchat', 'google', 'meta',
+        ];
+
+        foreach ($platformKeywords as $keyword) {
+            if (str_contains(strtolower($name), $keyword)) {
+                throw new \InvalidArgumentException(
+                    "Skill name '{$name}' contains platform-specific keyword '{$keyword}'. Use platform-agnostic names (e.g. 'creative-content' not 'instagram-creative')."
+                );
+            }
+        }
+
+        if (! preg_match('/^[a-z][a-z0-9_-]*$/', $name)) {
+            throw new \InvalidArgumentException(
+                "Skill name '{$name}' must be lowercase snake_case or kebab-case (e.g. 'my-skill' or 'my_skill')."
+            );
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────
