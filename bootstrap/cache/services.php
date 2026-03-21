@@ -29,6 +29,7 @@
     25 => 'Carbon\\Laravel\\ServiceProvider',
     26 => 'Termwind\\Laravel\\TermwindServiceProvider',
     27 => 'App\\Providers\\AgentSystemServiceProvider',
+    28 => 'App\\Providers\\HorizonServiceProvider',
   ),
   'eager' => 
   array (
@@ -47,6 +48,7 @@
     12 => 'Carbon\\Laravel\\ServiceProvider',
     13 => 'Termwind\\Laravel\\TermwindServiceProvider',
     14 => 'App\\Providers\\AgentSystemServiceProvider',
+    15 => 'App\\Providers\\HorizonServiceProvider',
   ),
   'deferred' => 
   array (
