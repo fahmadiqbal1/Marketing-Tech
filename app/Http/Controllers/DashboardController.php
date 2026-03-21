@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AgentJob;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
 use App\Models\KnowledgeBase;
@@ -133,16 +134,22 @@ class DashboardController extends Controller
         // Group steps by agent name
         $stepsByAgent = collect($recentSteps)->groupBy('agent_name');
 
-        // Running job counts per queue
-        $runningByQueue = AgentTask::where('status', 'running')
-            ->get(['ai_provider', 'model', 'status'])
-            ->count();
+        // Running job counts — check both legacy AgentTask and modern AgentJob
+        $runningLegacy = AgentTask::where('status', 'running')->count();
+        $runningModern = AgentJob::where('status', 'running')->count();
+        $totalRunning  = $runningLegacy + $runningModern;
+
+        // Per-agent running counts from modern system (agent_type matches config key)
+        $runningPerAgent = AgentJob::where('status', 'running')
+            ->selectRaw('agent_type, count(*) as cnt')
+            ->groupBy('agent_type')
+            ->pluck('cnt', 'agent_type');
 
         $agents = [];
         foreach ($agentDefs as $name => $def) {
-            $promptKey     = 'AGENT_' . strtoupper($name) . '_PROMPT';
-            $customPrompt  = $this->credentials->retrieve($promptKey);
-            $agents[]      = [
+            $promptKey    = 'AGENT_' . strtoupper($name) . '_PROMPT';
+            $customPrompt = $this->credentials->retrieve($promptKey);
+            $agents[]     = [
                 'name'          => $name,
                 'provider'      => $def['provider'] ?? 'openai',
                 'model'         => $def['model'] ?? 'gpt-4o',
@@ -151,13 +158,13 @@ class DashboardController extends Controller
                 'tools'         => $def['tools'] ?? [],
                 'system_prompt' => $customPrompt ?? ($def['system_prompt'] ?? ''),
                 'recent_steps'  => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
-                'active_jobs'   => AgentTask::where('status', 'running')->count(),
+                'active_jobs'   => (int) ($runningPerAgent[$name] ?? 0),
             ];
         }
 
         return response()->json([
-            'agents'           => $agents,
-            'total_running'    => $runningByQueue,
+            'agents'            => $agents,
+            'total_running'     => $totalRunning,
             'total_steps_today' => AgentStep::whereDate('created_at', today())->count(),
         ]);
     }

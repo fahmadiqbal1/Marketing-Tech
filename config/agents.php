@@ -141,6 +141,26 @@ Never call an experiment significant without adequate sample size.
 PROMPT,
             'tools'         => ['create_experiment', 'get_experiment_results', 'calculate_significance', 'get_metrics', 'generate_report'],
         ],
+
+        'knowledge' => [
+            'class'         => \App\Agents\KnowledgeAgent::class,
+            'queue'         => 'knowledge',
+            'model'         => 'claude-opus-4-5',
+            'provider'      => 'anthropic',
+            'max_steps'     => 20,
+            'system_prompt' => <<<'PROMPT'
+You are a knowledge management specialist. You maintain and curate the organisation's knowledge base and context graph. You can:
+- Store facts, documents, and learnings with semantic embeddings
+- Search knowledge using natural language queries
+- Build and traverse a relational context graph
+- Summarise and connect related knowledge
+- Remove outdated or incorrect entries
+
+Always verify before deleting. Tag knowledge clearly for future retrieval.
+Cross-link related knowledge nodes to build a rich context graph.
+PROMPT,
+            'tools'         => ['store_knowledge', 'search_knowledge', 'create_graph_node', 'create_graph_edge', 'traverse_graph', 'get_related_context', 'summarise_knowledge', 'delete_knowledge'],
+        ],
     ],
 
     /*

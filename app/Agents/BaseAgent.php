@@ -3,8 +3,10 @@
 namespace App\Agents;
 
 use App\Models\AgentJob;
+use App\Models\AgentStep;
 use App\Services\AI\OpenAIService;
 use App\Services\AI\AnthropicService;
+use App\Services\AI\GeminiService;
 use App\Services\Telegram\TelegramBotService;
 use App\Services\Knowledge\VectorStoreService;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +24,7 @@ abstract class BaseAgent
     public function __construct(
         protected readonly OpenAIService    $openai,
         protected readonly AnthropicService $anthropic,
+        protected readonly GeminiService    $gemini,
         protected readonly TelegramBotService $telegram,
         protected readonly VectorStoreService $knowledge,
     ) {
@@ -51,8 +54,11 @@ abstract class BaseAgent
 
                 Log::debug("Agent step {$stepCount}", ['job_id' => $job->id, 'agent' => $this->agentType]);
 
-                // Call AI model
-                $response = $this->callAI($messages, $this->getToolDefinitions());
+                // Call AI model — track latency
+                $aiStart   = (int) round(microtime(true) * 1000);
+                $response  = $this->callAI($messages, $this->getToolDefinitions());
+                $aiLatency = (int) round(microtime(true) * 1000) - $aiStart;
+                $tokensUsed = $this->extractTokensUsed($response);
 
                 // Check for tool calls
                 $toolCalls = $this->extractToolCalls($response);
@@ -60,6 +66,9 @@ abstract class BaseAgent
                 if (empty($toolCalls)) {
                     // No tool calls — extract final text response
                     $result = $this->extractText($response);
+
+                    // Record final step in pipeline
+                    $this->recordStep($job, $stepCount, 'finish', null, [], $result, $tokensUsed, $aiLatency);
                     break;
                 }
 
@@ -68,17 +77,25 @@ abstract class BaseAgent
                 $toolResults = [];
 
                 foreach ($toolCalls as $toolCall) {
+                    $toolStart = (int) round(microtime(true) * 1000);
+
                     $toolResult = $this->executeTool(
                         name:     $toolCall['name'],
                         args:     $toolCall['arguments'],
                         job:      $job,
                     );
 
+                    $toolLatency = (int) round(microtime(true) * 1000) - $toolStart;
+                    $resultStr   = is_string($toolResult) ? $toolResult : json_encode($toolResult);
+
                     $toolResults[] = [
                         'tool_call_id' => $toolCall['id'],
                         'name'         => $toolCall['name'],
-                        'content'      => is_string($toolResult) ? $toolResult : json_encode($toolResult),
+                        'content'      => $resultStr,
                     ];
+
+                    // Record this step in agent_steps for the pipeline dashboard
+                    $this->recordStep($job, $stepCount, $toolCall['name'], null, $toolCall['arguments'], $resultStr, $tokensUsed, $aiLatency + $toolLatency);
 
                     Log::debug("Tool executed", [
                         'tool'    => $toolCall['name'],
@@ -154,6 +171,13 @@ abstract class BaseAgent
                 systemPrompt: $this->systemPrompt,
                 tools:        $this->convertToolsForAnthropic($tools),
                 maxTokens:    config('agents.anthropic.max_tokens', 8192),
+            ),
+            'gemini' => $this->gemini->chat(
+                messages:     $messages,
+                model:        $this->model,
+                systemPrompt: $this->systemPrompt,
+                tools:        $tools,
+                maxTokens:    config('agents.openai.max_tokens', 4096),
             ),
             default => $this->openai->chat(
                 messages:     $messages,
@@ -268,6 +292,51 @@ abstract class BaseAgent
     }
 
     // ─── Helpers ──────────────────────────────────────────────────
+
+    /**
+     * Write a step record to agent_steps so the pipeline dashboard can display it.
+     */
+    private function recordStep(
+        AgentJob $job,
+        int      $stepNumber,
+        string   $action,
+        ?string  $thought,
+        array    $parameters,
+        mixed    $result,
+        int      $tokensUsed,
+        int      $latencyMs,
+    ): void {
+        try {
+            AgentStep::create([
+                'task_id'     => null,
+                'agent_job_id'=> $job->id,
+                'step_number' => $stepNumber,
+                'agent_name'  => $this->agentType,
+                'action'      => $action,
+                'thought'     => $thought,
+                'parameters'  => $parameters,
+                'result'      => is_string($result) ? ['output' => $result] : (array) $result,
+                'status'      => 'completed',
+                'tokens_used' => $tokensUsed,
+                'latency_ms'  => $latencyMs,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to record agent step', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Extract total tokens used from an AI response (works for OpenAI and Gemini responses).
+     */
+    private function extractTokensUsed(array $response): int
+    {
+        // Anthropic format
+        if (isset($response['usage']['input_tokens'])) {
+            return ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0);
+        }
+        // OpenAI / Gemini-normalized format
+        return $response['usage']['total_tokens'] ?? 0;
+    }
 
     protected function notifyUser(AgentJob $job, string $message): void
     {

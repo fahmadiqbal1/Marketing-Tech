@@ -259,23 +259,28 @@ function settingsApp() {
 
         async init() {
             try {
-                const r = await fetch('/agent/config');
-                this.config = await r.json();
-            } catch(e) {}
+                const d = await apiGet('/agent/config');
+                this.config = d;
+            } catch(e) {
+                console.warn('Could not load agent config:', e.message);
+            }
 
             try {
-                const r = await fetch('/dashboard/api/pipeline');
-                const d = await r.json();
+                const d = await apiGet('/dashboard/api/pipeline');
                 this.agents = (d.agents || []).map(a => ({
                     name: a.name, provider: a.provider, model: a.model,
                     queue: a.queue, max_steps: a.max_steps,
                 }));
-            } catch(e) {}
+            } catch(e) {
+                console.warn('Could not load agent list:', e.message);
+            }
 
             try {
                 const d = await apiGet('/dashboard/api/settings');
                 this.sysForm = { ...this.sysForm, ...d };
-            } catch(e) {}
+            } catch(e) {
+                this.sysWarning = 'Could not load system settings: ' + e.message;
+            }
         },
 
         async savePlatform(provider) {
