@@ -38,9 +38,9 @@ return new class extends Migration
             $table->index(['type', 'status']);
         });
 
-        // pgvector embedding column — ivfflat index skipped (requires ≤2000 dims; use HNSW or sequential scan for 3072)
+        // pgvector embedding column — now using 2000 dims for index compatibility
         if (DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
-            DB::statement('ALTER TABLE workflows ADD COLUMN embedding vector(3072)');
+            DB::statement('ALTER TABLE workflows ADD COLUMN embedding vector(2000)');
         }
     }
 
