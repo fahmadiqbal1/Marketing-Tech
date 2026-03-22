@@ -24,12 +24,13 @@ class Candidate extends Model {
     public function jobPosting() { return $this->belongsTo(JobPosting::class, 'applied_job_id'); }
 
     public static function search(array $embedding, ?string $jobId=null, ?string $stage=null, float $minScore=0, int $limit=10) {
-        $vec = '['.implode(',', $embedding).']';
+        $safeFloats = array_map('floatval', $embedding);
+        $vec = '['.implode(',', $safeFloats).']';
         $query = DB::table('candidates')
-            ->selectRaw("*, 1 - (embedding <=> '{$vec}'::vector) as similarity")
+            ->selectRaw("*, 1 - (embedding <=> ?::vector) as similarity", [$vec])
             ->whereNull('deleted_at')
-            ->where(DB::raw("1 - (embedding <=> '{$vec}'::vector)"), '>=', 0.5)
-            ->orderByRaw("embedding <=> '{$vec}'::vector")
+            ->whereRaw("1 - (embedding <=> ?::vector) >= 0.5", [$vec])
+            ->orderByRaw("embedding <=> ?::vector", [$vec])
             ->limit($limit);
         if ($jobId) $query->where('applied_job_id', $jobId);
         if ($stage) $query->where('pipeline_stage', $stage);
