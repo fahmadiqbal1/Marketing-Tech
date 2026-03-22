@@ -25,6 +25,11 @@
 | 14 | frontend | Alpine `x-show` on nested absolute modal inside slide-over requires the parent to be `relative` positioned | 2026-03-22 | Phase 9C |
 | 15 | social | Rate limiter signal: `RuntimeException("RATE_LIMITED:{seconds}")` — catch by prefix in DispatchScheduledPosts, not generic catch | 2026-03-22 | Phase 9B |
 | 16 | git | Local proxy 403 — no GITHUB_TOKEN in environment; all Phase 9 commits are local only until user supplies token | 2026-03-22 | Phase 9 |
+| 17 | social | Twitter + TikTok use PKCE — store code_verifier in session during redirect, retrieve in callback; never skip state check | 2026-03-22 | Phase 9E |
+| 18 | social | Facebook: exchange code→short token→long token→page token (3 steps); store user_access_token in metadata for refresh | 2026-03-22 | Phase 9E |
+| 19 | social | YouTube tokens expire every 3600s — always check isTokenExpired() before publish; refresh_token only returned on first auth (prompt=consent) | 2026-03-22 | Phase 9E |
+| 20 | social | TikTok response wraps in data.{} — use ->json('data') not ->json() directly; publish_id is async, not a final post ID | 2026-03-22 | Phase 9E |
+| 21 | social | SocialPlatformService::driver() now throws InvalidArgumentException for unknown platforms — callers must use platforms() helper to validate | 2026-03-22 | Phase 9E |
 
 ---
 
@@ -48,6 +53,16 @@
 - Added Self-Correction Protocol to root CLAUDE.md
 - Created this MEMORY.md with 12 active lessons seeded from Phase 5–9 knowledge
 - Incorporated 18 improvement points into Phase 9 plan (11 added, 7 deferred to Phase 10)
+
+### 2026-03-22 — Phase 9E (Real Social API Integrations — all 6 platforms)
+- TwitterService: OAuth 2.0 PKCE, tweet + thread, organic_metrics, refresh_token grant
+- LinkedInService: ugcPosts, image/article support, org share statistics, 60-day tokens
+- FacebookService: 3-step token exchange (short→long→page), post_insights, fb_exchange_token refresh
+- TikTokService: PKCE, PULL_FROM_URL video init + PHOTO_STORY, video.list metrics, async publish_id
+- YouTubeService: Google OAuth (prompt=consent), resumable upload, #Shorts, 1h token expiry
+- StubPlatformService deleted — no simulations anywhere in the pipeline
+- social.blade.php: all 6 platforms use Connect via OAuth (no token modal), YouTube added
+- SocialPlatformService factory throws on unknown platform; per-platform rate limits
 
 ### 2026-03-22 — Phase 9B/9C (Social Media Intelligence & Automation)
 - 4 migrations: content_calendar, hashtag_sets, social_accounts, task_type on agent_jobs
