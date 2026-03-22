@@ -437,6 +437,23 @@ class DashboardController extends Controller
                     $message = "Connected. {$modelCount} models available.";
                     break;
 
+                case 'telegram':
+                    $token = $this->credentials->retrieve('TELEGRAM_BOT_TOKEN') ?? '';
+                    if (empty($token) || str_contains($token, 'CHANGE_ME')) {
+                        throw new \RuntimeException('Telegram bot token is not configured.');
+                    }
+                    $response = Http::timeout(10)
+                        ->get("https://api.telegram.org/bot{$token}/getMe");
+                    if ($response->failed()) {
+                        throw new \RuntimeException('Telegram responded with HTTP ' . $response->status());
+                    }
+                    if (! ($response->json('ok') ?? false)) {
+                        throw new \RuntimeException('Telegram error: ' . ($response->json('description') ?? 'Unknown'));
+                    }
+                    $botName = $response->json('result.username') ?? 'unknown';
+                    $message = "Connected. Bot: @{$botName}.";
+                    break;
+
                 default:
                     // Custom platform
                     $platform = CustomAiPlatform::where('name', $provider)->where('is_active', true)->first();

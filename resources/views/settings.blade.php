@@ -321,12 +321,22 @@
                     class="px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50">
                 <span x-text="saving.system ? 'Saving...' : 'Save Telegram Config'"></span>
             </button>
+            <button @click="testConnection('telegram')" :disabled="testing.telegram"
+                    class="px-3 py-2 border border-brand-500/40 text-brand-400 text-sm rounded-lg hover:bg-brand-500/10 transition disabled:opacity-50"
+                    title="Test Telegram bot token">
+                <span x-show="!testing.telegram">⚡ Test</span>
+                <span x-show="testing.telegram" class="inline-block animate-spin">↻</span>
+            </button>
             <button @click="registerWebhook()" :disabled="saving.webhook"
                     class="px-4 py-2 border border-slate-600 hover:border-slate-500 text-slate-300 text-sm font-medium rounded-lg transition disabled:opacity-50">
                 <span x-text="saving.webhook ? 'Registering...' : 'Register Webhook'"></span>
             </button>
         </div>
         <p x-show="webhookResult" class="mt-2 text-xs text-slate-400" x-text="webhookResult"></p>
+        <div x-show="testResult.telegram" class="text-xs rounded-lg px-3 py-2 mt-2"
+             :class="testResult.telegram?.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'">
+            <span x-text="(testResult.telegram?.success ? '✓ ' : '✗ ') + (testResult.telegram?.message || '') + (testResult.telegram?.latency_ms ? ' (' + testResult.telegram.latency_ms + 'ms)' : '')"></span>
+        </div>
     </div>
 
     {{-- ── System / Application Settings ──────────────────────────── --}}
@@ -383,8 +393,8 @@ function settingsApp() {
             DB_CONNECTION: '', DB_HOST: '', DB_PORT: '', DB_DATABASE: '',
         },
         saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false, customPlatform: false },
-        testing:    { openai: false, anthropic: false, gemini: false },
-        testResult: { openai: null, anthropic: null, gemini: null },
+        testing:    { openai: false, anthropic: false, gemini: false, telegram: false },
+        testResult: { openai: null, anthropic: null, gemini: null, telegram: null },
         toast: { show: false, message: '', error: false },
         webhookResult: '',
         sysWarning: '',
@@ -420,6 +430,14 @@ function settingsApp() {
             }
 
             await this.loadCustomPlatforms();
+
+            // Auto-test configured providers so status badges reflect reality
+            const autoTest = [];
+            if (this.config.openai_configured)    autoTest.push('openai');
+            if (this.config.anthropic_configured)  autoTest.push('anthropic');
+            if (this.config.gemini_configured)     autoTest.push('gemini');
+            if (this.sysForm.TELEGRAM_BOT_TOKEN && !this.sysForm.TELEGRAM_BOT_TOKEN.includes('*')) autoTest.push('telegram');
+            for (const p of autoTest) { this.testConnection(p); }
         },
 
         async loadCustomPlatforms() {
