@@ -221,6 +221,9 @@ class DashboardStatsService
             if (! empty($filters['status'])) {
                 $query->where('status', $filters['status']);
             }
+            if (! empty($filters['search'])) {
+                $query->where('title', 'ilike', '%' . $filters['search'] . '%');
+            }
 
             return $query->paginate($perPage, [
                 'id', 'title', 'type', 'platform', 'status',

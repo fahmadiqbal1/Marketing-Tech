@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
+use App\Models\ContentItem;
 use App\Models\CustomAiPlatform;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
@@ -112,8 +113,18 @@ class DashboardController extends Controller
 
     public function apiContent(Request $request): JsonResponse
     {
-        $items = $this->stats->getContent($request->only(['type', 'status']));
+        $items = $this->stats->getContent($request->only(['type', 'status', 'search']));
         return response()->json($items);
+    }
+
+    public function apiContentDetail(string $id): JsonResponse
+    {
+        try {
+            $item = ContentItem::findOrFail($id);
+            return response()->json(['item' => $item]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
     }
 
     // ── API: System Events ────────────────────────────────────────────

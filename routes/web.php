@@ -76,6 +76,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::get('/campaigns',                  [DashboardController::class, 'apiCampaigns']);
         Route::get('/candidates',                 [DashboardController::class, 'apiCandidates']);
         Route::get('/content',                    [DashboardController::class, 'apiContent']);
+        Route::get('/content/{id}',               [DashboardController::class, 'apiContentDetail']);
         Route::get('/system-events',              [DashboardController::class, 'apiSystemEvents']);
         Route::get('/ai-costs',                   [DashboardController::class, 'apiAiCosts']);
 
