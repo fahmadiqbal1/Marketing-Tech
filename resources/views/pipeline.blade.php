@@ -265,7 +265,7 @@
                             <td class="py-2 pr-3 text-slate-500 text-xs" x-text="step.latency_ms ? step.latency_ms + 'ms' : '—'"></td>
                             <td class="py-2 pr-3 text-xs">
                                 <template x-if="step.knowledge_chunks_used && step.knowledge_chunks_used.length > 0">
-                                    <span class="badge bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                                    <span class="badge bg-violet-500/20 text-violet-400 border border-violet-500/30"
                                           :title="'Chunks: ' + (step.knowledge_chunks_used || []).join(', ')"
                                           x-text="step.knowledge_chunks_used.length + ' chunk' + (step.knowledge_chunks_used.length > 1 ? 's' : '') + (avgScore(step.knowledge_scores) ? ' @ ' + avgScore(step.knowledge_scores) : '')"></span>
                                 </template>
