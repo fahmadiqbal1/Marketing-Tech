@@ -7,6 +7,30 @@
     <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
     <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
+    {{-- ── Approval Confirmation Modal ──────────────────────────── --}}
+    <div x-show="confirmApprovalId" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+         @keydown.escape.window="confirmApprovalId = null">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4"
+             @click.stop>
+            <h3 class="text-base font-semibold text-white mb-2">Approve workflow?</h3>
+            <p class="text-sm text-slate-400 mb-5">
+                This will mark <span class="text-white font-medium" x-text="'&ldquo;' + confirmApprovalName + '&rdquo;'"></span>
+                as approved and allow it to continue execution.
+            </p>
+            <div class="flex justify-end gap-3">
+                <button @click="confirmApprovalId = null"
+                    class="px-4 py-2 text-sm rounded-lg border border-slate-600 text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                    Cancel
+                </button>
+                <button @click="confirmApprove()"
+                    class="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors font-medium">
+                    Approve
+                </button>
+            </div>
+        </div>
+    </div>
+
     {{-- ── Filters ──────────────────────────────────────────────── --}}
     <div class="flex flex-wrap items-center gap-3 mb-5">
         <div class="flex bg-slate-800/60 border border-slate-700/50 rounded-lg p-1 gap-0.5">
@@ -90,7 +114,7 @@
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-1.5" @click.stop>
                                     <template x-if="wf.status === 'owner_approval'">
-                                        <button @click="approve(wf.id)"
+                                        <button @click="confirmApprovalId = wf.id; confirmApprovalName = wf.name"
                                             class="px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 border border-emerald-500/30 transition-colors">
                                             Approve
                                         </button>
@@ -187,6 +211,7 @@ function workflowsApp() {
         loading: false, total: 0, page: 1, lastPage: 1,
         expanded: null, detail: null, detailLoading: false,
         counts: {},
+        confirmApprovalId: null, confirmApprovalName: '',
         statuses: [
             { label: 'All', value: '' },
             { label: 'Active', value: 'intake' },
@@ -228,7 +253,10 @@ function workflowsApp() {
             this.detailLoading = false;
         },
 
-        async approve(id) {
+        async confirmApprove() {
+            const id = this.confirmApprovalId;
+            this.confirmApprovalId = null;
+            this.confirmApprovalName = '';
             await apiPost('/dashboard/api/workflows/' + id + '/approve');
             this.load();
         },
