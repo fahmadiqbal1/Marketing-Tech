@@ -119,6 +119,33 @@ When editing Blade templates, Alpine.js, or Tailwind classes:
 - Amber warnings for missing data (`bg-amber-500/20 text-amber-400`)
 - Test Alpine.js `x-show` and `x-for` in browser devtools (not just PHP rendering)
 
+### 11. DashboardStatsService — pagination hybrid pattern
+When a service method needs BOTH paginated data AND summary aggregates (e.g. `getJobs`, `getCandidates`):
+- Use `rescueArray` (not `rescuePaginated`) so you can return extra keys alongside pagination
+- Call `$query->paginate($perPage)` inside the callback, then `array_merge($paginator->toArray(), [...])`
+- Compute global counts in separate unfiltered queries so filter cards always show totals
+- Fallback array must include `data: [], current_page: 1, last_page: 1, total: 0`
+
+### 12. Candidate::search() SQL injection — already fixed
+`Candidate::search()` had the same `'{$vec}'::vector` interpolation bug as `KnowledgeBase::semanticSearch()`.
+Fixed in commit 5e038fa — uses `array_map('floatval')` + PDO `?` bindings. Pattern to follow for any new vector queries.
+
+### 13. Controller model imports — always check before adding new endpoints
+Before adding a new controller method that uses a Model directly (e.g. `ContentItem::findOrFail`),
+check if the Model is already imported at the top of the controller. `Candidate` and `ContentItem`
+were missing from `DashboardController`'s use statements and had to be added.
+
+### 14. AgentSkillsSeeder idempotency — now content-hash aware
+The seeder previously skipped any title+category match. It now computes `md5` of first 1000 chars
+and only skips if `content_hash` matches. Changed manifests trigger soft-delete of old entry+chunks
+and re-store. This is safe to run multiple times.
+
+### 15. GitHub import progress tracking pattern
+Cache key: `'github-import:' . md5($repoUrl)` — TTL 1hr.
+Payload: `{status: running|completed|failed, ingested: N, total: N, repo: "owner/repo"}`.
+Frontend polls `/dashboard/api/knowledge/import-status?repo_url=...` every 3 seconds via `setInterval`.
+Stop polling when status is `completed` or `failed`. Always clear `importPollTimer` before starting a new import.
+
 ---
 
 ## Architecture Quick Reference
