@@ -56,26 +56,41 @@ class DashboardStatsService
 
             $queueDepth = DB::table('jobs')->count();
 
+            $candidateStages = Candidate::query()
+                ->selectRaw('pipeline_stage, count(*) as cnt')
+                ->whereNotNull('pipeline_stage')
+                ->groupBy('pipeline_stage')
+                ->pluck('cnt', 'pipeline_stage');
+
+            $failedJobs    = AgentJob::where('status', 'failed')->count();
+            $needsApproval = (int) ($workflowCounts->get('owner_approval', 0));
+
             return [
-                'workflows' => $workflowCounts,
-                'active_jobs' => $activeJobs,
-                'queue_depth' => $queueDepth,
+                'workflows'         => $workflowCounts,
+                'active_jobs'       => $activeJobs,
+                'queue_depth'       => $queueDepth,
                 'ai_cost_today'     => round((float) $aiCostToday, 4),
                 'ai_cost_yesterday' => round((float) $aiCostYesterday, 4),
                 'ai_cost_week'      => round((float) $aiCostWeek, 4),
-                'recent_workflows' => $recentWorkflows,
-                'recent_events' => $recentEvents,
-                'meta' => $this->meta(),
+                'recent_workflows'  => $recentWorkflows,
+                'recent_events'     => $recentEvents,
+                'candidate_stages'  => $candidateStages,
+                'failed_jobs'       => $failedJobs,
+                'needs_approval'    => $needsApproval,
+                'meta'              => $this->meta(),
             ];
         }, [
-            'workflows' => [],
-            'active_jobs' => 0,
-            'queue_depth' => 0,
+            'workflows'         => [],
+            'active_jobs'       => 0,
+            'queue_depth'       => 0,
             'ai_cost_today'     => 0.0,
             'ai_cost_yesterday' => 0.0,
             'ai_cost_week'      => 0.0,
-            'recent_workflows' => [],
-            'recent_events' => [],
+            'recent_workflows'  => [],
+            'recent_events'     => [],
+            'candidate_stages'  => [],
+            'failed_jobs'       => 0,
+            'needs_approval'    => 0,
         ]);
     }
 
@@ -154,7 +169,7 @@ class DashboardStatsService
                 ->groupBy('queue')
                 ->pluck('pending', 'queue');
 
-            return array_merge($paginator->toArray(), [
+            return $this->paginatedResponse($paginator, [
                 'by_status'     => $byStatus,
                 'by_agent_type' => $byAgentType,
                 'queue_table'   => $queueTable,
@@ -224,7 +239,7 @@ class DashboardStatsService
                 ->groupBy('pipeline_stage')
                 ->pluck('total', 'pipeline_stage');
 
-            return array_merge($paginator->toArray(), [
+            return $this->paginatedResponse($paginator, [
                 'by_stage' => $byStage,
                 'meta'     => $this->meta(),
             ]);
@@ -393,9 +408,25 @@ class DashboardStatsService
         return $this->databaseAvailable;
     }
 
+    /**
+     * Canonical pagination shape used by all dashboard list endpoints.
+     * Strips Laravel noise (links, path, from, to) so only the 5 keys
+     * the frontend actually reads are present.
+     */
+    private function paginatedResponse(LengthAwarePaginator $p, array $extras = []): array
+    {
+        return array_merge([
+            'data'         => $p->items(),
+            'current_page' => $p->currentPage(),
+            'last_page'    => $p->lastPage(),
+            'total'        => $p->total(),
+            'per_page'     => $p->perPage(),
+        ], $extras);
+    }
+
     private function paginationPayload(LengthAwarePaginator $paginator): array
     {
-        return array_merge($paginator->toArray(), ['meta' => $this->meta()]);
+        return $this->paginatedResponse($paginator, ['meta' => $this->meta()]);
     }
 
     private function emptyPagination(int $perPage): array
