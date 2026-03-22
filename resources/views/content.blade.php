@@ -159,8 +159,180 @@
                 {{-- Body --}}
                 <div>
                     <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Content</p>
-                    <div class="bg-slate-950/60 border border-slate-700/40 rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <div class="bg-slate-950/60 border border-slate-700/40 rounded-lg p-4 max-h-64 overflow-y-auto">
                         <pre class="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed" x-text="detail?.body || 'No body content.'"></pre>
+                    </div>
+                </div>
+
+                {{-- Hashtag Suggestions --}}
+                <div x-show="hashtagSuggestions.length > 0 || hashtagLoading">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Suggested Hashtags</p>
+                        <button x-show="hashtagSuggestions.length > 0"
+                                @click="copyHashtags()"
+                                class="text-xs text-brand-400 hover:text-brand-300 transition-colors">
+                            <span x-text="hashtagCopied ? '✓ Copied' : 'Copy all'"></span>
+                        </button>
+                    </div>
+                    <div x-show="hashtagLoading" class="text-xs text-slate-500 py-2">Loading hashtags…</div>
+                    <div x-show="!hashtagLoading" class="flex flex-wrap gap-1.5">
+                        <template x-for="tag in hashtagSuggestions" :key="tag">
+                            <span class="px-2 py-0.5 bg-brand-600/15 text-brand-400 border border-brand-600/20 rounded-full text-xs cursor-pointer hover:bg-brand-600/25 transition-colors"
+                                  @click="copyTag(tag)"
+                                  x-text="tag"></span>
+                        </template>
+                    </div>
+                </div>
+
+                {{-- Platform Preview --}}
+                <div x-show="detail?.platform">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Platform Preview</p>
+
+                    {{-- Instagram --}}
+                    <template x-if="detail?.platform === 'instagram'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl overflow-hidden max-w-xs">
+                            <div class="flex items-center gap-2 p-3 border-b border-slate-800">
+                                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-white text-xs font-bold">M</div>
+                                <span class="text-xs font-semibold text-slate-200">your_brand</span>
+                                <span class="ml-auto text-slate-500">···</span>
+                            </div>
+                            <div class="bg-slate-800/60 h-36 flex items-center justify-center">
+                                <svg class="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            </div>
+                            <div class="p-3">
+                                <p class="text-xs text-slate-300 leading-relaxed line-clamp-3" x-text="(detail?.body ?? '').substring(0, 120) + '…'"></p>
+                                <p class="text-xs text-brand-400 mt-1.5" x-text="hashtagSuggestions.slice(0, 5).join(' ')"></p>
+                            </div>
+                        </div>
+                    </template>
+
+                    {{-- Twitter / X --}}
+                    <template x-if="detail?.platform === 'twitter'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl p-4 max-w-xs">
+                            <div class="flex gap-3">
+                                <div class="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-white text-sm font-bold shrink-0">M</div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-1 mb-1">
+                                        <span class="text-xs font-bold text-slate-200">Your Brand</span>
+                                        <span class="text-xs text-slate-500">@your_brand · now</span>
+                                    </div>
+                                    <p class="text-xs text-slate-300 leading-relaxed" x-text="(detail?.body ?? '').substring(0, 280)"></p>
+                                    <p class="text-xs text-sky-400 mt-1" x-text="hashtagSuggestions.slice(0, 3).join(' ')"></p>
+                                    <div class="flex gap-5 mt-2 text-slate-600 text-xs">
+                                        <span>♡ 0</span><span>↺ 0</span><span>💬 0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    {{-- LinkedIn --}}
+                    <template x-if="detail?.platform === 'linkedin'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl p-4 max-w-xs">
+                            <div class="flex gap-3 mb-3">
+                                <div class="w-10 h-10 rounded bg-slate-700 flex items-center justify-center text-white text-sm font-bold shrink-0">M</div>
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-200">Your Brand</p>
+                                    <p class="text-xs text-slate-500">Marketing · now</p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-300 leading-relaxed line-clamp-4" x-text="(detail?.body ?? '').substring(0, 200)"></p>
+                            <p class="text-xs text-sky-400 mt-1.5" x-text="hashtagSuggestions.slice(0, 4).join(' ')"></p>
+                            <div class="flex gap-4 mt-3 pt-2 border-t border-slate-800 text-xs text-slate-500">
+                                <span>👍 Like</span><span>💬 Comment</span><span>↗ Share</span>
+                            </div>
+                        </div>
+                    </template>
+
+                    {{-- TikTok --}}
+                    <template x-if="detail?.platform === 'tiktok'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl overflow-hidden max-w-xs">
+                            <div class="bg-slate-800/60 h-40 flex flex-col items-center justify-center relative">
+                                <svg class="w-8 h-8 text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                <span class="text-xs text-slate-500">Video content</span>
+                                <div class="absolute bottom-2 left-3 right-3">
+                                    <p class="text-xs text-white/80 leading-snug line-clamp-2" x-text="(detail?.body ?? '').substring(0, 80)"></p>
+                                    <p class="text-xs text-pink-400 mt-0.5" x-text="hashtagSuggestions.slice(0, 4).join(' ')"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    {{-- Generic fallback --}}
+                    <template x-if="!['instagram','twitter','linkedin','tiktok'].includes(detail?.platform ?? '')">
+                        <div class="bg-slate-800/40 border border-slate-700/40 rounded-lg p-4 max-w-xs">
+                            <p class="text-xs text-slate-400 capitalize" x-text="(detail?.platform ?? 'generic') + ' post'"></p>
+                            <p class="text-xs text-slate-300 mt-1 line-clamp-4" x-text="(detail?.body ?? '').substring(0, 200)"></p>
+                        </div>
+                    </template>
+                </div>
+
+                {{-- Add to Calendar CTA --}}
+                <div class="pt-1 border-t border-slate-700/50 flex justify-end">
+                    <button @click="calendarModalOpen = true"
+                            class="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium rounded-lg transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        Add to Calendar
+                    </button>
+                </div>
+            </div>
+
+            {{-- Add to Calendar Modal (nested inside slide panel) --}}
+            <div x-show="calendarModalOpen" x-cloak
+                 class="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                 @click.self="calendarModalOpen = false">
+                <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+                    <div class="flex items-center justify-between mb-5">
+                        <h3 class="text-sm font-semibold text-white">Add to Content Calendar</h3>
+                        <button @click="calendarModalOpen = false" class="text-slate-400 hover:text-white transition-colors">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">Platform</label>
+                            <select x-model="calendarForm.platform"
+                                    @change="fetchHashtagSuggestions(calendarForm.platform)"
+                                    class="w-full bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 outline-none focus:border-brand-500">
+                                <option value="">Select platform…</option>
+                                <option value="instagram">Instagram</option>
+                                <option value="tiktok">TikTok</option>
+                                <option value="twitter">Twitter / X</option>
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="facebook">Facebook</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">Content Type</label>
+                            <select x-model="calendarForm.content_type"
+                                    class="w-full bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 outline-none focus:border-brand-500">
+                                <option value="">Select type…</option>
+                                <option value="post">Post</option>
+                                <option value="reel">Reel / Short video</option>
+                                <option value="carousel">Carousel</option>
+                                <option value="story">Story</option>
+                                <option value="thread">Thread</option>
+                                <option value="article">Article</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">Schedule At</label>
+                            <input x-model="calendarForm.scheduled_at" type="datetime-local"
+                                   class="w-full bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 outline-none focus:border-brand-500" />
+                        </div>
+                        <div x-show="calendarError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2" x-text="calendarError"></div>
+                        <div x-show="calendarSuccess" class="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">Added to calendar successfully.</div>
+                    </div>
+                    <div class="flex gap-2 mt-5">
+                        <button @click="calendarModalOpen = false"
+                                class="flex-1 px-3 py-2 text-xs text-slate-400 border border-slate-700 rounded-lg hover:border-slate-500 transition-colors">
+                            Cancel
+                        </button>
+                        <button @click="addToCalendar()"
+                                :disabled="calendarSaving || !calendarForm.platform || !calendarForm.content_type"
+                                class="flex-1 px-3 py-2 text-xs bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium">
+                            <span x-text="calendarSaving ? 'Saving…' : 'Schedule'"></span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -186,6 +358,14 @@ function contentApp() {
         detailOpen: false,
         detailLoading: false,
         detail: null,
+        hashtagSuggestions: [],
+        hashtagLoading: false,
+        hashtagCopied: false,
+        calendarModalOpen: false,
+        calendarSaving: false,
+        calendarError: '',
+        calendarSuccess: false,
+        calendarForm: { platform: '', content_type: '', scheduled_at: '' },
 
         async init() {
             const saved = JSON.parse(localStorage.getItem('filters_content') ?? '{}');
@@ -245,16 +425,97 @@ function contentApp() {
             this.detailOpen = true;
             this.detailLoading = true;
             this.detail = null;
+            this.hashtagSuggestions = [];
+            this.calendarModalOpen = false;
+            this.calendarSuccess = false;
+            this.calendarError = '';
             try {
                 const r = await fetch('/dashboard/api/content/' + id, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const d = await r.json();
                 this.detail = d.item ?? null;
+                if (this.detail?.platform) {
+                    this.calendarForm.platform = this.detail.platform;
+                    this.fetchHashtagSuggestions(this.detail.platform);
+                }
             } catch (e) {
                 this.handleError(e);
                 this.detailOpen = false;
             } finally {
                 this.detailLoading = false;
+            }
+        },
+
+        async fetchHashtagSuggestions(platform) {
+            if (!platform) { this.hashtagSuggestions = []; return; }
+            this.hashtagLoading = true;
+            try {
+                const r = await fetch('/dashboard/api/hashtag-sets?platform=' + encodeURIComponent(platform) + '&per_page=3', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                if (!r.ok) return;
+                const d = await r.json();
+                const sets = d.data ?? d ?? [];
+                // Flatten tags from first matching set
+                const tags = sets.length > 0 ? (sets[0].tags ?? []) : [];
+                this.hashtagSuggestions = Array.isArray(tags) ? tags.slice(0, 15) : [];
+            } catch (_) {
+                this.hashtagSuggestions = [];
+            } finally {
+                this.hashtagLoading = false;
+            }
+        },
+
+        copyHashtags() {
+            const text = this.hashtagSuggestions.join(' ');
+            navigator.clipboard?.writeText(text).then(() => {
+                this.hashtagCopied = true;
+                setTimeout(() => { this.hashtagCopied = false; }, 2000);
+            });
+        },
+
+        copyTag(tag) {
+            navigator.clipboard?.writeText(tag);
+        },
+
+        async addToCalendar() {
+            this.calendarError = '';
+            this.calendarSuccess = false;
+            if (!this.calendarForm.platform || !this.calendarForm.content_type) {
+                this.calendarError = 'Platform and content type are required.';
+                return;
+            }
+            this.calendarSaving = true;
+            try {
+                const payload = {
+                    platform:     this.calendarForm.platform,
+                    content_type: this.calendarForm.content_type,
+                    scheduled_at: this.calendarForm.scheduled_at || null,
+                    body:         this.detail?.body ?? '',
+                    title:        this.detail?.title ?? '',
+                    hashtags:     this.hashtagSuggestions,
+                };
+                const r = await fetch('/dashboard/api/content-calendar', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    body: JSON.stringify(payload),
+                });
+                const d = await r.json();
+                if (!r.ok) {
+                    this.calendarError = d.message ?? ('Error ' + r.status);
+                    return;
+                }
+                this.calendarSuccess = true;
+                this.calendarForm = { platform: this.detail?.platform ?? '', content_type: '', scheduled_at: '' };
+                setTimeout(() => { this.calendarModalOpen = false; this.calendarSuccess = false; }, 1800);
+            } catch (e) {
+                this.calendarError = e.message;
+            } finally {
+                this.calendarSaving = false;
             }
         },
 
