@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
+use App\Models\Candidate;
 use App\Models\ContentItem;
 use App\Models\CustomAiPlatform;
 use App\Models\AgentStep;
@@ -104,9 +105,19 @@ class DashboardController extends Controller
 
     // ── API: Candidates ───────────────────────────────────────────────
 
-    public function apiCandidates(): JsonResponse
+    public function apiCandidates(Request $request): JsonResponse
     {
-        return response()->json($this->stats->getCandidates());
+        return response()->json($this->stats->getCandidates($request->only(['search', 'pipeline_stage', 'min_score'])));
+    }
+
+    public function apiCandidateDetail(string $id): JsonResponse
+    {
+        try {
+            $candidate = Candidate::findOrFail($id);
+            return response()->json(['candidate' => $candidate]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
     }
 
     // ── API: Content ──────────────────────────────────────────────────

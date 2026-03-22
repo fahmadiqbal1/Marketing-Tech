@@ -191,23 +191,47 @@ class DashboardStatsService
         }, ['data' => [], 'summary' => []]);
     }
 
-    public function getCandidates(): array
+    public function getCandidates(array $filters = [], int $perPage = 25): array
     {
-        return $this->rescueArray(function (): array {
-            $candidates = Candidate::query()
-                ->latest()
-                ->limit(100)
-                ->get([
-                    'id', 'name', 'email', 'pipeline_stage', 'score',
-                    'current_title', 'current_company', 'created_at',
-                ]);
+        return $this->rescueArray(function () use ($filters, $perPage): array {
+            $query = Candidate::query()->latest();
 
-            return [
-                'data' => $candidates,
-                'by_stage' => $candidates->groupBy('pipeline_stage')->map->count(),
-                'meta' => $this->meta(),
-            ];
-        }, ['data' => [], 'by_stage' => []]);
+            if (! empty($filters['search'])) {
+                $term = $filters['search'];
+                $query->where(function ($q) use ($term) {
+                    $q->where('name', 'ilike', '%' . $term . '%')
+                      ->orWhere('email', 'ilike', '%' . $term . '%');
+                });
+            }
+            if (! empty($filters['pipeline_stage'])) {
+                $query->where('pipeline_stage', $filters['pipeline_stage']);
+            }
+            if (! empty($filters['min_score'])) {
+                $query->where('score', '>=', (float) $filters['min_score']);
+            }
+
+            $paginator = $query->paginate($perPage, [
+                'id', 'name', 'email', 'pipeline_stage', 'score',
+                'current_title', 'current_company', 'linkedin_url', 'github_url', 'created_at',
+            ]);
+
+            // Global stage counts (unfiltered)
+            $byStage = Candidate::query()
+                ->selectRaw('pipeline_stage, count(*) as total')
+                ->groupBy('pipeline_stage')
+                ->pluck('total', 'pipeline_stage');
+
+            return array_merge($paginator->toArray(), [
+                'by_stage' => $byStage,
+                'meta'     => $this->meta(),
+            ]);
+        }, [
+            'data'         => [],
+            'current_page' => 1,
+            'last_page'    => 1,
+            'total'        => 0,
+            'by_stage'     => [],
+        ]);
     }
 
     public function getContent(array $filters = [], int $perPage = 20): array
