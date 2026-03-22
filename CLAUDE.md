@@ -146,6 +146,77 @@ Payload: `{status: running|completed|failed, ingested: N, total: N, repo: "owner
 Frontend polls `/dashboard/api/knowledge/import-status?repo_url=...` every 3 seconds via `setInterval`.
 Stop polling when status is `completed` or `failed`. Always clear `importPollTimer` before starting a new import.
 
+### 16. GitHub import URL normalization — normalize before md5 in BOTH PHP and JS
+Cache keys must be identical regardless of how user types the URL.
+PHP (`IngestGitHubRepo::normalizeRepoUrl` + `DashboardController::apiKnowledgeImportStatus`):
+```php
+$url = strtolower(trim($url));
+$url = preg_replace('#\.git$#', '', $url);
+return rtrim($url, '/');
+```
+JS (`knowledge.blade.php` before `apiPost` + `pollImportProgress`):
+```js
+const repoUrl = raw.trim().toLowerCase().replace(/\.git$/, '').replace(/\/$/, '');
+```
+Cache TTL should be `now()->addHours(6)` — not 3600 — so progress survives long imports.
+
+### 17. apiKnowledge() search must use grouped closure
+Ungrouped `orWhere` escapes any preceding `AND` conditions (e.g. category filter):
+```php
+// WRONG — orWhere escapes the category filter
+$query->where('title', 'ilike', "%{$s}%")->orWhere('content', 'ilike', "%{$s}%");
+
+// CORRECT — closure keeps OR inside the AND
+$query->where(function ($q) use ($s) {
+    $q->where('title', 'ilike', "%{$s}%")->orWhere('content', 'ilike', "%{$s}%");
+});
+```
+Apply the same closure pattern to any multi-column search that combines with other filters.
+
+### 18. Rate limiting pattern for dashboard API routes
+Split the `Route::prefix('api')` group into three throttle tiers (see `routes/web.php`):
+- `throttle:60,1` — all GET/polling endpoints (safe for 2 open tabs + 12s auto-refresh)
+- `throttle:10,1` — write/action endpoints (approvals, settings, KB CRUD)
+- `throttle:5,1` — heavy ops (GitHub import dispatch)
+Outer `DashboardBasicAuth` middleware is unchanged. Throttle middleware goes on inner groups only.
+
+### 19. Client-side insights pattern (overview.blade.php)
+- Use dynamic threshold: compare top value to `1.5× average` across peers — not a hardcoded %
+- Health endpoint: fetch `/health` with `AbortController` 3s timeout — silent catch so UI degrades gracefully
+- Sort insights by severity: `{ error: 0, warning: 1, info: 2 }` — errors always surface first
+- Cap at 3 insights with `.slice(0, 3)` — prevents UI noise when multiple conditions trigger
+- `top_failure_reason` comes from `apiJobs` response (aggregated server-side) — attach to `this.stats` in `loadCosts()`
+
+### 20. Filter persistence via localStorage — key per page, validate on restore
+Pattern (applied to jobs, candidates, content, system, knowledge):
+```js
+// init(): restore + validate
+const saved = JSON.parse(localStorage.getItem('filters_jobs') ?? '{}');
+const validStatuses = ['', 'pending', 'running', 'completed', 'failed'];
+this.statusFilter = validStatuses.includes(saved.statusFilter ?? '') ? (saved.statusFilter ?? '') : '';
+// free-form keys validated post-load against backend data
+if (this.agentTypeFilter && !Object.keys(this.byAgentType).includes(this.agentTypeFilter)) {
+    this.agentTypeFilter = '';
+}
+
+// load(): persist before fetch
+localStorage.setItem('filters_jobs', JSON.stringify({ statusFilter: this.statusFilter, ... }));
+```
+Always reset `currentPage = 1` on restore. Never persist page numbers — only filter values.
+
+### 21. top_failure_reason aggregation pattern
+Efficiently find the most common error message from recent failures without a GROUP BY query:
+```php
+$topReason = AgentJob::where('status', 'failed')
+    ->whereNotNull('error_message')
+    ->latest()->limit(20)
+    ->pluck('error_message')
+    ->groupBy(fn ($m) => Str::limit($m, 60))   // group by first 60 chars
+    ->sortByDesc(fn ($g) => $g->count())
+    ->keys()->first();
+```
+Add `use Illuminate\Support\Str;` to controller. Returns null if no failures — always guard with `?? null`.
+
 ---
 
 ## Architecture Quick Reference
