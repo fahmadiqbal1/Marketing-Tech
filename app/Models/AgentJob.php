@@ -11,7 +11,7 @@ class AgentJob extends Model
     use HasUuids;
 
     protected $fillable = [
-        'workflow_id', 'campaign_id', 'agent_type', 'agent_class', 'ai_provider', 'model',
+        'workflow_id', 'campaign_id', 'agent_type', 'agent_class', 'task_type', 'ai_provider', 'model',
         'instruction', 'short_description', 'status',
         'result', 'error_message', 'steps_taken', 'total_tokens', 'last_tool', 'metadata',
         'chat_id', 'user_id', 'started_at', 'completed_at',

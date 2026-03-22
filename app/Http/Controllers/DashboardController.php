@@ -5,8 +5,19 @@ namespace App\Http\Controllers;
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
 use App\Models\Candidate;
+use App\Models\ContentCalendar;
 use App\Models\ContentItem;
 use App\Models\CustomAiPlatform;
+use App\Models\HashtagSet;
+use App\Models\SocialAccount;
+use App\Services\IterationEngineService;
+use App\Services\Social\SocialPlatformService;
+use App\Services\Social\Platforms\InstagramService;
+use App\Services\Social\Platforms\TwitterService;
+use App\Services\Social\Platforms\LinkedInService;
+use App\Services\Social\Platforms\FacebookService;
+use App\Services\Social\Platforms\TikTokService;
+use App\Services\Social\Platforms\YouTubeService;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
 use App\Models\ContentVariation;
@@ -632,5 +643,637 @@ class DashboardController extends Controller
         $platform->delete();
 
         return response()->json(['deleted' => true]);
+    }
+
+    // ─── Social Media — Page & OAuth ─────────────────────────────────────────
+
+    public function social(): \Illuminate\View\View
+    {
+        return view('social');
+    }
+
+    public function socialInstagramRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $instagram = new InstagramService();
+
+        if (! $instagram->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'Instagram API credentials are not configured. Set SOCIAL_INSTAGRAM_CLIENT_ID and SOCIAL_INSTAGRAM_CLIENT_SECRET in .env');
+        }
+
+        return redirect($instagram->getAuthorizationUrl());
+    }
+
+    public function socialInstagramCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'Instagram authorization denied: ' . $request->get('error_description'));
+        }
+
+        $code      = $request->get('code');
+        $instagram = new InstagramService();
+
+        try {
+            $tokenData = $instagram->exchangeCode($code);
+
+            // Fetch user profile to get platform_user_id and handle
+            $profile = \Illuminate\Support\Facades\Http::get('https://graph.instagram.com/me', [
+                'fields'       => 'id,username',
+                'access_token' => $tokenData['access_token'],
+            ])->json();
+
+            SocialAccount::updateOrCreate(
+                ['platform' => 'instagram', 'handle' => $profile['username'] ?? 'unknown'],
+                [
+                    'platform_user_id' => $profile['id'] ?? null,
+                    'access_token'     => $tokenData['access_token'],
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+
+            return redirect('/dashboard/social')->with('success', 'Instagram connected successfully');
+        } catch (\Throwable $e) {
+            Log::error('Instagram OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect Instagram: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — Twitter ───────────────────────────────────────────────
+
+    public function socialTwitterRedirect(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new TwitterService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'Twitter API credentials not configured. Set SOCIAL_TWITTER_CLIENT_ID and SOCIAL_TWITTER_CLIENT_SECRET in .env');
+        }
+        $codeVerifier = bin2hex(random_bytes(32));
+        $data = $svc->getAuthorizationUrl($codeVerifier);
+        session(['oauth_twitter_verifier' => $data['code_verifier'], 'oauth_twitter_state' => $data['state']]);
+        return redirect($data['url']);
+    }
+
+    public function socialTwitterCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'Twitter authorization denied: ' . $request->get('error_description'));
+        }
+        if ($request->get('state') !== session('oauth_twitter_state')) {
+            return redirect('/dashboard/social')->with('error', 'Twitter OAuth state mismatch — possible CSRF.');
+        }
+        $svc = new TwitterService();
+        try {
+            $tokenData    = $svc->exchangeCode($request->get('code'), session('oauth_twitter_verifier'));
+            $profile      = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->get('https://api.twitter.com/2/users/me', ['user.fields' => 'username'])->json();
+            $userId       = $profile['data']['id']       ?? null;
+            $username     = $profile['data']['username'] ?? 'unknown';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'twitter', 'handle' => $username],
+                [
+                    'platform_user_id' => $userId,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            session()->forget(['oauth_twitter_verifier', 'oauth_twitter_state']);
+            return redirect('/dashboard/social')->with('success', 'Twitter / X connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('Twitter OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect Twitter: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — LinkedIn ──────────────────────────────────────────────
+
+    public function socialLinkedInRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new LinkedInService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn API credentials not configured. Set SOCIAL_LINKEDIN_CLIENT_ID and SOCIAL_LINKEDIN_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialLinkedInCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn authorization denied: ' . $request->get('error_description'));
+        }
+        $svc = new LinkedInService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            $profile   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
+                ->get('https://api.linkedin.com/v2/me', ['projection' => '(id,localizedFirstName,localizedLastName)'])->json();
+            $userId    = $profile['id'] ?? null;
+            $name      = trim(($profile['localizedFirstName'] ?? '') . ' ' . ($profile['localizedLastName'] ?? '')) ?: 'unknown';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'linkedin', 'handle' => $userId ?? $name],
+                [
+                    'platform_user_id' => $userId,
+                    'display_name'     => $name,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', 'LinkedIn connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('LinkedIn OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect LinkedIn: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — Facebook ──────────────────────────────────────────────
+
+    public function socialFacebookRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new FacebookService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'Facebook API credentials not configured. Set SOCIAL_FACEBOOK_CLIENT_ID and SOCIAL_FACEBOOK_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialFacebookCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'Facebook authorization denied: ' . $request->get('error_description'));
+        }
+        $svc = new FacebookService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            $pageId    = $tokenData['page_id']   ?? null;
+            $pageName  = $tokenData['page_name'] ?? 'Facebook Page';
+            $handle    = $pageId ?? 'page';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'facebook', 'handle' => $handle],
+                [
+                    'platform_user_id' => $pageId,
+                    'display_name'     => $pageName,
+                    'access_token'     => $tokenData['page_access_token'],
+                    'token_expires_at' => ($tokenData['expires_in'] ?? 0) > 0
+                                            ? now()->addSeconds($tokenData['expires_in'])
+                                            : null,
+                    'metadata'         => ['user_access_token' => $tokenData['user_access_token'], 'page_id' => $pageId, 'page_name' => $pageName],
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', "Facebook Page \"{$pageName}\" connected successfully.");
+        } catch (\Throwable $e) {
+            Log::error('Facebook OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect Facebook: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — TikTok ────────────────────────────────────────────────
+
+    public function socialTikTokRedirect(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new TikTokService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'TikTok API credentials not configured. Set SOCIAL_TIKTOK_CLIENT_KEY and SOCIAL_TIKTOK_CLIENT_SECRET in .env');
+        }
+        $codeVerifier = bin2hex(random_bytes(32));
+        $data = $svc->getAuthorizationUrl($codeVerifier);
+        session(['oauth_tiktok_verifier' => $data['code_verifier'], 'oauth_tiktok_state' => $data['state']]);
+        return redirect($data['url']);
+    }
+
+    public function socialTikTokCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'TikTok authorization denied: ' . $request->get('error_description', $request->get('error')));
+        }
+        if ($request->get('state') !== session('oauth_tiktok_state')) {
+            return redirect('/dashboard/social')->with('error', 'TikTok OAuth state mismatch — possible CSRF.');
+        }
+        $svc = new TikTokService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'), session('oauth_tiktok_verifier'));
+            $openId    = $tokenData['open_id'] ?? null;
+            // Fetch creator info
+            $profile   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->post('https://open.tiktok.com/v2/user/info/', ['fields' => 'open_id,display_name,avatar_url'])
+                ->json('data.user', []);
+            $handle    = $openId ?? 'tiktok_user';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'tiktok', 'handle' => $handle],
+                [
+                    'platform_user_id' => $openId,
+                    'display_name'     => $profile['display_name'] ?? null,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            session()->forget(['oauth_tiktok_verifier', 'oauth_tiktok_state']);
+            return redirect('/dashboard/social')->with('success', 'TikTok connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('TikTok OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect TikTok: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — YouTube ───────────────────────────────────────────────
+
+    public function socialYouTubeRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new YouTubeService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'YouTube API credentials not configured. Set SOCIAL_YOUTUBE_CLIENT_ID and SOCIAL_YOUTUBE_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialYouTubeCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'YouTube authorization denied: ' . $request->get('error'));
+        }
+        $svc = new YouTubeService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            // Fetch channel info
+            $channel   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->get('https://www.googleapis.com/youtube/v3/channels', ['part' => 'snippet', 'mine' => 'true'])
+                ->json('items.0', []);
+            $channelId    = $channel['id']                       ?? null;
+            $channelTitle = $channel['snippet']['title']         ?? 'YouTube Channel';
+            $handle       = $channel['snippet']['customUrl']     ?? $channelId ?? 'youtube';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'youtube', 'handle' => ltrim($handle, '@')],
+                [
+                    'platform_user_id' => $channelId,
+                    'display_name'     => $channelTitle,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
+        } catch (\Throwable $e) {
+            Log::error('YouTube OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect YouTube: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social Media — Content Calendar ─────────────────────────────────────
+
+    public function apiContentCalendar(Request $request): JsonResponse
+    {
+        $query = ContentCalendar::withoutTrashed();
+
+        if ($platform = $request->get('platform')) {
+            $query->where('platform', $platform);
+        }
+
+        if ($status = $request->get('status')) {
+            $query->where('status', $status);
+        }
+
+        if ($week = $request->get('week')) {
+            try {
+                $start = \Carbon\Carbon::parse($week)->startOfWeek();
+                $end   = $start->copy()->endOfWeek();
+                $query->whereBetween('scheduled_at', [$start, $end]);
+            } catch (\Throwable) {}
+        }
+
+        $entries = $query->orderBy('scheduled_at')->paginate((int) $request->get('per_page', 50));
+
+        return response()->json($entries);
+    }
+
+    public function apiCreateCalendarEntry(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'title'         => 'required|string|max:255',
+            'platform'      => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
+            'content_type'  => 'required|in:reel,story,post,thread,carousel,live,ad',
+            'draft_content' => 'nullable|string',
+            'status'        => 'in:draft,scheduled,pending_approval',
+            'scheduled_at'  => 'nullable|date',
+            'hashtags'      => 'nullable|array',
+            'metadata'      => 'nullable|array',
+        ]);
+
+        // Validate platform/content_type combo
+        $invalid = [
+            'instagram' => ['thread'],
+            'twitter'   => ['reel', 'story', 'carousel'],
+            'linkedin'  => ['reel', 'story'],
+            'facebook'  => ['thread'],
+        ];
+
+        if (isset($invalid[$validated['platform']]) && in_array($validated['content_type'], $invalid[$validated['platform']])) {
+            return response()->json([
+                'error' => "content_type '{$validated['content_type']}' is not supported on {$validated['platform']}",
+            ], 422);
+        }
+
+        $entry = ContentCalendar::create($validated);
+
+        return response()->json($entry, 201);
+    }
+
+    public function apiUpdateCalendarEntry(Request $request, string $id): JsonResponse
+    {
+        $entry     = ContentCalendar::findOrFail($id);
+        $validated = $request->validate([
+            'title'                => 'sometimes|string|max:255',
+            'draft_content'        => 'nullable|string',
+            'status'               => 'sometimes|in:draft,scheduled,pending_approval,published,failed',
+            'moderation_status'    => 'sometimes|in:pending,approved,rejected,auto_approved',
+            'scheduled_at'         => 'nullable|date',
+            'hashtags'             => 'nullable|array',
+            'metadata'             => 'nullable|array',
+        ]);
+
+        $entry->update($validated);
+
+        return response()->json($entry->fresh());
+    }
+
+    public function apiDeleteCalendarEntry(string $id): JsonResponse
+    {
+        $entry = ContentCalendar::findOrFail($id);
+        $entry->delete();
+
+        return response()->json(['deleted' => true]);
+    }
+
+    public function apiApproveCalendarEntry(string $id): JsonResponse
+    {
+        $entry = ContentCalendar::findOrFail($id);
+        $entry->update(['moderation_status' => 'approved', 'status' => 'scheduled']);
+
+        return response()->json(['approved' => true, 'entry' => $entry->fresh()]);
+    }
+
+    public function apiRejectCalendarEntry(Request $request, string $id): JsonResponse
+    {
+        $entry = ContentCalendar::findOrFail($id);
+        $entry->update([
+            'moderation_status' => 'rejected',
+            'moderation_notes'  => $request->get('reason'),
+            'status'            => 'draft',
+        ]);
+
+        return response()->json(['rejected' => true, 'entry' => $entry->fresh()]);
+    }
+
+    public function apiPublishCalendarEntry(string $id): JsonResponse
+    {
+        $entry = ContentCalendar::findOrFail($id);
+
+        if ($entry->status === 'published') {
+            return response()->json(['error' => 'Already published'], 422);
+        }
+
+        $posted = false;
+        $result = [];
+
+        try {
+            $social = app(SocialPlatformService::class);
+
+            if ($social->autoPostEnabled()) {
+                $account = SocialAccount::connected()->forPlatform($entry->platform)->first();
+
+                if ($account) {
+                    $result = $social->publishWithRateLimit($account, $entry);
+                    $entry->update([
+                        'status'           => 'published',
+                        'published_at'     => now(),
+                        'external_post_id' => $result['post_id'] ?? null,
+                    ]);
+                    $posted = true;
+                }
+            }
+
+            if (! $posted) {
+                // Simulated publish
+                $result = [
+                    'post_id'     => 'sim_' . Str::random(10),
+                    'impressions' => rand(100, 5000),
+                    'clicks'      => rand(5, 300),
+                    'conversions' => rand(0, 20),
+                    'simulated'   => true,
+                ];
+                $entry->update(['status' => 'published', 'published_at' => now()]);
+            }
+
+            // Feed IterationEngine if variation is linked
+            if ($entry->content_variation_id) {
+                $impressions = $result['impressions'] ?? 0;
+                $clicks      = $result['clicks']      ?? 0;
+                $conversions = $result['conversions']  ?? 0;
+                $source      = ($result['simulated'] ?? true) ? 'simulated' : 'real';
+
+                app(IterationEngineService::class)->recordPerformance(
+                    $entry->content_variation_id, $impressions, $clicks, $conversions, $source
+                );
+            }
+
+            // Audit log
+            \App\Models\SystemEvent::create([
+                'level'   => 'info',
+                'message' => sprintf(
+                    "Published to %s: %s [%s]",
+                    $entry->platform,
+                    $entry->title,
+                    $posted ? 'real' : 'simulated'
+                ),
+            ]);
+
+            return response()->json([
+                'published' => true,
+                'simulated' => ! $posted,
+                'post_id'   => $result['post_id'] ?? null,
+                'entry'     => $entry->fresh(),
+            ]);
+        } catch (\Throwable $e) {
+            $entry->increment('retry_count');
+            $entry->update(['last_error' => $e->getMessage()]);
+
+            if ($entry->retry_count >= 3) {
+                $entry->update(['status' => 'failed']);
+            }
+
+            Log::error("apiPublishCalendarEntry failed for {$id}", ['error' => $e->getMessage()]);
+
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    // ─── Social Media — Hashtag Sets ─────────────────────────────────────────
+
+    public function apiHashtagSets(Request $request): JsonResponse
+    {
+        $platform = $request->get('platform');
+        $cacheKey = 'hashtag-sets:' . ($platform ?? 'all');
+
+        $sets = Cache::remember($cacheKey, 3600, function () use ($platform) {
+            $query = HashtagSet::orderByDesc('usage_count');
+            if ($platform) {
+                $query->forPlatform($platform);
+            }
+            return $query->get();
+        });
+
+        return response()->json(['data' => $sets]);
+    }
+
+    public function apiCreateHashtagSet(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'       => 'required|string|max:255',
+            'platform'   => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
+            'niche'      => 'nullable|string|max:100',
+            'tags'       => 'required|array|min:1',
+            'tags.*'     => 'string',
+            'reach_tier' => 'in:low,medium,high',
+        ]);
+
+        $set = HashtagSet::create($validated);
+
+        // Bust cache
+        Cache::forget('hashtag-sets:' . $validated['platform']);
+        Cache::forget('hashtag-sets:all');
+
+        return response()->json($set, 201);
+    }
+
+    public function apiDeleteHashtagSet(string $id): JsonResponse
+    {
+        $set = HashtagSet::findOrFail($id);
+        $platform = $set->platform;
+        $set->delete();
+
+        Cache::forget('hashtag-sets:' . $platform);
+        Cache::forget('hashtag-sets:all');
+
+        return response()->json(['deleted' => true]);
+    }
+
+    // ─── Social Media — Social Accounts ──────────────────────────────────────
+
+    public function apiSocialAccounts(): JsonResponse
+    {
+        $accounts = SocialAccount::orderBy('platform')->get()->makeVisible(['platform_user_id', 'token_expires_at', 'last_error', 'last_synced_at']);
+
+        return response()->json(['data' => $accounts]);
+    }
+
+    public function apiUpsertSocialAccount(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'platform'         => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
+            'handle'           => 'required|string|max:255',
+            'display_name'     => 'nullable|string|max:255',
+            'access_token'     => 'nullable|string',
+            'follower_count'   => 'nullable|integer|min:0',
+            'metadata'         => 'nullable|array',
+        ]);
+
+        $account = SocialAccount::updateOrCreate(
+            ['platform' => $validated['platform'], 'handle' => $validated['handle']],
+            array_merge($validated, [
+                'is_connected' => ! empty($validated['access_token']),
+            ])
+        );
+
+        return response()->json($account, 201);
+    }
+
+    public function apiDeleteSocialAccount(string $id): JsonResponse
+    {
+        $account = SocialAccount::findOrFail($id);
+        $account->delete();
+
+        return response()->json(['deleted' => true]);
+    }
+
+    // ─── Social Media — Analytics ─────────────────────────────────────────────
+
+    public function apiTrendInsights(Request $request): JsonResponse
+    {
+        $platform = $request->get('platform', 'all');
+        $cacheKey = "trend-insights:{$platform}";
+
+        $insights = Cache::remember($cacheKey, 900, function () use ($platform) {
+            $query = KnowledgeBase::whereNull('deleted_at')
+                ->latest()
+                ->limit(30);
+
+            if ($platform !== 'all') {
+                $query->where(function ($q) use ($platform) {
+                    $q->where('content', 'ilike', "%{$platform}%")
+                        ->orWhere('tags', 'ilike', "%{$platform}%");
+                });
+            }
+
+            return $query->get(['id', 'title', 'category', 'tags', 'created_at'])
+                ->map(fn ($k) => [
+                    'type'       => 'analytical_insight',
+                    'id'         => $k->id,
+                    'title'      => $k->title,
+                    'category'   => $k->category,
+                    'age_days'   => $k->created_at->diffInDays(now()),
+                    'confidence' => $k->created_at->diffInDays(now()) < 7 ? 'high'
+                        : ($k->created_at->diffInDays(now()) < 30 ? 'medium' : 'low'),
+                ]);
+        });
+
+        return response()->json([
+            'platform'   => $platform,
+            'insights'   => $insights,
+            'cached_for' => '15 minutes',
+            'note'       => 'Insights derived from knowledge base entries only.',
+        ]);
+    }
+
+    public function apiSocialHealth(): JsonResponse
+    {
+        $connectedAccounts = SocialAccount::connected()->get(['platform', 'handle', 'token_expires_at', 'last_synced_at', 'last_error']);
+
+        $scheduledThisWeek  = ContentCalendar::where('status', 'scheduled')
+            ->whereBetween('scheduled_at', [now(), now()->addWeek()])
+            ->count();
+
+        $pendingApproval = ContentCalendar::where('moderation_status', 'pending')->count();
+
+        $failedPosts = ContentCalendar::where('status', 'failed')
+            ->where('updated_at', '>=', now()->subDay())
+            ->count();
+
+        $tokensExpiringSoon = $connectedAccounts->filter(fn ($a) => $a->token_expires_at && $a->token_expires_at->lt(now()->addHours(24)))->count();
+
+        return response()->json([
+            'connected_accounts'   => $connectedAccounts,
+            'scheduled_this_week'  => $scheduledThisWeek,
+            'pending_approval'     => $pendingApproval,
+            'failed_last_24h'      => $failedPosts,
+            'tokens_expiring_soon' => $tokensExpiringSoon,
+            'auto_post_enabled'    => config('services.social.auto_post_enabled', false),
+            'timestamp'            => now()->toIso8601String(),
+        ]);
     }
 }

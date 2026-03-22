@@ -3,7 +3,11 @@
 namespace App\Agents;
 
 use App\Models\AgentJob;
+use App\Models\ContentCalendar;
 use App\Models\ContentItem;
+use App\Models\HashtagSet;
+use App\Models\KnowledgeBase;
+use App\Models\ContentPerformance;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
 use App\Services\AI\OpenAIService;
@@ -34,15 +38,38 @@ class ContentAgent extends BaseAgent
 
     protected function executeTool(string $name, array $args, AgentJob $job): mixed
     {
+        // Social tool gating: check task_type first, fall back to keyword regex for NULL (backward compat)
+        $socialTools = ['hashtag_strategy', 'trend_analysis', 'cross_platform_adapt', 'create_content_calendar', 'select_hashtags'];
+        if (in_array($name, $socialTools)) {
+            $taskType    = $job->task_type;
+            $instruction = strtolower($job->instruction ?? '');
+            $isSocial    = $taskType === 'social'
+                || ($taskType === null && preg_match('/social|calendar|hashtag|trend|platform|schedule|instagram|tiktok|linkedin|twitter|facebook/', $instruction));
+
+            if (! $isSocial) {
+                return $this->toolResult(false, null,
+                    "Tool '{$name}' requires task_type=social. " .
+                    "Current task_type: " . ($taskType ?? 'null (keyword match also failed)') . ". " .
+                    "Set task_type=social on the agent job, or include social keywords in the instruction."
+                );
+            }
+        }
+
         return match ($name) {
-            'generate_content'  => $this->toolGenerateContent($args, $job),
-            'check_seo'         => $this->toolCheckSEO($args),
-            'save_to_knowledge' => $this->toolSaveToKnowledge($args),
-            'search_knowledge'  => $this->toolSearchKnowledge($args),
-            'publish_content'   => $this->toolPublishContent($args),
-            'repurpose_content' => $this->toolRepurposeContent($args, $job),
-            'analyse_content'   => $this->toolAnalyseContent($args),
-            default             => $this->toolResult(false, null, "Unknown tool: {$name}"),
+            'generate_content'        => $this->toolGenerateContent($args, $job),
+            'check_seo'               => $this->toolCheckSEO($args),
+            'save_to_knowledge'       => $this->toolSaveToKnowledge($args),
+            'search_knowledge'        => $this->toolSearchKnowledge($args),
+            'publish_content'         => $this->toolPublishContent($args),
+            'repurpose_content'       => $this->toolRepurposeContent($args, $job),
+            'analyse_content'         => $this->toolAnalyseContent($args),
+            'keyword_research'        => $this->toolKeywordResearch($args),
+            'hashtag_strategy'        => $this->toolHashtagStrategy($args),
+            'trend_analysis'          => $this->toolTrendAnalysis($args),
+            'cross_platform_adapt'    => $this->toolCrossPlatformAdapt($args),
+            'create_content_calendar' => $this->toolCreateContentCalendar($args),
+            'select_hashtags'         => $this->toolSelectHashtags($args),
+            default                   => $this->toolResult(false, null, "Unknown tool: {$name}"),
         };
     }
 
@@ -163,10 +190,108 @@ class ContentAgent extends BaseAgent
                     'parameters'  => [
                         'type'       => 'object',
                         'properties' => [
-                            'content' => ['type' => 'string'],
+                            'content'  => ['type' => 'string'],
                             'platform' => ['type' => 'string'],
                         ],
                         'required'   => ['content'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'keyword_research',
+                    'description' => 'Research and analyse keywords for a topic and platform. Stores results to knowledge base.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'topic'    => ['type' => 'string', 'description' => 'Main topic to research'],
+                            'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin', 'google', 'general']],
+                            'niche'    => ['type' => 'string', 'description' => 'Industry or content niche'],
+                        ],
+                        'required'   => ['topic'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'hashtag_strategy',
+                    'description' => 'Generate a platform-specific hashtag strategy with tiered reach. Requires task_type=social.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'topic'    => ['type' => 'string'],
+                            'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']],
+                            'niche'    => ['type' => 'string'],
+                            'save_set' => ['type' => 'boolean', 'description' => 'Save this hashtag set to the library for reuse'],
+                            'set_name' => ['type' => 'string', 'description' => 'Name for the saved hashtag set (required if save_set=true)'],
+                        ],
+                        'required'   => ['topic', 'platform'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'trend_analysis',
+                    'description' => 'Analyse patterns from existing knowledge base and performance data. Returns analytical insights only — does NOT fetch live trends. Requires task_type=social.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin', 'all']],
+                            'niche'    => ['type' => 'string'],
+                            'limit'    => ['type' => 'integer', 'description' => 'Max number of insights to return (default 5)'],
+                        ],
+                        'required'   => ['platform'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'cross_platform_adapt',
+                    'description' => 'Adapt source content for multiple target platforms, respecting platform constraints. Requires task_type=social.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'source_content'   => ['type' => 'string'],
+                            'source_platform'  => ['type' => 'string'],
+                            'target_platforms' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']]],
+                        ],
+                        'required'   => ['source_content', 'target_platforms'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'create_content_calendar',
+                    'description' => 'Create a 7-day content calendar and save entries to the database as drafts. Validates platform/content_type combos. Requires task_type=social.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'brand_name'      => ['type' => 'string'],
+                            'platforms'       => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']]],
+                            'frequency'       => ['type' => 'string', 'description' => 'Posting frequency e.g. "daily", "3x per week"'],
+                            'content_pillars' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Content themes/pillars'],
+                        ],
+                        'required'   => ['brand_name', 'platforms'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'select_hashtags',
+                    'description' => 'Select the best matching hashtag set from the library for a platform and topic. Requires task_type=social.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']],
+                            'niche'    => ['type' => 'string', 'description' => 'Content niche or topic'],
+                        ],
+                        'required'   => ['platform'],
                     ],
                 ],
             ],
@@ -438,6 +563,352 @@ PROMPT;
             $raw    = $this->openai->complete($prompt, 'gpt-4o-mini', 1024, 0.1);
             $result = json_decode($raw, true);
             return $this->toolResult(true, $result ?? ['raw' => $raw]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolKeywordResearch(array $args): string
+    {
+        $topic    = $args['topic'];
+        $platform = $args['platform'] ?? 'general';
+        $niche    = $args['niche']    ?? '';
+
+        $prompt = <<<PROMPT
+Perform keyword research for the following. Return ONLY valid JSON.
+
+Topic: {$topic}
+Platform: {$platform}
+Niche: {$niche}
+
+Analyse search intent and return keywords optimised for {$platform} discoverability.
+
+Return:
+{
+  "primary_keyword": "...",
+  "secondary": ["...", "..."],
+  "long_tail": ["...", "..."],
+  "search_intent": "informational|navigational|transactional|commercial",
+  "content_angle": "...",
+  "estimated_monthly_searches": "low|medium|high",
+  "competition": "low|medium|high"
+}
+PROMPT;
+
+        try {
+            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.2);
+            $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
+
+            // Store to knowledge base for future reference
+            $this->knowledge->store(
+                title:    "Keyword Research: {$topic} ({$platform})",
+                content:  json_encode($result),
+                tags:     ['keywords', $platform, $niche],
+                category: 'keyword-research',
+            );
+
+            return $this->toolResult(true, $result);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolHashtagStrategy(array $args): string
+    {
+        $topic    = $args['topic'];
+        $platform = $args['platform'];
+        $niche    = $args['niche'] ?? '';
+
+        $platformRules = [
+            'tiktok'    => '3-5 hashtags total: 1 niche (<100k), 1 medium (100k-1M), 1 broad (1M+)',
+            'instagram' => '5-10 hashtags: 60% niche, 30% medium, 10% broad',
+            'linkedin'  => '3-5 professional hashtags only, no personal/generic',
+            'twitter'   => '2-3 hashtags maximum; more reduces engagement',
+            'facebook'  => '3-5 hashtags; focus on community/group-relevant tags',
+        ];
+
+        $rules = $platformRules[$platform] ?? '5-10 relevant hashtags';
+
+        $prompt = <<<PROMPT
+Generate a hashtag strategy for {$platform}. Return ONLY valid JSON.
+
+Topic: {$topic}
+Niche: {$niche}
+Platform rule: {$rules}
+
+Return:
+{
+  "hashtags": [
+    {"tag": "#example", "tier": "niche|medium|broad", "estimated_reach": "50k"}
+  ],
+  "usage_note": "...",
+  "total_count": 5
+}
+PROMPT;
+
+        try {
+            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.3);
+            $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
+
+            // Optionally save to hashtag_sets library
+            if (! empty($args['save_set']) && $args['save_set'] && ! empty($args['set_name']) && is_array($result['hashtags'] ?? null)) {
+                $tags = array_column($result['hashtags'], 'tag');
+                HashtagSet::create([
+                    'name'      => $args['set_name'],
+                    'platform'  => $platform,
+                    'niche'     => $niche ?: null,
+                    'tags'      => $tags,
+                    'reach_tier'=> 'medium',
+                ]);
+                $result['saved_to_library'] = true;
+                $result['set_name']         = $args['set_name'];
+            }
+
+            return $this->toolResult(true, $result);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolTrendAnalysis(array $args): string
+    {
+        // Analyses EXISTING data only — no LLM hallucination of "live trends"
+        $platform = $args['platform'];
+        $niche    = $args['niche'] ?? null;
+        $limit    = min((int) ($args['limit'] ?? 5), 10);
+
+        try {
+            // Query recent knowledge base entries for this platform
+            $knowledgeQuery = KnowledgeBase::whereNull('deleted_at')
+                ->where(function ($q) use ($platform, $niche) {
+                    $q->where('content', 'ilike', "%{$platform}%");
+                    if ($niche) {
+                        $q->orWhere('content', 'ilike', "%{$niche}%");
+                    }
+                })
+                ->latest()
+                ->limit(20)
+                ->get(['title', 'content', 'category', 'created_at']);
+
+            $patterns = $knowledgeQuery->map(fn ($k) => [
+                'title'    => $k->title,
+                'excerpt'  => mb_substr($k->content, 0, 300),
+                'category' => $k->category,
+                'age_days' => $k->created_at->diffInDays(now()),
+            ])->toArray();
+
+            // Build analytical insight from patterns (no external API call)
+            $insights = [];
+            foreach (array_slice($patterns, 0, $limit) as $i => $pattern) {
+                $insights[] = [
+                    'type'        => 'analytical_insight',
+                    'platform'    => $platform,
+                    'source'      => 'knowledge_base',
+                    'title'       => $pattern['title'],
+                    'excerpt'     => $pattern['excerpt'],
+                    'age_days'    => $pattern['age_days'],
+                    'confidence'  => $pattern['age_days'] < 7 ? 'high' : ($pattern['age_days'] < 30 ? 'medium' : 'low'),
+                ];
+            }
+
+            return $this->toolResult(true, [
+                'type'        => 'analytical_insight',
+                'platform'    => $platform,
+                'insights'    => $insights,
+                'total_found' => count($patterns),
+                'note'        => 'Insights derived from existing knowledge base entries only. No live data fetched.',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolCrossPlatformAdapt(array $args): string
+    {
+        $source          = $args['source_content'];
+        $sourcePlatform  = $args['source_platform'] ?? 'general';
+        $targetPlatforms = $args['target_platforms'] ?? [];
+
+        $constraints = [
+            'tiktok'    => 'Max 150 chars caption + 3-5 hashtags. Hook in first line. Vertical video cue.',
+            'instagram' => 'Max 2200 chars. 5-10 hashtags at end. First line must hook before "more" truncation.',
+            'linkedin'  => 'Max 3000 chars. No hashtags in body — add 3-5 at very end. Professional tone.',
+            'twitter'   => 'Max 280 chars per tweet. Thread of 3-5 tweets. No more than 2-3 hashtags.',
+            'facebook'  => 'Max 500 chars for best reach. Conversational tone. No more than 3 hashtags.',
+        ];
+
+        $platformList = implode(', ', $targetPlatforms);
+        $constraintText = collect($targetPlatforms)
+            ->map(fn ($p) => "{$p}: " . ($constraints[$p] ?? 'standard format'))
+            ->implode("\n");
+
+        $prompt = <<<PROMPT
+Adapt this content from {$sourcePlatform} to multiple platforms. Return ONLY valid JSON.
+
+Source content:
+{$source}
+
+Target platforms: {$platformList}
+
+Platform constraints:
+{$constraintText}
+
+Return:
+{
+  "adaptations": {
+    "platform_name": {
+      "content": "...",
+      "char_count": 150,
+      "hashtag_count": 5,
+      "notes": "..."
+    }
+  }
+}
+PROMPT;
+
+        try {
+            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.7);
+            $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
+            return $this->toolResult(true, $result);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolCreateContentCalendar(array $args): string
+    {
+        $brandName     = $args['brand_name'];
+        $platforms     = $args['platforms'] ?? [];
+        $frequency     = $args['frequency'] ?? 'daily';
+        $pillars       = $args['content_pillars'] ?? ['educational', 'entertaining', 'promotional'];
+
+        // Validation matrix: invalid platform/content_type combos
+        $invalidCombos = [
+            'instagram' => ['thread'],
+            'twitter'   => ['reel', 'story', 'carousel'],
+            'linkedin'  => ['reel', 'story'],
+            'facebook'  => ['thread'],
+        ];
+
+        $defaultTypes = [
+            'tiktok'    => ['reel', 'post'],
+            'instagram' => ['reel', 'carousel', 'post', 'story'],
+            'facebook'  => ['post', 'reel'],
+            'twitter'   => ['post', 'thread'],
+            'linkedin'  => ['post', 'carousel'],
+        ];
+
+        $prompt = <<<PROMPT
+Create a 7-day content calendar for {$brandName}. Return ONLY valid JSON.
+
+Platforms: {$this->formatList($platforms)}
+Posting frequency: {$frequency}
+Content pillars: {$this->formatList($pillars)}
+
+Return:
+{
+  "calendar": [
+    {
+      "day": 1,
+      "date_offset": "+1 day",
+      "platform": "instagram",
+      "content_type": "reel",
+      "pillar": "educational",
+      "title": "...",
+      "draft_content": "...",
+      "hashtags": ["#tag1", "#tag2"]
+    }
+  ]
+}
+PROMPT;
+
+        try {
+            $raw  = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.8);
+            $plan = json_decode(trim($raw), true);
+
+            if (! is_array($plan) || empty($plan['calendar'])) {
+                return $this->toolResult(false, null, 'Failed to generate calendar plan');
+            }
+
+            $created   = [];
+            $skipped   = [];
+
+            foreach ($plan['calendar'] as $entry) {
+                $platform    = $entry['platform']     ?? '';
+                $contentType = $entry['content_type'] ?? 'post';
+
+                // Validate combo
+                if (isset($invalidCombos[$platform]) && in_array($contentType, $invalidCombos[$platform])) {
+                    $skipped[] = "{$platform}/{$contentType} is not a valid combination";
+                    // Use default type for this platform instead
+                    $contentType = $defaultTypes[$platform][0] ?? 'post';
+                }
+
+                $scheduledAt = now()->addDays((int) ($entry['day'] ?? 1));
+
+                $calendar = ContentCalendar::create([
+                    'title'        => $entry['title']        ?? "Day {$entry['day']} — {$platform}",
+                    'platform'     => $platform,
+                    'content_type' => $contentType,
+                    'draft_content'=> $entry['draft_content'] ?? null,
+                    'status'       => 'draft',
+                    'scheduled_at' => $scheduledAt,
+                    'hashtags'     => $entry['hashtags'] ?? [],
+                    'metadata'     => ['pillar' => $entry['pillar'] ?? null, 'brand' => $brandName],
+                ]);
+
+                $created[] = [
+                    'id'           => $calendar->id,
+                    'platform'     => $platform,
+                    'content_type' => $contentType,
+                    'title'        => $calendar->title,
+                    'scheduled_at' => $scheduledAt->toDateString(),
+                ];
+            }
+
+            return $this->toolResult(true, [
+                'created' => $created,
+                'skipped' => $skipped,
+                'total'   => count($created),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolSelectHashtags(array $args): string
+    {
+        $platform = $args['platform'];
+        $niche    = $args['niche'] ?? null;
+
+        try {
+            $query = HashtagSet::forPlatform($platform)
+                ->orderByDesc('usage_count');
+
+            if ($niche) {
+                $query->where(function ($q) use ($niche) {
+                    $q->forNiche($niche)->orWhereNull('niche');
+                });
+            }
+
+            $set = $query->first();
+
+            if (! $set) {
+                return $this->toolResult(false, null, "No hashtag sets found for platform={$platform}" . ($niche ? " niche={$niche}" : '') . ". Use hashtag_strategy to create one.");
+            }
+
+            // Increment usage count
+            $set->incrementUsage();
+
+            return $this->toolResult(true, [
+                'set_id'     => $set->id,
+                'name'       => $set->name,
+                'platform'   => $set->platform,
+                'niche'      => $set->niche,
+                'tags'       => $set->tags,
+                'reach_tier' => $set->reach_tier,
+                'usage_count'=> $set->usage_count,
+            ]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
         }
