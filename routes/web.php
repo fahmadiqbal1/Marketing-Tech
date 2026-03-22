@@ -64,6 +64,11 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
     Route::get('/settings',   [SettingsController::class,  'index']);
     Route::get('/pipeline',   [DashboardController::class, 'pipeline']);
     Route::get('/knowledge',  [DashboardController::class, 'knowledge']);
+    Route::get('/social',     [DashboardController::class, 'social']);
+
+    // Instagram OAuth (no throttle — user-initiated redirect/callback)
+    Route::get('/social/auth/instagram/redirect',  [DashboardController::class, 'socialInstagramRedirect']);
+    Route::get('/social/auth/instagram/callback',  [DashboardController::class, 'socialInstagramCallback']);
 
     Route::prefix('api')->group(function () {
 
@@ -88,6 +93,13 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::get('/knowledge/import-status',     [DashboardController::class, 'apiKnowledgeImportStatus']);
             Route::get('/custom-platforms',            [DashboardController::class, 'apiCustomPlatforms']);
             Route::get('/variations/{jobId}',          [PipelineActionController::class, 'listVariations']);
+
+            // Social media — reads/polling
+            Route::get('/content-calendar',            [DashboardController::class, 'apiContentCalendar']);
+            Route::get('/hashtag-sets',                [DashboardController::class, 'apiHashtagSets']);
+            Route::get('/social-accounts',             [DashboardController::class, 'apiSocialAccounts']);
+            Route::get('/trend-insights',              [DashboardController::class, 'apiTrendInsights']);
+            Route::get('/social/health',               [DashboardController::class, 'apiSocialHealth']);
         });
 
         // ── Write / action endpoints — 10 req/min ────────────────────────────────
@@ -109,11 +121,25 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/pipeline/jobs/{id}/promote-winner',   [PipelineActionController::class, 'promoteWinner']);
             Route::post('/pipeline/jobs/{id}/rerun-from-winner',[PipelineActionController::class, 'rerunFromWinner']);
             Route::post('/variations/{id}/performance',         [PipelineActionController::class, 'recordPerformance']);
+
+            // Social media — writes/actions
+            Route::post('/content-calendar',                    [DashboardController::class, 'apiCreateCalendarEntry']);
+            Route::put('/content-calendar/{id}',                [DashboardController::class, 'apiUpdateCalendarEntry']);
+            Route::delete('/content-calendar/{id}',             [DashboardController::class, 'apiDeleteCalendarEntry']);
+            Route::post('/content-calendar/{id}/approve',       [DashboardController::class, 'apiApproveCalendarEntry']);
+            Route::post('/content-calendar/{id}/reject',        [DashboardController::class, 'apiRejectCalendarEntry']);
+            Route::post('/hashtag-sets',                        [DashboardController::class, 'apiCreateHashtagSet']);
+            Route::delete('/hashtag-sets/{id}',                 [DashboardController::class, 'apiDeleteHashtagSet']);
+            Route::post('/social-accounts',                     [DashboardController::class, 'apiUpsertSocialAccount']);
+            Route::delete('/social-accounts/{id}',              [DashboardController::class, 'apiDeleteSocialAccount']);
         });
 
         // ── Heavy / expensive operations — 5 req/min ────────────────────────────
         Route::middleware('throttle:5,1')->group(function () {
             Route::post('/knowledge/github', [DashboardController::class, 'apiKnowledgeGitHub']);
+
+            // Social media — heavy ops
+            Route::post('/content-calendar/{id}/publish',       [DashboardController::class, 'apiPublishCalendarEntry']);
         });
     });
 });
