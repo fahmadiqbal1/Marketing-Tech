@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 /**
  * DashboardController – thin controller.
@@ -94,7 +95,21 @@ class DashboardController extends Controller
 
     public function apiJobs(Request $request): JsonResponse
     {
-        return response()->json($this->stats->getJobs($request->only(['status', 'agent_type'])));
+        $data = $this->stats->getJobs($request->only(['status', 'agent_type']));
+
+        $topReason = AgentJob::where('status', 'failed')
+            ->whereNotNull('error_message')
+            ->latest()
+            ->limit(20)
+            ->pluck('error_message')
+            ->groupBy(fn ($m) => Str::limit($m, 60))
+            ->sortByDesc(fn ($g) => $g->count())
+            ->keys()
+            ->first();
+
+        $data['top_failure_reason'] = $topReason;
+
+        return response()->json($data);
     }
 
     // ── API: Campaigns ────────────────────────────────────────────────
@@ -275,8 +290,10 @@ class DashboardController extends Controller
             ->select(['id', 'title', 'category', 'tags', 'chunk_index', 'access_count', 'last_accessed_at', 'created_at']);
 
         if ($search = $request->query('search')) {
-            $query->where('title', 'ilike', "%{$search}%")
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'ilike', "%{$search}%")
                   ->orWhere('content', 'ilike', "%{$search}%");
+            });
         }
 
         if ($category = $request->query('category')) {
@@ -305,6 +322,7 @@ class DashboardController extends Controller
                 'total_chunks'  => $totalChunks,
                 'categories'    => $categories,
             ],
+            'meta'          => ['database_available' => true],
         ]);
     }
 
@@ -370,6 +388,8 @@ class DashboardController extends Controller
         if (empty($repoUrl)) {
             return response()->json(['error' => 'repo_url required'], 422);
         }
+        // Normalize before hashing — must match IngestGitHubRepo::normalizeRepoUrl()
+        $repoUrl  = strtolower(rtrim(preg_replace('#\.git$#', '', trim($repoUrl)), '/'));
         $cacheKey = 'github-import:' . md5($repoUrl);
         $status   = Cache::get($cacheKey);
         if (! $status) {

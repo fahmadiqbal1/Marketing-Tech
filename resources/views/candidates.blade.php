@@ -232,9 +232,22 @@ function candidatesApp() {
         detailLoading: false,
         detail: null,
 
-        async init() { await this.load(); },
+        async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_candidates') ?? '{}');
+            this.stageFilter = saved.stageFilter ?? '';
+            this.search      = saved.search ?? '';
+            await this.load();
+            // Post-load: reset stageFilter if stage no longer exists in data
+            if (this.stageFilter && !Object.keys(this.byStage).includes(this.stageFilter)) {
+                this.stageFilter = '';
+            }
+        },
 
         async load() {
+            localStorage.setItem('filters_candidates', JSON.stringify({
+                stageFilter: this.stageFilter,
+                search:      this.search,
+            }));
             this.loading = true;
             this.clearMessages();
             try {

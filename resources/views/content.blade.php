@@ -187,9 +187,22 @@ function contentApp() {
         detailLoading: false,
         detail: null,
 
-        async init() { await this.load(); },
+        async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_content') ?? '{}');
+            const validTypes    = ['', 'blog', 'social', 'email', 'ad', 'landing_page', 'video_script'];
+            const validStatuses = ['', 'draft', 'scheduled', 'published', 'failed'];
+            this.typeFilter   = validTypes.includes(saved.typeFilter ?? '')    ? (saved.typeFilter ?? '')   : '';
+            this.statusFilter = validStatuses.includes(saved.statusFilter ?? '') ? (saved.statusFilter ?? '') : '';
+            this.search       = saved.search ?? '';
+            await this.load();
+        },
 
         async load() {
+            localStorage.setItem('filters_content', JSON.stringify({
+                typeFilter:   this.typeFilter,
+                statusFilter: this.statusFilter,
+                search:       this.search,
+            }));
             this.loading = true;
             this.clearMessages();
             try {

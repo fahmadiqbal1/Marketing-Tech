@@ -81,12 +81,13 @@ class IngestGitHubRepo implements ShouldQueue
         // Filter to relevant files
         $files = $this->filterFiles($tree);
 
-        $ingested   = 0;
-        $skipped    = 0;
-        $failed     = 0;
-        $totalChars = 0;
-        $total      = count($files);
-        $cacheKey   = 'github-import:' . md5($this->repoUrl);
+        $ingested    = 0;
+        $skipped     = 0;
+        $failed      = 0;
+        $failedFiles = [];
+        $totalChars  = 0;
+        $total       = count($files);
+        $cacheKey    = 'github-import:' . md5($this->normalizeRepoUrl($this->repoUrl));
 
         Cache::put($cacheKey, [
             'status'     => 'running',
@@ -94,7 +95,7 @@ class IngestGitHubRepo implements ShouldQueue
             'ingested'   => 0,
             'total'      => $total,
             'started_at' => now()->toISOString(),
-        ], 3600);
+        ], now()->addHours(6));
 
         foreach ($files as $file) {
             if ($ingested >= self::MAX_FILES || $ingested + $skipped >= self::MAX_ENTRIES) {
@@ -153,7 +154,7 @@ class IngestGitHubRepo implements ShouldQueue
                         'repo'     => "{$owner}/{$repo}",
                         'ingested' => $ingested,
                         'total'    => $total,
-                    ], 3600);
+                    ], now()->addHours(6));
                 }
 
             } catch (\Throwable $e) {
@@ -162,6 +163,7 @@ class IngestGitHubRepo implements ShouldQueue
                     'path'  => $file['path'],
                     'error' => $e->getMessage(),
                 ]);
+                $failedFiles[] = ['path' => $file['path'], 'error' => $e->getMessage()];
                 $failed++;
             }
         }
@@ -173,8 +175,9 @@ class IngestGitHubRepo implements ShouldQueue
             'total'        => $total,
             'skipped'      => $skipped,
             'failed'       => $failed,
+            'failed_files' => array_slice($failedFiles, 0, 20),
             'completed_at' => now()->toISOString(),
-        ], 3600);
+        ], now()->addHours(6));
 
         Log::info("IngestGitHubRepo: completed", [
             'repo'      => "{$owner}/{$repo}",
@@ -187,12 +190,12 @@ class IngestGitHubRepo implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        $cacheKey = 'github-import:' . md5($this->repoUrl);
+        $cacheKey = 'github-import:' . md5($this->normalizeRepoUrl($this->repoUrl));
         $existing = Cache::get($cacheKey, []);
         Cache::put($cacheKey, array_merge($existing, [
             'status' => 'failed',
             'error'  => $exception->getMessage(),
-        ]), 3600);
+        ]), now()->addHours(6));
     }
 
     // ── Private helpers ───────────────────────────────────────────────
@@ -285,6 +288,18 @@ class IngestGitHubRepo implements ShouldQueue
     private function isSkillManifest(string $content): bool
     {
         return str_contains($content, 'ROLE:') && str_contains($content, 'TOOLS:');
+    }
+
+    /**
+     * Normalize a GitHub repo URL so cache keys are consistent regardless of
+     * trailing slashes, .git suffix, or casing differences.
+     * e.g. https://github.com/Owner/Repo.git/ → https://github.com/owner/repo
+     */
+    private function normalizeRepoUrl(string $url): string
+    {
+        $url = strtolower(trim($url));
+        $url = preg_replace('#\.git$#', '', $url);
+        return rtrim($url, '/');
     }
 
     private function checkRateLimit(array $headers): void

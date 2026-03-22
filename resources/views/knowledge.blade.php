@@ -95,6 +95,25 @@
                              :style="'width:' + (importProgress?.total ? Math.round((importProgress.ingested / importProgress.total) * 100) : 5) + '%'"></div>
                     </div>
                     <p x-show="importProgress?.error" class="text-xs text-red-400" x-text="importProgress?.error"></p>
+                    {{-- Failed files expandable panel --}}
+                    <template x-if="importProgress?.failed_files?.length">
+                        <div class="mt-1">
+                            <button @click="showFailedFiles = !showFailedFiles"
+                                    class="text-xs text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1">
+                                <span>⚠</span>
+                                <span x-text="importProgress.failed_files.length + ' file(s) failed'"></span>
+                                <span x-text="showFailedFiles ? '▲' : '▼'" class="text-slate-500"></span>
+                            </button>
+                            <ul x-show="showFailedFiles" class="mt-1.5 space-y-1 max-h-28 overflow-y-auto">
+                                <template x-for="f in importProgress.failed_files.slice(0,5)" :key="f.path">
+                                    <li class="text-xs text-slate-400 leading-snug">
+                                        <span class="font-mono text-slate-300" x-text="f.path"></span>
+                                        <span class="text-red-400 ml-1" x-text="'— ' + f.error"></span>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
                 </div>
             </div>
             <div x-show="importMode === 'github'" class="px-6 py-4 border-t border-slate-800 flex gap-3">
@@ -315,14 +334,26 @@ function knowledgeApp() {
         githubResult: null,
         importProgress: null,
         importPollTimer: null,
+        showFailedFiles: false,
         toast: { show: false, message: '', error: false },
         newEntry: { title: '', content: '', category: 'general', tagsRaw: '' },
 
         async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_knowledge') ?? '{}');
+            this.categoryFilter = saved.categoryFilter ?? '';
+            this.search         = saved.search ?? '';
             await this.load();
+            // Post-load: reset categoryFilter if no longer an available category
+            if (this.categoryFilter && !(this.stats.categories ?? []).includes(this.categoryFilter)) {
+                this.categoryFilter = '';
+            }
         },
 
         async load() {
+            localStorage.setItem('filters_knowledge', JSON.stringify({
+                categoryFilter: this.categoryFilter,
+                search:         this.search,
+            }));
             this.loading = true;
             try {
                 const params = new URLSearchParams({
@@ -408,16 +439,21 @@ function knowledgeApp() {
         },
 
         async importGitHub() {
-            if (!this.githubImport.repoUrl.trim()) {
+            // Normalize before dispatch — must match PHP normalizeRepoUrl() in IngestGitHubRepo
+            const repoUrl = this.githubImport.repoUrl.trim()
+                .toLowerCase()
+                .replace(/\.git$/, '')
+                .replace(/\/$/, '');
+            if (!repoUrl) {
                 this.showToast('Repository URL is required.', true);
                 return;
             }
             this.importing = true;
             this.githubResult = null;
             this.importProgress = null;
+            this.showFailedFiles = false;
             if (this.importPollTimer) { clearInterval(this.importPollTimer); this.importPollTimer = null; }
 
-            const repoUrl = this.githubImport.repoUrl.trim();
             try {
                 const r = await apiPost('/dashboard/api/knowledge/github', {
                     repo_url: repoUrl,
