@@ -66,9 +66,19 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
     Route::get('/knowledge',  [DashboardController::class, 'knowledge']);
     Route::get('/social',     [DashboardController::class, 'social']);
 
-    // Instagram OAuth (no throttle — user-initiated redirect/callback)
+    // Social OAuth flows — all platforms (no throttle — user-initiated)
     Route::get('/social/auth/instagram/redirect',  [DashboardController::class, 'socialInstagramRedirect']);
     Route::get('/social/auth/instagram/callback',  [DashboardController::class, 'socialInstagramCallback']);
+    Route::get('/social/auth/twitter/redirect',    [DashboardController::class, 'socialTwitterRedirect']);
+    Route::get('/social/auth/twitter/callback',    [DashboardController::class, 'socialTwitterCallback']);
+    Route::get('/social/auth/linkedin/redirect',   [DashboardController::class, 'socialLinkedInRedirect']);
+    Route::get('/social/auth/linkedin/callback',   [DashboardController::class, 'socialLinkedInCallback']);
+    Route::get('/social/auth/facebook/redirect',   [DashboardController::class, 'socialFacebookRedirect']);
+    Route::get('/social/auth/facebook/callback',   [DashboardController::class, 'socialFacebookCallback']);
+    Route::get('/social/auth/tiktok/redirect',     [DashboardController::class, 'socialTikTokRedirect']);
+    Route::get('/social/auth/tiktok/callback',     [DashboardController::class, 'socialTikTokCallback']);
+    Route::get('/social/auth/youtube/redirect',    [DashboardController::class, 'socialYouTubeRedirect']);
+    Route::get('/social/auth/youtube/callback',    [DashboardController::class, 'socialYouTubeCallback']);
 
     Route::prefix('api')->group(function () {
 

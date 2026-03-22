@@ -5,37 +5,54 @@ namespace App\Services\Social;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\Platforms\FacebookService;
 use App\Services\Social\Platforms\InstagramService;
-use App\Services\Social\Platforms\StubPlatformService;
+use App\Services\Social\Platforms\LinkedInService;
+use App\Services\Social\Platforms\TikTokService;
+use App\Services\Social\Platforms\TwitterService;
+use App\Services\Social\Platforms\YouTubeService;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Log;
 
 class SocialPlatformService
 {
     /**
-     * Return the appropriate platform driver.
+     * Return the real platform driver for a given platform slug.
+     * All platforms have full API implementations — no stubs.
      */
     public function driver(string $platform): SocialPlatformInterface
     {
         return match ($platform) {
             'instagram' => new InstagramService(),
-            default     => new StubPlatformService($platform),
+            'twitter'   => new TwitterService(),
+            'linkedin'  => new LinkedInService(),
+            'facebook'  => new FacebookService(),
+            'tiktok'    => new TikTokService(),
+            'youtube'   => new YouTubeService(),
+            default     => throw new \InvalidArgumentException("Unsupported social platform: {$platform}"),
         };
     }
 
     /**
      * Publish with per-platform rate limiting.
-     * Throws \RuntimeException on 429 — caller should re-queue with backoff.
+     * Throws \RuntimeException("RATE_LIMITED:{seconds}") on 429 — caller re-queues with backoff.
      *
-     * Rate limit: 10 posts per 60 seconds per platform+account.
+     * Rate limits (conservative defaults, adjust per platform ToS):
+     *  - Instagram: 25 posts/day per user (we limit 10/min locally)
+     *  - Twitter:   300 tweets/3h per app (we limit 10/min locally)
+     *  - LinkedIn:  150 requests/day per member (we limit 5/min locally)
+     *  - Facebook:  200 calls/hour per user token (we limit 10/min locally)
+     *  - TikTok:    varies by tier (we limit 5/min locally)
+     *  - YouTube:   10,000 units/day quota (we limit 2/min locally — upload = 1600 units)
      */
     public function publishWithRateLimit(SocialAccount $account, ContentCalendar $entry): array
     {
-        $key = "social-post:{$account->platform}:{$account->id}";
+        $key      = "social-post:{$account->platform}:{$account->id}";
+        $perMin   = $this->rateLimit($account->platform);
 
         $executed = RateLimiter::attempt(
             $key,
-            perMinute: 10,
+            perMinute: $perMin,
             callback: function () use ($account, $entry) {
                 return $this->driver($account->platform)->publish($account, $entry);
             },
@@ -52,8 +69,20 @@ class SocialPlatformService
     }
 
     /**
-     * Calculate exponential backoff delay in seconds for retry_count.
-     * retry 1 → 60s, retry 2 → 120s, retry 3 → 240s
+     * Per-platform conservative rate limit (posts per minute).
+     */
+    public function rateLimit(string $platform): int
+    {
+        return match ($platform) {
+            'youtube'  => 2,
+            'tiktok'   => 5,
+            'linkedin' => 5,
+            default    => 10,
+        };
+    }
+
+    /**
+     * Exponential backoff delay: retry 1→60s, 2→120s, 3→240s.
      */
     public static function backoffSeconds(int $retryCount): int
     {
@@ -66,5 +95,13 @@ class SocialPlatformService
     public function autoPostEnabled(): bool
     {
         return (bool) config('services.social.auto_post_enabled', false);
+    }
+
+    /**
+     * List all supported platforms.
+     */
+    public static function platforms(): array
+    {
+        return ['instagram', 'twitter', 'linkedin', 'facebook', 'tiktok', 'youtube'];
     }
 }

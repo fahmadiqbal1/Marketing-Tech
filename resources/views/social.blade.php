@@ -135,31 +135,44 @@
         <div x-show="activeTab === 'accounts'" x-cloak>
             <div x-data="accountsComponent()" x-init="init()" class="space-y-4">
 
+                {{-- Info banner: all platforms use real OAuth --}}
+                <div class="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-xs text-sky-300">
+                    <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span>All platforms use real OAuth 2.0. Click <strong>Connect</strong> to authorise via the official platform login. Credentials must be set in <code class="bg-slate-800 px-1 rounded">.env</code> first.</span>
+                </div>
+
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     @foreach([
-                        ['tiktok',    'TikTok',    'bg-slate-800 border-slate-700', '#EE1D52'],
-                        ['instagram', 'Instagram', 'bg-slate-800 border-slate-700', '#E1306C'],
-                        ['facebook',  'Facebook',  'bg-slate-800 border-slate-700', '#1877F2'],
-                        ['twitter',   'Twitter/X', 'bg-slate-800 border-slate-700', '#1DA1F2'],
-                        ['linkedin',  'LinkedIn',  'bg-slate-800 border-slate-700', '#0077B5'],
-                    ] as [$platform, $label, $cardClass, $color])
-                    <div class="stat-card relative">
-                        <div class="flex items-start justify-between mb-3">
+                        ['instagram', 'Instagram', '#E1306C'],
+                        ['tiktok',    'TikTok',    '#EE1D52'],
+                        ['facebook',  'Facebook',  '#1877F2'],
+                        ['twitter',   'Twitter/X', '#1DA1F2'],
+                        ['linkedin',  'LinkedIn',  '#0077B5'],
+                        ['youtube',   'YouTube',   '#FF0000'],
+                    ] as [$platform, $label, $color])
+                    <div class="stat-card relative overflow-hidden">
+                        {{-- Accent bar --}}
+                        <div class="absolute top-0 left-0 right-0 h-0.5" style="background: {{ $color }}"></div>
+
+                        <div class="flex items-start justify-between mb-3 mt-1">
                             <div>
                                 <p class="text-sm font-semibold text-white">{{ $label }}</p>
                                 <template x-if="accountFor('{{ $platform }}')">
-                                    <p class="text-xs text-slate-400 mt-0.5" x-text="'@' + accountFor('{{ $platform }}').handle"></p>
+                                    <p class="text-xs text-slate-400 mt-0.5" x-text="(accountFor('{{ $platform }}').display_name || ('@' + accountFor('{{ $platform }}').handle))"></p>
+                                </template>
+                                <template x-if="!accountFor('{{ $platform }}')">
+                                    <p class="text-xs text-slate-600 mt-0.5">Not connected</p>
                                 </template>
                             </div>
                             <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
-                                <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">Connected</span>
+                                <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">Connected</span>
                             </template>
                             <template x-if="!accountFor('{{ $platform }}') || !accountFor('{{ $platform }}').is_connected">
-                                <span class="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded-full">Not connected</span>
+                                <span class="text-xs bg-slate-700/60 text-slate-500 px-2 py-0.5 rounded-full">Disconnected</span>
                             </template>
                         </div>
 
-                        <template x-if="accountFor('{{ $platform }}')">
+                        <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
                             <div class="grid grid-cols-2 gap-2 mb-3 text-center">
                                 <div class="bg-slate-900/50 rounded-lg py-2">
                                     <p class="text-lg font-bold text-white" x-text="(accountFor('{{ $platform }}').follower_count ?? 0).toLocaleString()"></p>
@@ -173,55 +186,33 @@
                         </template>
 
                         <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').last_error">
-                            <p class="text-xs text-red-400 mb-2 truncate" x-text="accountFor('{{ $platform }}').last_error"></p>
+                            <p class="text-xs text-red-400 mb-2 bg-red-500/10 rounded px-2 py-1 truncate" x-text="accountFor('{{ $platform }}').last_error"></p>
                         </template>
 
-                        <div class="flex gap-2">
-                            @if($platform === 'instagram')
-                            <a href="/dashboard/social/auth/instagram/redirect" class="flex-1 text-center text-sm py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white transition-colors">
-                                <template x-if="accountFor('instagram') && accountFor('instagram').is_connected">
+                        {{-- All platforms: real OAuth redirect --}}
+                        <div class="flex gap-2 mt-auto">
+                            <a href="/dashboard/social/auth/{{ $platform }}/redirect"
+                               class="flex-1 text-center text-xs py-1.5 rounded-lg font-medium transition-colors"
+                               :class="accountFor('{{ $platform }}')?.is_connected
+                                   ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                                   : 'bg-violet-600 hover:bg-violet-500 text-white'">
+                                <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
                                     <span>Reconnect</span>
                                 </template>
-                                <template x-if="!accountFor('instagram') || !accountFor('instagram').is_connected">
-                                    <span>Connect</span>
+                                <template x-if="!accountFor('{{ $platform }}') || !accountFor('{{ $platform }}').is_connected">
+                                    <span>Connect via OAuth</span>
                                 </template>
                             </a>
-                            @else
-                            <button @click="openConnect('{{ $platform }}')" class="flex-1 text-sm py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
-                                <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
-                                    <span>Edit</span>
-                                </template>
-                                <template x-if="!accountFor('{{ $platform }}') || !accountFor('{{ $platform }}').is_connected">
-                                    <span>Add Token</span>
-                                </template>
-                            </button>
-                            @endif
+                            <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
+                                <button @click="disconnectAccount('{{ $platform }}')"
+                                        class="px-2 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs transition-colors"
+                                        title="Disconnect">
+                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                                </button>
+                            </template>
                         </div>
                     </div>
                     @endforeach
-                </div>
-
-                {{-- Connect modal (for non-Instagram platforms) --}}
-                <div x-show="showConnect" x-cloak @keydown.escape.window="showConnect = false"
-                     class="fixed inset-0 z-50 flex items-center justify-center">
-                    <div @click="showConnect = false" class="fixed inset-0 bg-black/60"></div>
-                    <div class="relative z-10 bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md mx-4">
-                        <h3 class="text-lg font-semibold text-white mb-4" x-text="'Connect ' + connectPlatform"></h3>
-                        <div class="space-y-3">
-                            <div>
-                                <label class="text-xs text-slate-400 mb-1 block">Handle / Username</label>
-                                <input x-model="connectHandle" type="text" class="form-input w-full" placeholder="@yourbrand">
-                            </div>
-                            <div>
-                                <label class="text-xs text-slate-400 mb-1 block">Access Token (optional)</label>
-                                <input x-model="connectToken" type="password" class="form-input w-full" placeholder="Paste token here">
-                            </div>
-                            <div class="flex gap-2 pt-1">
-                                <button @click="saveAccount()" :disabled="saving" class="btn-primary flex-1 text-sm py-2" x-text="saving ? 'Saving…' : 'Save'"></button>
-                                <button @click="showConnect = false" class="flex-1 text-sm py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">Cancel</button>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -236,11 +227,12 @@
                     <div class="grid grid-cols-2 gap-3 mb-3">
                         <input x-model="newSet.name" type="text" class="form-input" placeholder="Set name">
                         <select x-model="newSet.platform" class="form-input">
-                            <option value="tiktok">TikTok</option>
                             <option value="instagram">Instagram</option>
+                            <option value="tiktok">TikTok</option>
                             <option value="facebook">Facebook</option>
                             <option value="twitter">Twitter/X</option>
                             <option value="linkedin">LinkedIn</option>
+                            <option value="youtube">YouTube</option>
                         </select>
                         <input x-model="newSet.niche" type="text" class="form-input" placeholder="Niche (optional)">
                         <select x-model="newSet.reach_tier" class="form-input">
@@ -256,7 +248,7 @@
 
                 {{-- Filter by platform --}}
                 <div class="flex gap-2">
-                    @foreach(['','tiktok','instagram','facebook','twitter','linkedin'] as $p)
+                    @foreach(['','instagram','tiktok','facebook','twitter','linkedin','youtube'] as $p)
                     <button @click="platformFilter = '{{ $p }}'; filterSets()"
                         :class="platformFilter === '{{ $p }}' ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'"
                         class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">{{ $p ?: 'All' }}</button>
@@ -459,12 +451,6 @@ function calendarComponent() {
 function accountsComponent() {
     return {
         accounts: [],
-        showConnect: false,
-        connectPlatform: '',
-        connectHandle: '',
-        connectToken: '',
-        saving: false,
-
         async init() { await this.load(); },
 
         async load() {
@@ -476,20 +462,11 @@ function accountsComponent() {
             return this.accounts.find(a => a.platform === platform) ?? null;
         },
 
-        openConnect(platform) {
-            const existing = this.accountFor(platform);
-            this.connectPlatform = platform;
-            this.connectHandle   = existing?.handle ?? '';
-            this.connectToken    = '';
-            this.showConnect     = true;
-        },
-
-        async saveAccount() {
-            this.saving = true;
-            const payload = { platform: this.connectPlatform, handle: this.connectHandle.replace('@',''), access_token: this.connectToken || undefined };
-            await apiPost('/dashboard/api/social-accounts', payload);
-            this.showConnect = false;
-            this.saving = false;
+        async disconnectAccount(platform) {
+            const acct = this.accountFor(platform);
+            if (! acct) return;
+            if (! confirm(`Disconnect ${platform}? The account record will be removed.`)) return;
+            await apiDelete(`/dashboard/api/social-accounts/${acct.id}`);
             await this.load();
         },
     };

@@ -13,6 +13,11 @@ use App\Models\SocialAccount;
 use App\Services\IterationEngineService;
 use App\Services\Social\SocialPlatformService;
 use App\Services\Social\Platforms\InstagramService;
+use App\Services\Social\Platforms\TwitterService;
+use App\Services\Social\Platforms\LinkedInService;
+use App\Services\Social\Platforms\FacebookService;
+use App\Services\Social\Platforms\TikTokService;
+use App\Services\Social\Platforms\YouTubeService;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
 use App\Models\ContentVariation;
@@ -692,6 +697,241 @@ class DashboardController extends Controller
         } catch (\Throwable $e) {
             Log::error('Instagram OAuth callback failed', ['error' => $e->getMessage()]);
             return redirect('/dashboard/social')->with('error', 'Failed to connect Instagram: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — Twitter ───────────────────────────────────────────────
+
+    public function socialTwitterRedirect(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new TwitterService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'Twitter API credentials not configured. Set SOCIAL_TWITTER_CLIENT_ID and SOCIAL_TWITTER_CLIENT_SECRET in .env');
+        }
+        $codeVerifier = bin2hex(random_bytes(32));
+        $data = $svc->getAuthorizationUrl($codeVerifier);
+        session(['oauth_twitter_verifier' => $data['code_verifier'], 'oauth_twitter_state' => $data['state']]);
+        return redirect($data['url']);
+    }
+
+    public function socialTwitterCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'Twitter authorization denied: ' . $request->get('error_description'));
+        }
+        if ($request->get('state') !== session('oauth_twitter_state')) {
+            return redirect('/dashboard/social')->with('error', 'Twitter OAuth state mismatch — possible CSRF.');
+        }
+        $svc = new TwitterService();
+        try {
+            $tokenData    = $svc->exchangeCode($request->get('code'), session('oauth_twitter_verifier'));
+            $profile      = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->get('https://api.twitter.com/2/users/me', ['user.fields' => 'username'])->json();
+            $userId       = $profile['data']['id']       ?? null;
+            $username     = $profile['data']['username'] ?? 'unknown';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'twitter', 'handle' => $username],
+                [
+                    'platform_user_id' => $userId,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            session()->forget(['oauth_twitter_verifier', 'oauth_twitter_state']);
+            return redirect('/dashboard/social')->with('success', 'Twitter / X connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('Twitter OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect Twitter: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — LinkedIn ──────────────────────────────────────────────
+
+    public function socialLinkedInRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new LinkedInService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn API credentials not configured. Set SOCIAL_LINKEDIN_CLIENT_ID and SOCIAL_LINKEDIN_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialLinkedInCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn authorization denied: ' . $request->get('error_description'));
+        }
+        $svc = new LinkedInService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            $profile   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
+                ->get('https://api.linkedin.com/v2/me', ['projection' => '(id,localizedFirstName,localizedLastName)'])->json();
+            $userId    = $profile['id'] ?? null;
+            $name      = trim(($profile['localizedFirstName'] ?? '') . ' ' . ($profile['localizedLastName'] ?? '')) ?: 'unknown';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'linkedin', 'handle' => $userId ?? $name],
+                [
+                    'platform_user_id' => $userId,
+                    'display_name'     => $name,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', 'LinkedIn connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('LinkedIn OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect LinkedIn: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — Facebook ──────────────────────────────────────────────
+
+    public function socialFacebookRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new FacebookService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'Facebook API credentials not configured. Set SOCIAL_FACEBOOK_CLIENT_ID and SOCIAL_FACEBOOK_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialFacebookCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'Facebook authorization denied: ' . $request->get('error_description'));
+        }
+        $svc = new FacebookService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            $pageId    = $tokenData['page_id']   ?? null;
+            $pageName  = $tokenData['page_name'] ?? 'Facebook Page';
+            $handle    = $pageId ?? 'page';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'facebook', 'handle' => $handle],
+                [
+                    'platform_user_id' => $pageId,
+                    'display_name'     => $pageName,
+                    'access_token'     => $tokenData['page_access_token'],
+                    'token_expires_at' => ($tokenData['expires_in'] ?? 0) > 0
+                                            ? now()->addSeconds($tokenData['expires_in'])
+                                            : null,
+                    'metadata'         => ['user_access_token' => $tokenData['user_access_token'], 'page_id' => $pageId, 'page_name' => $pageName],
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', "Facebook Page \"{$pageName}\" connected successfully.");
+        } catch (\Throwable $e) {
+            Log::error('Facebook OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect Facebook: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — TikTok ────────────────────────────────────────────────
+
+    public function socialTikTokRedirect(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new TikTokService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'TikTok API credentials not configured. Set SOCIAL_TIKTOK_CLIENT_KEY and SOCIAL_TIKTOK_CLIENT_SECRET in .env');
+        }
+        $codeVerifier = bin2hex(random_bytes(32));
+        $data = $svc->getAuthorizationUrl($codeVerifier);
+        session(['oauth_tiktok_verifier' => $data['code_verifier'], 'oauth_tiktok_state' => $data['state']]);
+        return redirect($data['url']);
+    }
+
+    public function socialTikTokCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'TikTok authorization denied: ' . $request->get('error_description', $request->get('error')));
+        }
+        if ($request->get('state') !== session('oauth_tiktok_state')) {
+            return redirect('/dashboard/social')->with('error', 'TikTok OAuth state mismatch — possible CSRF.');
+        }
+        $svc = new TikTokService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'), session('oauth_tiktok_verifier'));
+            $openId    = $tokenData['open_id'] ?? null;
+            // Fetch creator info
+            $profile   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->post('https://open.tiktok.com/v2/user/info/', ['fields' => 'open_id,display_name,avatar_url'])
+                ->json('data.user', []);
+            $handle    = $openId ?? 'tiktok_user';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'tiktok', 'handle' => $handle],
+                [
+                    'platform_user_id' => $openId,
+                    'display_name'     => $profile['display_name'] ?? null,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            session()->forget(['oauth_tiktok_verifier', 'oauth_tiktok_state']);
+            return redirect('/dashboard/social')->with('success', 'TikTok connected successfully.');
+        } catch (\Throwable $e) {
+            Log::error('TikTok OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect TikTok: ' . $e->getMessage());
+        }
+    }
+
+    // ─── Social OAuth — YouTube ───────────────────────────────────────────────
+
+    public function socialYouTubeRedirect(): \Illuminate\Http\RedirectResponse
+    {
+        $svc = new YouTubeService();
+        if (! $svc->isConfigured()) {
+            return redirect('/dashboard/social')->with('error', 'YouTube API credentials not configured. Set SOCIAL_YOUTUBE_CLIENT_ID and SOCIAL_YOUTUBE_CLIENT_SECRET in .env');
+        }
+        return redirect($svc->getAuthorizationUrl());
+    }
+
+    public function socialYouTubeCallback(Request $request): \Illuminate\Http\RedirectResponse
+    {
+        if ($request->has('error')) {
+            return redirect('/dashboard/social')->with('error', 'YouTube authorization denied: ' . $request->get('error'));
+        }
+        $svc = new YouTubeService();
+        try {
+            $tokenData = $svc->exchangeCode($request->get('code'));
+            // Fetch channel info
+            $channel   = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->get('https://www.googleapis.com/youtube/v3/channels', ['part' => 'snippet', 'mine' => 'true'])
+                ->json('items.0', []);
+            $channelId    = $channel['id']                       ?? null;
+            $channelTitle = $channel['snippet']['title']         ?? 'YouTube Channel';
+            $handle       = $channel['snippet']['customUrl']     ?? $channelId ?? 'youtube';
+            SocialAccount::updateOrCreate(
+                ['platform' => 'youtube', 'handle' => ltrim($handle, '@')],
+                [
+                    'platform_user_id' => $channelId,
+                    'display_name'     => $channelTitle,
+                    'access_token'     => $tokenData['access_token'],
+                    'refresh_token'    => $tokenData['refresh_token'] ?? null,
+                    'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'is_connected'     => true,
+                    'last_error'       => null,
+                    'last_synced_at'   => now(),
+                ]
+            );
+            return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
+        } catch (\Throwable $e) {
+            Log::error('YouTube OAuth callback failed', ['error' => $e->getMessage()]);
+            return redirect('/dashboard/social')->with('error', 'Failed to connect YouTube: ' . $e->getMessage());
         }
     }
 
