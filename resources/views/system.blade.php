@@ -7,6 +7,44 @@
     <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
     <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
+    {{-- ── Severity Summary Cards ─────────────────────────────────── --}}
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <template x-for="sev in severities" :key="sev.key">
+            <div class="stat-card cursor-pointer transition-all"
+                 :class="levelFilter === sev.key ? 'ring-2 ring-brand-500' : 'hover:ring-1 hover:ring-slate-600'"
+                 @click="levelFilter = (levelFilter === sev.key ? '' : sev.key); currentPage = 1; load()">
+                <p class="text-xs text-slate-500 uppercase tracking-wide mb-1" x-text="sev.label"></p>
+                <p class="text-2xl font-bold" :class="sev.color" x-text="counts[sev.key] ?? 0"></p>
+            </div>
+        </template>
+    </div>
+
+    {{-- ── Filters ────────────────────────────────────────────────── --}}
+    <div class="flex flex-wrap items-center gap-3">
+        <div class="flex bg-slate-800/60 border border-slate-700/50 rounded-lg p-1 gap-0.5">
+            <button @click="levelFilter = ''; currentPage = 1; load()"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="levelFilter === '' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'">All</button>
+            <button @click="levelFilter = 'info'; currentPage = 1; load()"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="levelFilter === 'info' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'">Info</button>
+            <button @click="levelFilter = 'warning'; currentPage = 1; load()"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="levelFilter === 'warning' ? 'bg-amber-500 text-white' : 'text-slate-400 hover:text-white'">Warning</button>
+            <button @click="levelFilter = 'error'; currentPage = 1; load()"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="levelFilter === 'error' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'">Error</button>
+        </div>
+
+        <div class="ml-auto flex items-center gap-2">
+            <span class="text-xs text-slate-500" x-text="totalEntries + ' events'"></span>
+            <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+                <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+        </div>
+    </div>
+
+    {{-- ── Events Table ───────────────────────────────────────────── --}}
     <div class="stat-card overflow-x-auto">
         <table class="w-full text-sm">
             <thead class="text-slate-400 text-xs uppercase border-b border-slate-700/60">
@@ -19,18 +57,34 @@
                 </tr>
             </thead>
             <tbody>
-                <template x-if="!events.length"><tr><td colspan="5" class="py-8 text-center text-slate-500">No system events available.</td></tr></template>
+                <template x-if="loading && !events.length">
+                    <tr><td colspan="5" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                </template>
+                <template x-if="!loading && !events.length">
+                    <tr><td colspan="5" class="py-8 text-center text-slate-500">No system events found.</td></tr>
+                </template>
                 <template x-for="event in events" :key="event.id">
-                    <tr class="border-b border-slate-800/60 align-top">
+                    <tr class="border-b border-slate-800/60 align-top hover:bg-slate-800/30 transition-colors">
                         <td class="py-3"><span class="badge" :class="statusBadge(event.level)" x-text="event.level"></span></td>
                         <td class="py-3 text-slate-300" x-text="event.event"></td>
                         <td class="py-3 text-slate-400 text-xs" x-text="event.source || 'app'"></td>
-                        <td class="py-3 text-slate-400" x-text="event.message"></td>
-                        <td class="py-3 text-slate-400 text-xs" x-text="relativeTime(event.created_at)"></td>
+                        <td class="py-3 text-slate-400 max-w-sm truncate" x-text="event.message"></td>
+                        <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(event.created_at)"></td>
                     </tr>
                 </template>
             </tbody>
         </table>
+
+        {{-- Pagination --}}
+        <div class="flex items-center justify-between mt-4 pt-4 border-t border-slate-800" x-show="totalPages > 1">
+            <p class="text-xs text-slate-500" x-text="'Page ' + currentPage + ' of ' + totalPages + ' (' + totalEntries + ' events)'"></p>
+            <div class="flex gap-2">
+                <button @click="changePage(currentPage - 1)" :disabled="currentPage <= 1"
+                        class="px-3 py-1.5 text-xs border border-slate-700 text-slate-400 rounded-lg hover:border-slate-500 hover:text-white transition disabled:opacity-40">Prev</button>
+                <button @click="changePage(currentPage + 1)" :disabled="currentPage >= totalPages"
+                        class="px-3 py-1.5 text-xs border border-slate-700 text-slate-400 rounded-lg hover:border-slate-500 hover:text-white transition disabled:opacity-40">Next</button>
+            </div>
+        </div>
     </div>
 </div>
 @endsection
@@ -41,15 +95,59 @@ function systemApp() {
     return {
         ...dashboardState(),
         events: [],
+        levelFilter: '',
+        currentPage: 1,
+        totalPages: 1,
+        totalEntries: 0,
+        loading: false,
+        counts: {},
+        severities: [
+            { key: 'info',    label: 'Info',    color: 'text-sky-400' },
+            { key: 'warning', label: 'Warning', color: 'text-amber-400' },
+            { key: 'error',   label: 'Error',   color: 'text-red-400' },
+            { key: 'debug',   label: 'Debug',   color: 'text-slate-400' },
+        ],
+
         async init() { await this.load(); },
+
         async load() {
+            this.loading = true;
             this.clearMessages();
             try {
-                const data = this.applyMeta(await apiGet('/dashboard/api/system-events'));
-                this.events = data.data ?? [];
+                const params = new URLSearchParams({ page: this.currentPage });
+                if (this.levelFilter) params.set('level', this.levelFilter);
+
+                const r = await fetch('/dashboard/api/system-events?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = this.applyMeta(await r.json());
+
+                this.events       = d.data ?? [];
+                this.totalEntries = d.total ?? 0;
+                this.totalPages   = d.last_page ?? 1;
+                this.currentPage  = d.current_page ?? 1;
+
+                // Tally counts from current page (approximate for filter cards)
+                if (!this.levelFilter) {
+                    const tally = {};
+                    this.events.forEach(e => { tally[e.level] = (tally[e.level] || 0) + 1; });
+                    // Merge without wiping counts from other pages
+                    Object.assign(this.counts, tally);
+                }
+
                 updateTimestamp();
-            } catch (error) { this.handleError(error); }
+            } catch (error) {
+                this.handleError(error);
+            } finally {
+                this.loading = false;
+            }
         },
+
+        changePage(page) {
+            if (page < 1 || page > this.totalPages) return;
+            this.currentPage = page;
+            this.load();
+        },
+
         statusBadge, relativeTime,
     }
 }
