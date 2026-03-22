@@ -13,6 +13,7 @@ Laravel 11 AI marketing platform:
 - **Alpine.js + Tailwind CSS**: dark slate-950 palette frontend
 - **Chart.js 4.4.8** (CDN): pinned — 4.4.0 had a `fullSize` crash
 - **Laravel Horizon**: SPA at `resources/views/vendor/horizon/layout.blade.php` with dark-theme override
+- **Social Layer (Phase 9)**: `SocialPlatformService` (factory) → `InstagramService` (Graph API v19.0) + `StubPlatformService` ([SIMULATED]). Models: `ContentCalendar`, `HashtagSet`, `SocialAccount`. 6 automation jobs on `social`/`low` queues. Feature flag: `SOCIAL_AUTO_POST_ENABLED=false`.
 
 ---
 
