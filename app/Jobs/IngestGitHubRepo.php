@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -84,6 +85,16 @@ class IngestGitHubRepo implements ShouldQueue
         $skipped    = 0;
         $failed     = 0;
         $totalChars = 0;
+        $total      = count($files);
+        $cacheKey   = 'github-import:' . md5($this->repoUrl);
+
+        Cache::put($cacheKey, [
+            'status'     => 'running',
+            'repo'       => "{$owner}/{$repo}",
+            'ingested'   => 0,
+            'total'      => $total,
+            'started_at' => now()->toISOString(),
+        ], 3600);
 
         foreach ($files as $file) {
             if ($ingested >= self::MAX_FILES || $ingested + $skipped >= self::MAX_ENTRIES) {
@@ -116,16 +127,34 @@ class IngestGitHubRepo implements ShouldQueue
                 $title    = "{$owner}/{$repo}/{$file['path']}";
                 $category = $this->categorise($file['path']);
 
+                // Content-based override: if file contains skill manifest markers,
+                // treat it as agent-skills regardless of path
+                $tags = ['github', $repo, $owner];
+                if ($category !== 'agent-skills' && $this->isSkillManifest($content)) {
+                    $category = 'agent-skills';
+                    $tags[]   = 'skills';
+                }
+
                 $vectorStore->store(
                     title:    $title,
                     content:  $content,
-                    tags:     ['github', $repo, $owner],
+                    tags:     $tags,
                     category: $category,
                     source:   $rawUrl,
                 );
 
                 $totalChars += strlen($content);
                 $ingested++;
+
+                // Update progress every 5 files
+                if ($ingested % 5 === 0) {
+                    Cache::put($cacheKey, [
+                        'status'   => 'running',
+                        'repo'     => "{$owner}/{$repo}",
+                        'ingested' => $ingested,
+                        'total'    => $total,
+                    ], 3600);
+                }
 
             } catch (\Throwable $e) {
                 // Per-file error: log and continue — one bad file won't kill the import
@@ -137,6 +166,16 @@ class IngestGitHubRepo implements ShouldQueue
             }
         }
 
+        Cache::put($cacheKey, [
+            'status'       => 'completed',
+            'repo'         => "{$owner}/{$repo}",
+            'ingested'     => $ingested,
+            'total'        => $total,
+            'skipped'      => $skipped,
+            'failed'       => $failed,
+            'completed_at' => now()->toISOString(),
+        ], 3600);
+
         Log::info("IngestGitHubRepo: completed", [
             'repo'      => "{$owner}/{$repo}",
             'ingested'  => $ingested,
@@ -144,6 +183,16 @@ class IngestGitHubRepo implements ShouldQueue
             'failed'    => $failed,
             'chars'     => $totalChars,
         ]);
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        $cacheKey = 'github-import:' . md5($this->repoUrl);
+        $existing = Cache::get($cacheKey, []);
+        Cache::put($cacheKey, array_merge($existing, [
+            'status' => 'failed',
+            'error'  => $exception->getMessage(),
+        ]), 3600);
     }
 
     // ── Private helpers ───────────────────────────────────────────────
@@ -204,7 +253,17 @@ class IngestGitHubRepo implements ShouldQueue
 
     private function categorise(string $path): string
     {
-        $lower = strtolower($path);
+        $lower    = strtolower($path);
+        $basename = strtolower(basename($path));
+
+        // Priority: skill/agent definition files → agent-skills category
+        $skillBasenames = ['skills.md', 'skills.yaml', 'skills.json', 'agents.yaml', 'agents.json', 'agent-config.yaml', 'agent-config.json', 'claude.md'];
+        if (in_array($basename, $skillBasenames, true)) {
+            return 'agent-skills';
+        }
+        if ((str_contains($lower, 'skills') || str_contains($lower, 'agent')) && str_ends_with($lower, '.md')) {
+            return 'agent-skills';
+        }
 
         if (str_starts_with($lower, 'docs/') || str_contains($lower, '/docs/') || str_ends_with($lower, '.md') || str_contains($lower, 'readme')) {
             return 'general';
@@ -217,6 +276,15 @@ class IngestGitHubRepo implements ShouldQueue
         }
 
         return 'technical';
+    }
+
+    /**
+     * Detect if file content follows AgentSkillsSeeder skill manifest format.
+     * Returns true if the content has ROLE: + TOOLS: markers.
+     */
+    private function isSkillManifest(string $content): bool
+    {
+        return str_contains($content, 'ROLE:') && str_contains($content, 'TOOLS:');
     }
 
     private function checkRateLimit(array $headers): void

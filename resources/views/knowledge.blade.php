@@ -82,6 +82,20 @@
                 <div x-show="githubResult" class="rounded-lg px-3 py-2 text-xs"
                      :class="githubResult.error ? 'bg-red-500/10 text-red-400 border border-red-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'"
                      x-text="githubResult.message || githubResult.error"></div>
+
+                {{-- Import progress --}}
+                <div x-show="importProgress" class="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-3 space-y-2">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-300 font-medium" x-text="importProgress?.status === 'completed' ? 'Import complete' : importProgress?.status === 'failed' ? 'Import failed' : 'Importing\u2026'"></span>
+                        <span class="text-slate-400" x-text="(importProgress?.ingested ?? 0) + ' / ' + (importProgress?.total ?? '?') + ' files'"></span>
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-500"
+                             :class="importProgress?.status === 'failed' ? 'bg-red-500' : importProgress?.status === 'completed' ? 'bg-emerald-500' : 'bg-brand-500'"
+                             :style="'width:' + (importProgress?.total ? Math.round((importProgress.ingested / importProgress.total) * 100) : 5) + '%'"></div>
+                    </div>
+                    <p x-show="importProgress?.error" class="text-xs text-red-400" x-text="importProgress?.error"></p>
+                </div>
             </div>
             <div x-show="importMode === 'github'" class="px-6 py-4 border-t border-slate-800 flex gap-3">
                 <button @click="addPanel = false"
@@ -299,6 +313,8 @@ function knowledgeApp() {
         importMode: 'manual',
         githubImport: { repoUrl: '', category: 'general', branch: 'main', token: '' },
         githubResult: null,
+        importProgress: null,
+        importPollTimer: null,
         toast: { show: false, message: '', error: false },
         newEntry: { title: '', content: '', category: 'general', tagsRaw: '' },
 
@@ -398,18 +414,23 @@ function knowledgeApp() {
             }
             this.importing = true;
             this.githubResult = null;
+            this.importProgress = null;
+            if (this.importPollTimer) { clearInterval(this.importPollTimer); this.importPollTimer = null; }
+
+            const repoUrl = this.githubImport.repoUrl.trim();
             try {
                 const r = await apiPost('/dashboard/api/knowledge/github', {
-                    repo_url: this.githubImport.repoUrl,
+                    repo_url: repoUrl,
                     category: this.githubImport.category,
                     branch:   this.githubImport.branch || 'main',
                     token:    this.githubImport.token || null,
                 });
 
-                if (r.queued) {
-                    this.githubResult = { message: r.message || 'Import queued. Files will appear shortly.' };
+                if (r.dispatched ?? r.queued) {
+                    this.githubResult = { message: r.message || 'Import queued. Tracking progress…' };
                     this.githubImport = { repoUrl: '', category: 'general', branch: 'main', token: '' };
                     this.showToast('GitHub import queued successfully.');
+                    this.pollImportProgress(repoUrl);
                 } else {
                     this.githubResult = { error: r.error || 'Failed to queue import.' };
                 }
@@ -417,6 +438,29 @@ function knowledgeApp() {
                 this.githubResult = { error: 'Error: ' + e.message };
             }
             this.importing = false;
+        },
+
+        pollImportProgress(repoUrl) {
+            this.importProgress = { status: 'running', ingested: 0, total: null };
+            this.importPollTimer = setInterval(async () => {
+                try {
+                    const params = new URLSearchParams({ repo_url: repoUrl });
+                    const r = await fetch('/dashboard/api/knowledge/import-status?' + params, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    if (!r.ok) return;
+                    const d = await r.json();
+                    if (d.status === 'not_found') return;
+                    this.importProgress = d;
+                    if (d.status === 'completed') {
+                        clearInterval(this.importPollTimer);
+                        this.importPollTimer = null;
+                        this.showToast('Import complete! ' + (d.ingested ?? 0) + ' files ingested.');
+                        this.load(); // Refresh the knowledge table
+                    } else if (d.status === 'failed') {
+                        clearInterval(this.importPollTimer);
+                        this.importPollTimer = null;
+                    }
+                } catch (_) {}
+            }, 3000);
         },
 
         relativeTime,

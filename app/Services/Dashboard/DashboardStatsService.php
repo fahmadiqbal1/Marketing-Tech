@@ -33,8 +33,9 @@ class DashboardStatsService
 
             $activeJobs = AgentJob::query()->whereIn('status', ['pending', 'running'])->count();
 
-            $aiCostToday = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
-            $aiCostWeek = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
+            $aiCostToday     = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
+            $aiCostYesterday = AiRequest::query()->whereDate('requested_at', today()->subDay())->sum('cost_usd');
+            $aiCostWeek      = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
 
             $recentWorkflows = Workflow::query()
                 ->latest()
@@ -59,8 +60,9 @@ class DashboardStatsService
                 'workflows' => $workflowCounts,
                 'active_jobs' => $activeJobs,
                 'queue_depth' => $queueDepth,
-                'ai_cost_today' => round((float) $aiCostToday, 4),
-                'ai_cost_week' => round((float) $aiCostWeek, 4),
+                'ai_cost_today'     => round((float) $aiCostToday, 4),
+                'ai_cost_yesterday' => round((float) $aiCostYesterday, 4),
+                'ai_cost_week'      => round((float) $aiCostWeek, 4),
                 'recent_workflows' => $recentWorkflows,
                 'recent_events' => $recentEvents,
                 'meta' => $this->meta(),
@@ -69,8 +71,9 @@ class DashboardStatsService
             'workflows' => [],
             'active_jobs' => 0,
             'queue_depth' => 0,
-            'ai_cost_today' => 0.0,
-            'ai_cost_week' => 0.0,
+            'ai_cost_today'     => 0.0,
+            'ai_cost_yesterday' => 0.0,
+            'ai_cost_week'      => 0.0,
             'recent_workflows' => [],
             'recent_events' => [],
         ]);
@@ -117,36 +120,54 @@ class DashboardStatsService
         ]);
     }
 
-    public function getJobs(): array
+    public function getJobs(array $filters = [], int $perPage = 25): array
     {
-        return $this->rescueArray(function (): array {
-            $jobs = AgentJob::query()
-                ->latest()
-                ->limit(50)
-                ->get([
-                    'id', 'workflow_id', 'agent_type', 'short_description', 'status', 'steps_taken',
-                    'started_at', 'completed_at', 'error_message', 'created_at',
-                ]);
+        return $this->rescueArray(function () use ($filters, $perPage): array {
+            $query = AgentJob::query()->latest();
 
-            $byStatus = $jobs->groupBy('status')->map->count();
-            $byAgentType = $jobs->groupBy('agent_type')->map->count();
+            if (! empty($filters['status'])) {
+                $query->where('status', $filters['status']);
+            }
+            if (! empty($filters['agent_type'])) {
+                $query->where('agent_type', $filters['agent_type']);
+            }
+
+            $paginator = $query->paginate($perPage, [
+                'id', 'workflow_id', 'agent_type', 'short_description', 'status', 'steps_taken',
+                'started_at', 'completed_at', 'error_message', 'created_at',
+            ]);
+
+            // Global counts (unfiltered) for summary cards and filter dropdowns
+            $byStatus = AgentJob::query()
+                ->selectRaw('status, count(*) as total')
+                ->groupBy('status')
+                ->pluck('total', 'status');
+
+            $byAgentType = AgentJob::query()
+                ->selectRaw('agent_type, count(*) as total')
+                ->groupBy('agent_type')
+                ->orderByDesc('total')
+                ->pluck('total', 'agent_type');
+
             $queueTable = DB::table('jobs')
                 ->selectRaw('queue, count(*) as pending')
                 ->groupBy('queue')
                 ->pluck('pending', 'queue');
 
-            return [
-                'jobs' => $jobs,
-                'by_status' => $byStatus,
+            return array_merge($paginator->toArray(), [
+                'by_status'     => $byStatus,
                 'by_agent_type' => $byAgentType,
-                'queue_table' => $queueTable,
-                'meta' => $this->meta(),
-            ];
+                'queue_table'   => $queueTable,
+                'meta'          => $this->meta(),
+            ]);
         }, [
-            'jobs' => [],
-            'by_status' => [],
+            'data'          => [],
+            'current_page'  => 1,
+            'last_page'     => 1,
+            'total'         => 0,
+            'by_status'     => [],
             'by_agent_type' => [],
-            'queue_table' => [],
+            'queue_table'   => [],
         ]);
     }
 
@@ -173,23 +194,47 @@ class DashboardStatsService
         }, ['data' => [], 'summary' => []]);
     }
 
-    public function getCandidates(): array
+    public function getCandidates(array $filters = [], int $perPage = 25): array
     {
-        return $this->rescueArray(function (): array {
-            $candidates = Candidate::query()
-                ->latest()
-                ->limit(100)
-                ->get([
-                    'id', 'name', 'email', 'pipeline_stage', 'score',
-                    'current_title', 'current_company', 'created_at',
-                ]);
+        return $this->rescueArray(function () use ($filters, $perPage): array {
+            $query = Candidate::query()->latest();
 
-            return [
-                'data' => $candidates,
-                'by_stage' => $candidates->groupBy('pipeline_stage')->map->count(),
-                'meta' => $this->meta(),
-            ];
-        }, ['data' => [], 'by_stage' => []]);
+            if (! empty($filters['search'])) {
+                $term = $filters['search'];
+                $query->where(function ($q) use ($term) {
+                    $q->where('name', 'ilike', '%' . $term . '%')
+                      ->orWhere('email', 'ilike', '%' . $term . '%');
+                });
+            }
+            if (! empty($filters['pipeline_stage'])) {
+                $query->where('pipeline_stage', $filters['pipeline_stage']);
+            }
+            if (! empty($filters['min_score'])) {
+                $query->where('score', '>=', (float) $filters['min_score']);
+            }
+
+            $paginator = $query->paginate($perPage, [
+                'id', 'name', 'email', 'pipeline_stage', 'score',
+                'current_title', 'current_company', 'linkedin_url', 'github_url', 'created_at',
+            ]);
+
+            // Global stage counts (unfiltered)
+            $byStage = Candidate::query()
+                ->selectRaw('pipeline_stage, count(*) as total')
+                ->groupBy('pipeline_stage')
+                ->pluck('total', 'pipeline_stage');
+
+            return array_merge($paginator->toArray(), [
+                'by_stage' => $byStage,
+                'meta'     => $this->meta(),
+            ]);
+        }, [
+            'data'         => [],
+            'current_page' => 1,
+            'last_page'    => 1,
+            'total'        => 0,
+            'by_stage'     => [],
+        ]);
     }
 
     public function getContent(array $filters = [], int $perPage = 20): array
@@ -202,6 +247,9 @@ class DashboardStatsService
             }
             if (! empty($filters['status'])) {
                 $query->where('status', $filters['status']);
+            }
+            if (! empty($filters['search'])) {
+                $query->where('title', 'ilike', '%' . $filters['search'] . '%');
             }
 
             return $query->paginate($perPage, [

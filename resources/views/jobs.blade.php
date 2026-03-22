@@ -7,44 +7,111 @@
     <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
     <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="stat-card"><p class="text-xs text-slate-400 uppercase">Pending</p><p class="text-3xl font-bold" x-text="summary.pending ?? 0"></p></div>
-        <div class="stat-card"><p class="text-xs text-slate-400 uppercase">Running</p><p class="text-3xl font-bold" x-text="summary.running ?? 0"></p></div>
-        <div class="stat-card"><p class="text-xs text-slate-400 uppercase">Failed</p><p class="text-3xl font-bold" x-text="summary.failed ?? 0"></p></div>
+    {{-- ── Status Summary Cards ────────────────────────────────────── --}}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="stat-card cursor-pointer transition-all"
+             :class="statusFilter === 'pending' ? 'ring-2 ring-brand-500' : 'hover:ring-1 hover:ring-slate-600'"
+             @click="statusFilter = (statusFilter === 'pending' ? '' : 'pending'); currentPage = 1; load()">
+            <p class="text-xs text-slate-400 uppercase mb-1">Pending</p>
+            <p class="text-3xl font-bold text-slate-200" x-text="byStatus.pending ?? 0"></p>
+        </div>
+        <div class="stat-card cursor-pointer transition-all"
+             :class="statusFilter === 'running' ? 'ring-2 ring-brand-500' : 'hover:ring-1 hover:ring-slate-600'"
+             @click="statusFilter = (statusFilter === 'running' ? '' : 'running'); currentPage = 1; load()">
+            <p class="text-xs text-slate-400 uppercase mb-1">Running</p>
+            <p class="text-3xl font-bold text-sky-400" x-text="byStatus.running ?? 0"></p>
+        </div>
+        <div class="stat-card cursor-pointer transition-all"
+             :class="statusFilter === 'completed' ? 'ring-2 ring-brand-500' : 'hover:ring-1 hover:ring-slate-600'"
+             @click="statusFilter = (statusFilter === 'completed' ? '' : 'completed'); currentPage = 1; load()">
+            <p class="text-xs text-slate-400 uppercase mb-1">Completed</p>
+            <p class="text-3xl font-bold text-emerald-400" x-text="byStatus.completed ?? 0"></p>
+        </div>
+        <div class="stat-card cursor-pointer transition-all"
+             :class="statusFilter === 'failed' ? 'ring-2 ring-red-500' : 'hover:ring-1 hover:ring-slate-600'"
+             @click="statusFilter = (statusFilter === 'failed' ? '' : 'failed'); currentPage = 1; load()">
+            <p class="text-xs text-slate-400 uppercase mb-1">Failed</p>
+            <p class="text-3xl font-bold text-red-400" x-text="byStatus.failed ?? 0"></p>
+        </div>
     </div>
 
-    <div class="stat-card">
-        <div class="flex items-center justify-between mb-4">
-            <h3 class="font-semibold">Recent agent jobs</h3>
-            <button @click="load()" class="text-xs text-brand-400">Refresh</button>
+    {{-- ── Queue Depth Panel ───────────────────────────────────────── --}}
+    <div class="stat-card" x-show="Object.keys(queueTable).length > 0">
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Queue Depth</h3>
+        <div class="flex flex-wrap gap-3">
+            <template x-for="[queue, count] in Object.entries(queueTable)" :key="queue">
+                <div class="flex items-center gap-2 bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-2">
+                    <span class="text-xs text-slate-400" x-text="queue"></span>
+                    <span class="text-sm font-semibold text-amber-400" x-text="count"></span>
+                    <span class="text-xs text-slate-500">pending</span>
+                </div>
+            </template>
         </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="text-slate-400 text-xs uppercase border-b border-slate-700/60">
-                    <tr>
-                        <th class="text-left py-3">Agent</th>
-                        <th class="text-left py-3">Status</th>
-                        <th class="text-left py-3">Workflow</th>
-                        <th class="text-left py-3">Steps</th>
-                        <th class="text-left py-3">Created</th>
+    </div>
+
+    {{-- ── Filters ─────────────────────────────────────────────────── --}}
+    <div class="flex flex-wrap items-center gap-3">
+        <select x-model="agentTypeFilter" @change="currentPage = 1; load()"
+            class="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+            <option value="">All agent types</option>
+            <template x-for="[type, count] in Object.entries(byAgentType)" :key="type">
+                <option :value="type" x-text="type + ' (' + count + ')'"></option>
+            </template>
+        </select>
+
+        <div class="ml-auto flex items-center gap-2">
+            <span class="text-xs text-slate-500" x-text="totalEntries + ' jobs'"></span>
+            <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+                <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            </button>
+        </div>
+    </div>
+
+    {{-- ── Jobs Table ──────────────────────────────────────────────── --}}
+    <div class="stat-card overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead class="text-slate-400 text-xs uppercase border-b border-slate-700/60">
+                <tr>
+                    <th class="text-left py-3">Agent</th>
+                    <th class="text-left py-3">Status</th>
+                    <th class="text-left py-3">Workflow</th>
+                    <th class="text-left py-3">Steps</th>
+                    <th class="text-left py-3">Duration</th>
+                    <th class="text-left py-3">Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-if="loading && !jobs.length">
+                    <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                </template>
+                <template x-if="!loading && !jobs.length">
+                    <tr><td colspan="6" class="py-8 text-center text-slate-500">No agent jobs found.</td></tr>
+                </template>
+                <template x-for="job in jobs" :key="job.id">
+                    <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors">
+                        <td class="py-3">
+                            <div class="font-medium text-slate-200" x-text="job.agent_type"></div>
+                            <div class="text-xs text-slate-500 max-w-xs truncate" x-text="job.short_description || '—'"></div>
+                        </td>
+                        <td class="py-3"><span class="badge" :class="statusBadge(job.status)" x-text="job.status"></span></td>
+                        <td class="py-3 text-slate-400 text-xs font-mono" x-text="job.workflow_id ? job.workflow_id.slice(0,8) + '…' : '–'"></td>
+                        <td class="py-3 text-slate-400" x-text="job.steps_taken ?? 0"></td>
+                        <td class="py-3 text-slate-400 text-xs" x-text="jobDuration(job)"></td>
+                        <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(job.created_at)"></td>
                     </tr>
-                </thead>
-                <tbody>
-                    <template x-if="!jobs.length"><tr><td colspan="5" class="py-8 text-center text-slate-500">No agent jobs available.</td></tr></template>
-                    <template x-for="job in jobs" :key="job.id">
-                        <tr class="border-b border-slate-800/60">
-                            <td class="py-3">
-                                <div class="font-medium text-slate-200" x-text="job.agent_type"></div>
-                                <div class="text-xs text-slate-500" x-text="job.short_description || 'No summary provided'"></div>
-                            </td>
-                            <td class="py-3"><span class="badge" :class="statusBadge(job.status)" x-text="job.status"></span></td>
-                            <td class="py-3 text-slate-400 text-xs" x-text="job.workflow_id || '–'"></td>
-                            <td class="py-3 text-slate-400" x-text="job.steps_taken ?? 0"></td>
-                            <td class="py-3 text-slate-400 text-xs" x-text="relativeTime(job.created_at)"></td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
+                </template>
+            </tbody>
+        </table>
+
+        {{-- Pagination --}}
+        <div class="flex items-center justify-between mt-4 pt-4 border-t border-slate-800" x-show="totalPages > 1">
+            <p class="text-xs text-slate-500" x-text="'Page ' + currentPage + ' of ' + totalPages + ' (' + totalEntries + ' jobs)'"></p>
+            <div class="flex gap-2">
+                <button @click="changePage(currentPage - 1)" :disabled="currentPage <= 1"
+                        class="px-3 py-1.5 text-xs border border-slate-700 text-slate-400 rounded-lg hover:border-slate-500 hover:text-white transition disabled:opacity-40">Prev</button>
+                <button @click="changePage(currentPage + 1)" :disabled="currentPage >= totalPages"
+                        class="px-3 py-1.5 text-xs border border-slate-700 text-slate-400 rounded-lg hover:border-slate-500 hover:text-white transition disabled:opacity-40">Next</button>
+            </div>
         </div>
     </div>
 </div>
@@ -56,19 +123,60 @@ function jobsApp() {
     return {
         ...dashboardState(),
         jobs: [],
-        summary: {},
+        byStatus: {},
+        byAgentType: {},
+        queueTable: {},
+        statusFilter: '',
+        agentTypeFilter: '',
+        currentPage: 1,
+        totalPages: 1,
+        totalEntries: 0,
+        loading: false,
+
         async init() { await this.load(); },
+
         async load() {
+            this.loading = true;
             this.clearMessages();
             try {
-                const data = this.applyMeta(await apiGet('/dashboard/api/jobs'));
-                this.jobs = data.jobs ?? [];
-                this.summary = data.by_status ?? {};
+                const params = new URLSearchParams({ page: this.currentPage });
+                if (this.statusFilter)    params.set('status', this.statusFilter);
+                if (this.agentTypeFilter) params.set('agent_type', this.agentTypeFilter);
+
+                const r = await fetch('/dashboard/api/jobs?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = this.applyMeta(await r.json());
+
+                this.jobs         = d.data ?? [];
+                this.totalEntries = d.total ?? 0;
+                this.totalPages   = d.last_page ?? 1;
+                this.currentPage  = d.current_page ?? 1;
+                this.byStatus     = d.by_status ?? {};
+                this.byAgentType  = d.by_agent_type ?? {};
+                this.queueTable   = d.queue_table ?? {};
+
                 updateTimestamp();
             } catch (error) {
                 this.handleError(error);
+            } finally {
+                this.loading = false;
             }
         },
+
+        changePage(page) {
+            if (page < 1 || page > this.totalPages) return;
+            this.currentPage = page;
+            this.load();
+        },
+
+        jobDuration(job) {
+            if (!job.started_at) return '—';
+            const end = job.completed_at ? new Date(job.completed_at) : new Date();
+            const secs = Math.round((end - new Date(job.started_at)) / 1000);
+            if (secs < 60) return secs + 's';
+            return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+        },
+
         statusBadge, relativeTime,
     }
 }

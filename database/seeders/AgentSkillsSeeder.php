@@ -26,12 +26,22 @@ class AgentSkillsSeeder extends Seeder
         $skillManifests = $this->buildManifests();
 
         foreach ($skillManifests as $agentName => $manifest) {
-            $title = "Agent Skills: " . ucfirst($agentName);
+            $title   = "Agent Skills: " . ucfirst($agentName);
+            $newHash = md5(strtolower(preg_replace('/\s+/', ' ', trim(mb_substr($manifest, 0, 1000, 'UTF-8')))));
 
-            // Idempotent check: skip if entry already exists
-            if (KnowledgeBase::where('title', $title)->where('category', 'agent-skills')->exists()) {
-                $this->command->line("  Skipped (exists): {$title}");
-                continue;
+            $existing = KnowledgeBase::where('title', $title)->where('category', 'agent-skills')->first();
+
+            if ($existing) {
+                if ($existing->content_hash === $newHash) {
+                    $this->command->line("  Skipped (unchanged): {$title}");
+                    continue;
+                }
+
+                // Content changed — soft-delete old entry + chunks, then re-store
+                KnowledgeBase::where('id', $existing->id)
+                    ->orWhere('parent_id', $existing->id)
+                    ->delete();
+                $this->command->line("  Updating (content changed): {$title}");
             }
 
             try {

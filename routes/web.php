@@ -75,7 +75,9 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::get('/jobs',                       [DashboardController::class, 'apiJobs']);
         Route::get('/campaigns',                  [DashboardController::class, 'apiCampaigns']);
         Route::get('/candidates',                 [DashboardController::class, 'apiCandidates']);
+        Route::get('/candidates/{id}',            [DashboardController::class, 'apiCandidateDetail']);
         Route::get('/content',                    [DashboardController::class, 'apiContent']);
+        Route::get('/content/{id}',               [DashboardController::class, 'apiContentDetail']);
         Route::get('/system-events',              [DashboardController::class, 'apiSystemEvents']);
         Route::get('/ai-costs',                   [DashboardController::class, 'apiAiCosts']);
 
@@ -88,6 +90,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::get('/knowledge',                  [DashboardController::class, 'apiKnowledge']);
         Route::post('/knowledge',                 [DashboardController::class, 'apiKnowledgeCreate']);
         Route::post('/knowledge/github',          [DashboardController::class, 'apiKnowledgeGitHub']);
+        Route::get('/knowledge/import-status',    [DashboardController::class, 'apiKnowledgeImportStatus']);
         Route::delete('/knowledge/{id}',          [DashboardController::class, 'apiKnowledgeDelete']);
         Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
         Route::post('/platform',                  [DashboardController::class, 'savePlatform']);

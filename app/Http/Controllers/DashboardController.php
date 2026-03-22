@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
+use App\Models\Candidate;
+use App\Models\ContentItem;
 use App\Models\CustomAiPlatform;
 use App\Models\AgentStep;
 use App\Models\AgentTask;
@@ -21,6 +23,7 @@ use App\Services\Knowledge\VectorStoreService;
 use App\Workflows\WorkflowDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -89,9 +92,9 @@ class DashboardController extends Controller
 
     // ── API: Agent Jobs ───────────────────────────────────────────────
 
-    public function apiJobs(): JsonResponse
+    public function apiJobs(Request $request): JsonResponse
     {
-        return response()->json($this->stats->getJobs());
+        return response()->json($this->stats->getJobs($request->only(['status', 'agent_type'])));
     }
 
     // ── API: Campaigns ────────────────────────────────────────────────
@@ -103,17 +106,37 @@ class DashboardController extends Controller
 
     // ── API: Candidates ───────────────────────────────────────────────
 
-    public function apiCandidates(): JsonResponse
+    public function apiCandidates(Request $request): JsonResponse
     {
-        return response()->json($this->stats->getCandidates());
+        return response()->json($this->stats->getCandidates($request->only(['search', 'pipeline_stage', 'min_score'])));
+    }
+
+    public function apiCandidateDetail(string $id): JsonResponse
+    {
+        try {
+            $candidate = Candidate::findOrFail($id);
+            return response()->json(['candidate' => $candidate]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
     }
 
     // ── API: Content ──────────────────────────────────────────────────
 
     public function apiContent(Request $request): JsonResponse
     {
-        $items = $this->stats->getContent($request->only(['type', 'status']));
+        $items = $this->stats->getContent($request->only(['type', 'status', 'search']));
         return response()->json($items);
+    }
+
+    public function apiContentDetail(string $id): JsonResponse
+    {
+        try {
+            $item = ContentItem::findOrFail($id);
+            return response()->json(['item' => $item]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
     }
 
     // ── API: System Events ────────────────────────────────────────────
@@ -341,6 +364,20 @@ class DashboardController extends Controller
         ]);
     }
 
+    public function apiKnowledgeImportStatus(Request $request): JsonResponse
+    {
+        $repoUrl = $request->query('repo_url', '');
+        if (empty($repoUrl)) {
+            return response()->json(['error' => 'repo_url required'], 422);
+        }
+        $cacheKey = 'github-import:' . md5($repoUrl);
+        $status   = Cache::get($cacheKey);
+        if (! $status) {
+            return response()->json(['status' => 'not_found']);
+        }
+        return response()->json($status);
+    }
+
     public function apiKnowledgeDelete(string $id): JsonResponse
     {
         // Delete the entry and all its chunks
@@ -413,6 +450,23 @@ class DashboardController extends Controller
                     }
                     $modelCount = count($response->json('models') ?? []);
                     $message = "Connected. {$modelCount} models available.";
+                    break;
+
+                case 'telegram':
+                    $token = $this->credentials->retrieve('TELEGRAM_BOT_TOKEN') ?? '';
+                    if (empty($token) || str_contains($token, 'CHANGE_ME')) {
+                        throw new \RuntimeException('Telegram bot token is not configured.');
+                    }
+                    $response = Http::timeout(10)
+                        ->get("https://api.telegram.org/bot{$token}/getMe");
+                    if ($response->failed()) {
+                        throw new \RuntimeException('Telegram responded with HTTP ' . $response->status());
+                    }
+                    if (! ($response->json('ok') ?? false)) {
+                        throw new \RuntimeException('Telegram error: ' . ($response->json('description') ?? 'Unknown'));
+                    }
+                    $botName = $response->json('result.username') ?? 'unknown';
+                    $message = "Connected. Bot: @{$botName}.";
                     break;
 
                 default:
