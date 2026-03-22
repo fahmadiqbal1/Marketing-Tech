@@ -7,6 +7,25 @@
     <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
     <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
+    {{-- ── System Insights ─────────────────────────────────────── --}}
+    <template x-if="insights.length">
+        <div class="space-y-2">
+            <template x-for="ins in insights" :key="ins.msg">
+                <a :href="ins.action ?? '#'"
+                   class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm transition-opacity hover:opacity-80"
+                   :class="{
+                       'bg-amber-500/10 text-amber-300 border border-amber-500/20': ins.type === 'warning',
+                       'bg-red-500/10 text-red-300 border border-red-500/20':       ins.type === 'error',
+                       'bg-sky-500/10 text-sky-300 border border-sky-500/20':       ins.type === 'info',
+                   }">
+                    <span x-text="ins.type === 'error' ? '⚠' : ins.type === 'warning' ? '●' : 'ℹ'" class="shrink-0 text-base leading-none"></span>
+                    <span x-text="ins.msg" class="flex-1"></span>
+                    <span class="text-xs opacity-50 shrink-0">→</span>
+                </a>
+            </template>
+        </div>
+    </template>
+
     {{-- ── Stat cards ─────────────────────────────────────────── --}}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 
@@ -228,6 +247,7 @@ function overviewApp() {
         costBreakdown: [],
         agentTypes: {},
         costDays: 7,
+        health: null,
         statusChartInstance: null,
         costChartInstance: null,
 
@@ -248,9 +268,50 @@ function overviewApp() {
             const vals = Object.values(this.agentTypes);
             return vals.length ? Math.max(...vals) : 1;
         },
+        get insights() {
+            const out = [];
+            const rank = { error: 0, warning: 1, info: 2 };
+
+            // 1. Pipeline bottleneck (dynamic: >1.5× average stage size)
+            const stages = Object.entries(this.stats.candidate_stages ?? {});
+            if (stages.length > 1) {
+                const total = stages.reduce((s, [, c]) => s + Number(c), 0);
+                const avg   = total / stages.length;
+                const [top, cnt] = stages.sort((a, b) => b[1] - a[1])[0];
+                if (Number(cnt) > avg * 1.5) {
+                    const pct = Math.round(Number(cnt) / total * 100);
+                    out.push({ type: 'warning', msg: `${pct}% of candidates stuck in "${top}"`, action: `/dashboard/candidates?stage=${encodeURIComponent(top)}` });
+                }
+            }
+
+            // 2. High job failure rate >20%
+            const totalJobs = Object.values(this.agentTypes).reduce((s, c) => s + Number(c), 0);
+            const failPct   = totalJobs > 0 ? Math.round((this.stats.failed_jobs ?? 0) / totalJobs * 100) : 0;
+            if (failPct > 20) {
+                const reason = this.stats.top_failure_reason ? ` — ${this.stats.top_failure_reason}` : '';
+                out.push({ type: 'error', msg: `${failPct}% of recent jobs failed${reason}`, action: `/dashboard/jobs?status=failed` });
+            }
+
+            // 3. AI cost spike >50% day-over-day
+            if (this.costTrend > 50) {
+                out.push({ type: 'warning', msg: `AI cost up ${this.costTrend}% vs yesterday`, action: `/dashboard/system` });
+            }
+
+            // 4. Pending approvals
+            if ((this.stats.needs_approval ?? 0) > 0) {
+                out.push({ type: 'info', msg: `${this.stats.needs_approval} workflow(s) awaiting approval`, action: `/dashboard/workflows?status=owner_approval` });
+            }
+
+            // 5. Queue/worker health (only when data is fully loaded and well-typed)
+            if (this.health && typeof this.health.worker_healthy !== 'undefined' && !this.health.worker_healthy) {
+                out.push({ type: 'error', msg: `Queue worker unhealthy — ${this.health.queue_pending_jobs ?? '?'} jobs pending`, action: `/dashboard/jobs` });
+            }
+
+            return out.sort((a, b) => rank[a.type] - rank[b.type]).slice(0, 3);
+        },
 
         async init() {
-            await this.load();
+            await Promise.all([this.load(), this.loadHealth()]);
             this.buildCharts();
             setInterval(() => this.load(), 12000);
         },
@@ -342,11 +403,25 @@ function overviewApp() {
                 this.costBreakdown = d.breakdown ?? [];
             } catch (error) { this.handleError(error); }
 
-            // Also load agent type distribution
+            // Also load agent type distribution (provides agentTypes for insights)
             try {
                 const j = await apiGet('/dashboard/api/jobs');
-                this.agentTypes = j.by_agent_type ?? {};
+                this.agentTypes        = j.by_agent_type ?? {};
+                // top_failure_reason comes from apiJobs — attach to stats for insights getter
+                this.stats.top_failure_reason = j.top_failure_reason ?? null;
             } catch (_) {}
+        },
+
+        async loadHealth() {
+            try {
+                const ctrl = new AbortController();
+                setTimeout(() => ctrl.abort(), 3000);
+                const r = await fetch('/health', {
+                    signal: ctrl.signal,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                if (r.ok) this.health = await r.json();
+            } catch (_) {} // silent — insights degrade gracefully without health data
         },
 
         statusBadge, relativeTime
