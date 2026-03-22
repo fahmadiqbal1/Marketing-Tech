@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -84,6 +85,16 @@ class IngestGitHubRepo implements ShouldQueue
         $skipped    = 0;
         $failed     = 0;
         $totalChars = 0;
+        $total      = count($files);
+        $cacheKey   = 'github-import:' . md5($this->repoUrl);
+
+        Cache::put($cacheKey, [
+            'status'     => 'running',
+            'repo'       => "{$owner}/{$repo}",
+            'ingested'   => 0,
+            'total'      => $total,
+            'started_at' => now()->toISOString(),
+        ], 3600);
 
         foreach ($files as $file) {
             if ($ingested >= self::MAX_FILES || $ingested + $skipped >= self::MAX_ENTRIES) {
@@ -135,6 +146,16 @@ class IngestGitHubRepo implements ShouldQueue
                 $totalChars += strlen($content);
                 $ingested++;
 
+                // Update progress every 5 files
+                if ($ingested % 5 === 0) {
+                    Cache::put($cacheKey, [
+                        'status'   => 'running',
+                        'repo'     => "{$owner}/{$repo}",
+                        'ingested' => $ingested,
+                        'total'    => $total,
+                    ], 3600);
+                }
+
             } catch (\Throwable $e) {
                 // Per-file error: log and continue — one bad file won't kill the import
                 Log::warning("IngestGitHubRepo: file failed", [
@@ -145,6 +166,16 @@ class IngestGitHubRepo implements ShouldQueue
             }
         }
 
+        Cache::put($cacheKey, [
+            'status'       => 'completed',
+            'repo'         => "{$owner}/{$repo}",
+            'ingested'     => $ingested,
+            'total'        => $total,
+            'skipped'      => $skipped,
+            'failed'       => $failed,
+            'completed_at' => now()->toISOString(),
+        ], 3600);
+
         Log::info("IngestGitHubRepo: completed", [
             'repo'      => "{$owner}/{$repo}",
             'ingested'  => $ingested,
@@ -152,6 +183,16 @@ class IngestGitHubRepo implements ShouldQueue
             'failed'    => $failed,
             'chars'     => $totalChars,
         ]);
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        $cacheKey = 'github-import:' . md5($this->repoUrl);
+        $existing = Cache::get($cacheKey, []);
+        Cache::put($cacheKey, array_merge($existing, [
+            'status' => 'failed',
+            'error'  => $exception->getMessage(),
+        ]), 3600);
     }
 
     // ── Private helpers ───────────────────────────────────────────────

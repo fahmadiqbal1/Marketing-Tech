@@ -23,6 +23,7 @@ use App\Services\Knowledge\VectorStoreService;
 use App\Workflows\WorkflowDispatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -361,6 +362,20 @@ class DashboardController extends Controller
             'message'    => 'Import queued. Files will appear in the knowledge base shortly.',
             'repo'       => $validated['repo_url'],
         ]);
+    }
+
+    public function apiKnowledgeImportStatus(Request $request): JsonResponse
+    {
+        $repoUrl = $request->query('repo_url', '');
+        if (empty($repoUrl)) {
+            return response()->json(['error' => 'repo_url required'], 422);
+        }
+        $cacheKey = 'github-import:' . md5($repoUrl);
+        $status   = Cache::get($cacheKey);
+        if (! $status) {
+            return response()->json(['status' => 'not_found']);
+        }
+        return response()->json($status);
     }
 
     public function apiKnowledgeDelete(string $id): JsonResponse

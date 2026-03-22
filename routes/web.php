@@ -90,6 +90,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
         Route::get('/knowledge',                  [DashboardController::class, 'apiKnowledge']);
         Route::post('/knowledge',                 [DashboardController::class, 'apiKnowledgeCreate']);
         Route::post('/knowledge/github',          [DashboardController::class, 'apiKnowledgeGitHub']);
+        Route::get('/knowledge/import-status',    [DashboardController::class, 'apiKnowledgeImportStatus']);
         Route::delete('/knowledge/{id}',          [DashboardController::class, 'apiKnowledgeDelete']);
         Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
         Route::post('/platform',                  [DashboardController::class, 'savePlatform']);
