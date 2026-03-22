@@ -26,7 +26,7 @@ return new class extends Migration {
         });
 
         if (DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
-            DB::statement('ALTER TABLE context_graph_nodes ADD COLUMN embedding vector(3072)');
+            DB::statement('ALTER TABLE context_graph_nodes ADD COLUMN embedding vector(2000)');
             DB::statement('CREATE INDEX context_graph_nodes_content_fts ON context_graph_nodes USING gin(to_tsvector(\'english\', content))');
         }
 

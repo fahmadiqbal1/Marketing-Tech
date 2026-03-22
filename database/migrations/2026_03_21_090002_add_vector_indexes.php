@@ -14,13 +14,13 @@ return new class extends Migration {
             return;
         }
 
-        // HNSW index on knowledge_base.embedding (3072 dims — cosine similarity)
-        // Note: IVFFlat requires > 0 rows; HNSW works on empty tables too
+        // IVFFlat index on knowledge_base.embedding (up to 2000 dims — cosine similarity)
+        // Note: IVFFlat requires > 0 rows
         DB::statement(
-            "CREATE INDEX IF NOT EXISTS knowledge_base_embedding_hnsw_idx
+            "CREATE INDEX IF NOT EXISTS knowledge_base_embedding_ivfflat_idx
              ON knowledge_base
-             USING hnsw (embedding vector_cosine_ops)
-             WITH (m = 16, ef_construction = 64)"
+             USING ivfflat (embedding vector_cosine_ops)
+             WITH (lists = 100)"
         );
 
         // HNSW index on workflows.embedding if column exists

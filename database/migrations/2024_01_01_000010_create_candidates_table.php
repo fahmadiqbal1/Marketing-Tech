@@ -43,7 +43,7 @@ return new class extends Migration {
         });
 
         if (DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
-            DB::statement('ALTER TABLE candidates ADD COLUMN embedding vector(3072)');
+            DB::statement('ALTER TABLE candidates ADD COLUMN embedding vector(2000)');
         }
     }
     public function down(): void { Schema::dropIfExists('candidates'); }
