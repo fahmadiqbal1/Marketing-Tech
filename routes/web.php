@@ -66,53 +66,54 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
     Route::get('/knowledge',  [DashboardController::class, 'knowledge']);
 
     Route::prefix('api')->group(function () {
-        Route::get('/stats',                      [DashboardController::class, 'apiStats']);
-        Route::get('/workflows',                  [DashboardController::class, 'apiWorkflows']);
-        Route::get('/workflows/{id}',             [DashboardController::class, 'apiWorkflowDetail']);
-        Route::post('/workflows/{id}/approve',    [DashboardController::class, 'apiWorkflowApprove']);
-        Route::post('/workflows/{id}/cancel',     [DashboardController::class, 'apiWorkflowCancel']);
-        Route::post('/workflows/{id}/retry',      [DashboardController::class, 'apiWorkflowRetry']);
-        Route::get('/jobs',                       [DashboardController::class, 'apiJobs']);
-        Route::get('/campaigns',                  [DashboardController::class, 'apiCampaigns']);
-        Route::get('/candidates',                 [DashboardController::class, 'apiCandidates']);
-        Route::get('/candidates/{id}',            [DashboardController::class, 'apiCandidateDetail']);
-        Route::get('/content',                    [DashboardController::class, 'apiContent']);
-        Route::get('/content/{id}',               [DashboardController::class, 'apiContentDetail']);
-        Route::get('/system-events',              [DashboardController::class, 'apiSystemEvents']);
-        Route::get('/ai-costs',                   [DashboardController::class, 'apiAiCosts']);
 
-        Route::get('/settings',                   [SettingsController::class, 'show']);
-        Route::post('/settings',                  [SettingsController::class, 'update']);
-        Route::post('/settings/telegram/webhook', [SettingsController::class, 'registerWebhook']);
+        // ── Polling / read endpoints — 60 req/min (safe for 2 tabs + auto-refresh) ──
+        Route::middleware('throttle:60,1')->group(function () {
+            Route::get('/stats',                       [DashboardController::class, 'apiStats']);
+            Route::get('/workflows',                   [DashboardController::class, 'apiWorkflows']);
+            Route::get('/workflows/{id}',              [DashboardController::class, 'apiWorkflowDetail']);
+            Route::get('/jobs',                        [DashboardController::class, 'apiJobs']);
+            Route::get('/campaigns',                   [DashboardController::class, 'apiCampaigns']);
+            Route::get('/campaigns/{id}/intelligence', [PipelineActionController::class, 'campaignIntelligence']);
+            Route::get('/campaigns/{id}/detail',       [DashboardController::class, 'apiCampaignDetail']);
+            Route::get('/candidates',                  [DashboardController::class, 'apiCandidates']);
+            Route::get('/candidates/{id}',             [DashboardController::class, 'apiCandidateDetail']);
+            Route::get('/content',                     [DashboardController::class, 'apiContent']);
+            Route::get('/content/{id}',                [DashboardController::class, 'apiContentDetail']);
+            Route::get('/system-events',               [DashboardController::class, 'apiSystemEvents']);
+            Route::get('/ai-costs',                    [DashboardController::class, 'apiAiCosts']);
+            Route::get('/settings',                    [SettingsController::class,  'show']);
+            Route::get('/pipeline',                    [DashboardController::class, 'apiPipeline']);
+            Route::get('/knowledge',                   [DashboardController::class, 'apiKnowledge']);
+            Route::get('/knowledge/import-status',     [DashboardController::class, 'apiKnowledgeImportStatus']);
+            Route::get('/custom-platforms',            [DashboardController::class, 'apiCustomPlatforms']);
+            Route::get('/variations/{jobId}',          [PipelineActionController::class, 'listVariations']);
+        });
 
-        // Pipeline & Knowledge
-        Route::get('/pipeline',                   [DashboardController::class, 'apiPipeline']);
-        Route::get('/knowledge',                  [DashboardController::class, 'apiKnowledge']);
-        Route::post('/knowledge',                 [DashboardController::class, 'apiKnowledgeCreate']);
-        Route::post('/knowledge/github',          [DashboardController::class, 'apiKnowledgeGitHub']);
-        Route::get('/knowledge/import-status',    [DashboardController::class, 'apiKnowledgeImportStatus']);
-        Route::delete('/knowledge/{id}',          [DashboardController::class, 'apiKnowledgeDelete']);
-        Route::post('/agents/{name}/prompt',      [DashboardController::class, 'apiUpdatePrompt']);
-        Route::post('/platform',                  [DashboardController::class, 'savePlatform']);
-        Route::post('/test-connection',           [DashboardController::class, 'testConnection']);
-        Route::get('/custom-platforms',           [DashboardController::class, 'apiCustomPlatforms']);
-        Route::post('/custom-platforms',          [DashboardController::class, 'apiCustomPlatformCreate']);
-        Route::delete('/custom-platforms/{id}',   [DashboardController::class, 'apiCustomPlatformDelete']);
+        // ── Write / action endpoints — 10 req/min ────────────────────────────────
+        Route::middleware('throttle:10,1')->group(function () {
+            Route::post('/workflows/{id}/approve',              [DashboardController::class,      'apiWorkflowApprove']);
+            Route::post('/workflows/{id}/cancel',               [DashboardController::class,      'apiWorkflowCancel']);
+            Route::post('/workflows/{id}/retry',                [DashboardController::class,      'apiWorkflowRetry']);
+            Route::post('/settings',                            [SettingsController::class,       'update']);
+            Route::post('/settings/telegram/webhook',           [SettingsController::class,       'registerWebhook']);
+            Route::post('/platform',                            [DashboardController::class,      'savePlatform']);
+            Route::post('/test-connection',                     [DashboardController::class,      'testConnection']);
+            Route::post('/agents/{name}/prompt',                [DashboardController::class,      'apiUpdatePrompt']);
+            Route::post('/knowledge',                           [DashboardController::class,      'apiKnowledgeCreate']);
+            Route::delete('/knowledge/{id}',                    [DashboardController::class,      'apiKnowledgeDelete']);
+            Route::post('/custom-platforms',                    [DashboardController::class,      'apiCustomPlatformCreate']);
+            Route::delete('/custom-platforms/{id}',             [DashboardController::class,      'apiCustomPlatformDelete']);
+            Route::post('/pipeline/steps/{id}/skip',            [PipelineActionController::class, 'skipStep']);
+            Route::post('/pipeline/jobs/{id}/retry',            [PipelineActionController::class, 'retryJob']);
+            Route::post('/pipeline/jobs/{id}/promote-winner',   [PipelineActionController::class, 'promoteWinner']);
+            Route::post('/pipeline/jobs/{id}/rerun-from-winner',[PipelineActionController::class, 'rerunFromWinner']);
+            Route::post('/variations/{id}/performance',         [PipelineActionController::class, 'recordPerformance']);
+        });
 
-        // Pipeline actions (Phase 4)
-        Route::post('/pipeline/steps/{id}/skip',           [PipelineActionController::class, 'skipStep']);
-        Route::post('/pipeline/jobs/{id}/retry',           [PipelineActionController::class, 'retryJob']);
-
-        // Winner promotion & re-run (Phase 5)
-        Route::post('/pipeline/jobs/{id}/promote-winner',  [PipelineActionController::class, 'promoteWinner']);
-        Route::post('/pipeline/jobs/{id}/rerun-from-winner', [PipelineActionController::class, 'rerunFromWinner']);
-
-        // Variations & performance
-        Route::get('/variations/{jobId}',         [PipelineActionController::class, 'listVariations']);
-        Route::post('/variations/{id}/performance', [PipelineActionController::class, 'recordPerformance']);
-
-        // Campaign intelligence
-        Route::get('/campaigns/{id}/intelligence', [PipelineActionController::class, 'campaignIntelligence']);
-        Route::get('/campaigns/{id}/detail',       [DashboardController::class, 'apiCampaignDetail']);
+        // ── Heavy / expensive operations — 5 req/min ────────────────────────────
+        Route::middleware('throttle:5,1')->group(function () {
+            Route::post('/knowledge/github', [DashboardController::class, 'apiKnowledgeGitHub']);
+        });
     });
 });
