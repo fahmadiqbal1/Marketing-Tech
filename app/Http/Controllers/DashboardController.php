@@ -89,9 +89,9 @@ class DashboardController extends Controller
 
     // ── API: Agent Jobs ───────────────────────────────────────────────
 
-    public function apiJobs(): JsonResponse
+    public function apiJobs(Request $request): JsonResponse
     {
-        return response()->json($this->stats->getJobs());
+        return response()->json($this->stats->getJobs($request->only(['status', 'agent_type'])));
     }
 
     // ── API: Campaigns ────────────────────────────────────────────────

@@ -117,36 +117,54 @@ class DashboardStatsService
         ]);
     }
 
-    public function getJobs(): array
+    public function getJobs(array $filters = [], int $perPage = 25): array
     {
-        return $this->rescueArray(function (): array {
-            $jobs = AgentJob::query()
-                ->latest()
-                ->limit(50)
-                ->get([
-                    'id', 'workflow_id', 'agent_type', 'short_description', 'status', 'steps_taken',
-                    'started_at', 'completed_at', 'error_message', 'created_at',
-                ]);
+        return $this->rescueArray(function () use ($filters, $perPage): array {
+            $query = AgentJob::query()->latest();
 
-            $byStatus = $jobs->groupBy('status')->map->count();
-            $byAgentType = $jobs->groupBy('agent_type')->map->count();
+            if (! empty($filters['status'])) {
+                $query->where('status', $filters['status']);
+            }
+            if (! empty($filters['agent_type'])) {
+                $query->where('agent_type', $filters['agent_type']);
+            }
+
+            $paginator = $query->paginate($perPage, [
+                'id', 'workflow_id', 'agent_type', 'short_description', 'status', 'steps_taken',
+                'started_at', 'completed_at', 'error_message', 'created_at',
+            ]);
+
+            // Global counts (unfiltered) for summary cards and filter dropdowns
+            $byStatus = AgentJob::query()
+                ->selectRaw('status, count(*) as total')
+                ->groupBy('status')
+                ->pluck('total', 'status');
+
+            $byAgentType = AgentJob::query()
+                ->selectRaw('agent_type, count(*) as total')
+                ->groupBy('agent_type')
+                ->orderByDesc('total')
+                ->pluck('total', 'agent_type');
+
             $queueTable = DB::table('jobs')
                 ->selectRaw('queue, count(*) as pending')
                 ->groupBy('queue')
                 ->pluck('pending', 'queue');
 
-            return [
-                'jobs' => $jobs,
-                'by_status' => $byStatus,
+            return array_merge($paginator->toArray(), [
+                'by_status'     => $byStatus,
                 'by_agent_type' => $byAgentType,
-                'queue_table' => $queueTable,
-                'meta' => $this->meta(),
-            ];
+                'queue_table'   => $queueTable,
+                'meta'          => $this->meta(),
+            ]);
         }, [
-            'jobs' => [],
-            'by_status' => [],
+            'data'          => [],
+            'current_page'  => 1,
+            'last_page'     => 1,
+            'total'         => 0,
+            'by_status'     => [],
             'by_agent_type' => [],
-            'queue_table' => [],
+            'queue_table'   => [],
         ]);
     }
 
