@@ -26,8 +26,9 @@
             </p>
         </div>
 
-        {{-- Active Jobs --}}
-        <div class="stat-card">
+        {{-- Active Jobs (clickable) --}}
+        <div class="stat-card cursor-pointer hover:ring-1 hover:ring-slate-600 transition-all"
+             @click="window.location='/dashboard/jobs?status=running'">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Active Jobs</p>
                 <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
@@ -37,10 +38,11 @@
             <p class="text-3xl font-bold text-white" x-text="stats.active_jobs ?? 0">–</p>
             <p class="text-xs text-slate-500 mt-1">
                 <span x-text="(stats.queue_depth ?? 0) + ' queued'"></span>
+                <span class="ml-1 text-xs text-brand-400">→ view jobs</span>
             </p>
         </div>
 
-        {{-- AI Cost Today --}}
+        {{-- AI Cost Today (with trend) --}}
         <div class="stat-card">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">AI Cost Today</p>
@@ -48,14 +50,31 @@
                     <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </div>
             </div>
-            <p class="text-3xl font-bold text-white" x-text="'$' + (stats.ai_cost_today ?? 0).toFixed(4)">–</p>
+            <div class="flex items-end gap-2">
+                <p class="text-3xl font-bold text-white" x-text="'$' + (stats.ai_cost_today ?? 0).toFixed(4)">–</p>
+                <span class="mb-1 text-xs font-medium flex items-center gap-0.5"
+                      :class="costTrend > 0 ? 'text-red-400' : costTrend < 0 ? 'text-emerald-400' : 'text-slate-500'"
+                      x-show="stats.ai_cost_yesterday != null && stats.ai_cost_today != null">
+                    <template x-if="costTrend > 0">
+                        <span>↑ <span x-text="Math.abs(costTrend) + '%'"></span></span>
+                    </template>
+                    <template x-if="costTrend < 0">
+                        <span>↓ <span x-text="Math.abs(costTrend) + '%'"></span></span>
+                    </template>
+                    <template x-if="costTrend === 0">
+                        <span>→ flat</span>
+                    </template>
+                </span>
+            </div>
             <p class="text-xs text-slate-500 mt-1">
                 <span x-text="'$' + (stats.ai_cost_week ?? 0).toFixed(4) + ' this week'"></span>
             </p>
         </div>
 
-        {{-- Pending Approval --}}
-        <div class="stat-card" :class="pendingApproval > 0 ? 'border-orange-500/40' : ''">
+        {{-- Pending Approval (clickable) --}}
+        <div class="stat-card cursor-pointer transition-all"
+             :class="pendingApproval > 0 ? 'border-orange-500/40 hover:ring-1 hover:ring-orange-500/50' : 'hover:ring-1 hover:ring-slate-600'"
+             @click="window.location='/dashboard/workflows?status=owner_approval'">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Needs Approval</p>
                 <div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
@@ -63,11 +82,14 @@
                 </div>
             </div>
             <p class="text-3xl font-bold" :class="pendingApproval > 0 ? 'text-orange-400' : 'text-white'" x-text="pendingApproval">–</p>
-            <p class="text-xs text-slate-500 mt-1">workflows awaiting sign-off</p>
+            <p class="text-xs text-slate-500 mt-1">
+                <span>workflows awaiting sign-off</span>
+                <span class="ml-1 text-xs text-brand-400" x-show="pendingApproval > 0">→ review</span>
+            </p>
         </div>
     </div>
 
-    {{-- ── Middle row ──────────────────────────────────────────── --}}
+    {{-- ── Middle row: charts ──────────────────────────────────── --}}
     <div class="grid grid-cols-3 gap-4 mb-6">
 
         {{-- Workflow status breakdown --}}
@@ -76,13 +98,63 @@
             <canvas id="statusChart" height="180"></canvas>
         </div>
 
-        {{-- AI cost chart --}}
+        {{-- AI cost chart with time range --}}
         <div class="stat-card col-span-2">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="text-sm font-semibold text-white">AI Cost — Last 7 Days</h3>
-                <span class="text-xs text-slate-500">per day</span>
+                <h3 class="text-sm font-semibold text-white">AI Cost History</h3>
+                <div class="flex bg-slate-800/60 border border-slate-700/50 rounded-lg p-0.5 gap-0.5">
+                    <template x-for="d in [7, 14, 30]" :key="d">
+                        <button @click="costDays = d; loadCosts()"
+                            class="px-2.5 py-1 rounded-md text-xs font-medium transition-all"
+                            :class="costDays === d ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'"
+                            x-text="d + 'd'"></button>
+                    </template>
+                </div>
             </div>
             <canvas id="costChart" height="130"></canvas>
+        </div>
+    </div>
+
+    {{-- ── AI Cost Breakdown + Agent Performance ───────────────── --}}
+    <div class="grid grid-cols-2 gap-4 mb-6">
+
+        {{-- Cost breakdown by model --}}
+        <div class="stat-card">
+            <h3 class="text-sm font-semibold text-white mb-3">Cost by Model</h3>
+            <template x-if="!costBreakdown.length">
+                <p class="text-xs text-slate-500 py-4 text-center">No AI requests recorded yet.</p>
+            </template>
+            <div class="space-y-2">
+                <template x-for="row in costBreakdown" :key="row.model">
+                    <div class="flex items-center justify-between text-xs">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-slate-300 truncate" x-text="row.model"></p>
+                            <p class="text-slate-500" x-text="row.provider + ' · ' + row.requests + ' reqs'"></p>
+                        </div>
+                        <span class="ml-3 font-medium text-amber-400" x-text="'$' + Number(row.total_cost).toFixed(4)"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        {{-- Agent job distribution --}}
+        <div class="stat-card">
+            <h3 class="text-sm font-semibold text-white mb-3">Jobs by Agent</h3>
+            <template x-if="!Object.keys(agentTypes).length">
+                <p class="text-xs text-slate-500 py-4 text-center">No agent jobs recorded yet.</p>
+            </template>
+            <div class="space-y-2">
+                <template x-for="[type, count] in Object.entries(agentTypes)" :key="type">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-300 w-32 truncate" x-text="type"></span>
+                        <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div class="h-full bg-brand-500 rounded-full transition-all"
+                                 :style="'width:' + Math.round(count / maxAgentCount * 100) + '%'"></div>
+                        </div>
+                        <span class="text-xs text-slate-400 w-6 text-right" x-text="count"></span>
+                    </div>
+                </template>
+            </div>
         </div>
     </div>
 
@@ -153,6 +225,9 @@ function overviewApp() {
     return {
         ...dashboardState(),
         stats: {},
+        costBreakdown: [],
+        agentTypes: {},
+        costDays: 7,
         statusChartInstance: null,
         costChartInstance: null,
 
@@ -161,6 +236,17 @@ function overviewApp() {
         },
         get pendingApproval() {
             return Number(this.stats.workflows?.owner_approval ?? 0);
+        },
+        get costTrend() {
+            const today = this.stats.ai_cost_today ?? 0;
+            const yesterday = this.stats.ai_cost_yesterday ?? 0;
+            if (yesterday === 0 && today === 0) return 0;
+            if (yesterday === 0) return 100;
+            return Math.round(((today - yesterday) / yesterday) * 100);
+        },
+        get maxAgentCount() {
+            const vals = Object.values(this.agentTypes);
+            return vals.length ? Math.max(...vals) : 1;
         },
 
         async init() {
@@ -185,10 +271,7 @@ function overviewApp() {
                 // Status donut
                 const sCtx = document.getElementById('statusChart')?.getContext('2d');
                 if (sCtx) {
-                    if (this.statusChartInstance) {
-                        this.statusChartInstance.destroy();
-                        this.statusChartInstance = null;
-                    }
+                    if (this.statusChartInstance) { this.statusChartInstance.destroy(); this.statusChartInstance = null; }
                     this.statusChartInstance = new Chart(sCtx, {
                         type: 'doughnut',
                         data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0 }] },
@@ -208,10 +291,7 @@ function overviewApp() {
                 // Cost bar chart
                 const cCtx = document.getElementById('costChart')?.getContext('2d');
                 if (cCtx) {
-                    if (this.costChartInstance) {
-                        this.costChartInstance.destroy();
-                        this.costChartInstance = null;
-                    }
+                    if (this.costChartInstance) { this.costChartInstance.destroy(); this.costChartInstance = null; }
                     this.costChartInstance = new Chart(cCtx, {
                         type: 'bar',
                         data: { labels: [], datasets: [{ label: 'USD', data: [], backgroundColor: 'rgba(139,92,246,0.6)', borderRadius: 4 }] },
@@ -229,7 +309,6 @@ function overviewApp() {
                             }
                         }
                     });
-                    // Load cost data
                     this.loadCosts();
                     setInterval(() => this.loadCosts(), 30000);
                 }
@@ -256,11 +335,18 @@ function overviewApp() {
         async loadCosts() {
             if (!this.costChartInstance?.canvas) return;
             try {
-                const d = this.applyMeta(await apiGet('/dashboard/api/ai-costs?days=7'));
+                const d = this.applyMeta(await apiGet('/dashboard/api/ai-costs?days=' + this.costDays));
                 this.costChartInstance.data.labels = (d.daily ?? []).map(x => x.date);
                 this.costChartInstance.data.datasets[0].data = (d.daily ?? []).map(x => x.cost);
                 this.costChartInstance.update();
+                this.costBreakdown = d.breakdown ?? [];
             } catch (error) { this.handleError(error); }
+
+            // Also load agent type distribution
+            try {
+                const j = await apiGet('/dashboard/api/jobs');
+                this.agentTypes = j.by_agent_type ?? {};
+            } catch (_) {}
         },
 
         statusBadge, relativeTime

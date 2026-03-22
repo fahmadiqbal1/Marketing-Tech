@@ -33,8 +33,9 @@ class DashboardStatsService
 
             $activeJobs = AgentJob::query()->whereIn('status', ['pending', 'running'])->count();
 
-            $aiCostToday = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
-            $aiCostWeek = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
+            $aiCostToday     = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
+            $aiCostYesterday = AiRequest::query()->whereDate('requested_at', today()->subDay())->sum('cost_usd');
+            $aiCostWeek      = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
 
             $recentWorkflows = Workflow::query()
                 ->latest()
@@ -59,8 +60,9 @@ class DashboardStatsService
                 'workflows' => $workflowCounts,
                 'active_jobs' => $activeJobs,
                 'queue_depth' => $queueDepth,
-                'ai_cost_today' => round((float) $aiCostToday, 4),
-                'ai_cost_week' => round((float) $aiCostWeek, 4),
+                'ai_cost_today'     => round((float) $aiCostToday, 4),
+                'ai_cost_yesterday' => round((float) $aiCostYesterday, 4),
+                'ai_cost_week'      => round((float) $aiCostWeek, 4),
                 'recent_workflows' => $recentWorkflows,
                 'recent_events' => $recentEvents,
                 'meta' => $this->meta(),
@@ -69,8 +71,9 @@ class DashboardStatsService
             'workflows' => [],
             'active_jobs' => 0,
             'queue_depth' => 0,
-            'ai_cost_today' => 0.0,
-            'ai_cost_week' => 0.0,
+            'ai_cost_today'     => 0.0,
+            'ai_cost_yesterday' => 0.0,
+            'ai_cost_week'      => 0.0,
             'recent_workflows' => [],
             'recent_events' => [],
         ]);
