@@ -108,9 +108,17 @@ function systemApp() {
             { key: 'debug',   label: 'Debug',   color: 'text-slate-400' },
         ],
 
-        async init() { await this.load(); },
+        async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_system') ?? '{}');
+            const validLevels = ['', 'info', 'warning', 'error', 'debug'];
+            this.levelFilter = validLevels.includes(saved.levelFilter ?? '') ? (saved.levelFilter ?? '') : '';
+            await this.load();
+        },
 
         async load() {
+            localStorage.setItem('filters_system', JSON.stringify({
+                levelFilter: this.levelFilter,
+            }));
             this.loading = true;
             this.clearMessages();
             try {

@@ -133,9 +133,23 @@ function jobsApp() {
         totalEntries: 0,
         loading: false,
 
-        async init() { await this.load(); },
+        async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_jobs') ?? '{}');
+            const validStatuses = ['', 'pending', 'running', 'completed', 'failed'];
+            this.statusFilter    = validStatuses.includes(saved.statusFilter ?? '') ? (saved.statusFilter ?? '') : '';
+            this.agentTypeFilter = saved.agentTypeFilter ?? '';
+            await this.load();
+            // Post-load: reset agentTypeFilter if not found in available agent types
+            if (this.agentTypeFilter && !Object.keys(this.byAgentType).includes(this.agentTypeFilter)) {
+                this.agentTypeFilter = '';
+            }
+        },
 
         async load() {
+            localStorage.setItem('filters_jobs', JSON.stringify({
+                statusFilter:    this.statusFilter,
+                agentTypeFilter: this.agentTypeFilter,
+            }));
             this.loading = true;
             this.clearMessages();
             try {

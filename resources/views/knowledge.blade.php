@@ -339,10 +339,21 @@ function knowledgeApp() {
         newEntry: { title: '', content: '', category: 'general', tagsRaw: '' },
 
         async init() {
+            const saved = JSON.parse(localStorage.getItem('filters_knowledge') ?? '{}');
+            this.categoryFilter = saved.categoryFilter ?? '';
+            this.search         = saved.search ?? '';
             await this.load();
+            // Post-load: reset categoryFilter if no longer an available category
+            if (this.categoryFilter && !(this.stats.categories ?? []).includes(this.categoryFilter)) {
+                this.categoryFilter = '';
+            }
         },
 
         async load() {
+            localStorage.setItem('filters_knowledge', JSON.stringify({
+                categoryFilter: this.categoryFilter,
+                search:         this.search,
+            }));
             this.loading = true;
             try {
                 const params = new URLSearchParams({
