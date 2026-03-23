@@ -82,6 +82,8 @@ class YouTubeService implements SocialPlatformInterface
             throw new \RuntimeException('[YouTube] Publish requires metadata.media_url (public video URL).');
         }
 
+        $mediaUrl = \App\Services\Social\SocialPlatformService::ensurePublicUrl($mediaUrl);
+
         $isShort      = $entry->content_type === 'short' || ($entry->metadata['is_short'] ?? false);
 
         // Shorts validation: warn if duration metadata suggests video exceeds 60s
@@ -114,19 +116,30 @@ class YouTubeService implements SocialPlatformInterface
             ],
         ];
 
-        // Step 1: Initiate resumable upload session
-        $initResponse = Http::withToken($account->access_token)
-            ->withHeaders([
-                'X-Upload-Content-Type'   => 'video/*',
-                'X-Upload-Content-Length' => '0', // unknown size for URL source
-                'Content-Type'            => 'application/json; charset=UTF-8',
-            ])
-            ->post(self::UPLOAD_URL . '?uploadType=resumable&part=snippet,status', $videoMeta)
-            ->throw();
+        // Step 1: Initiate resumable upload session (skip if we have a stored URI from a failed retry)
+        $uploadUri = $entry->metadata['youtube_upload_uri'] ?? null;
 
-        $uploadUri = $initResponse->header('Location');
         if (! $uploadUri) {
-            throw new \RuntimeException('[YouTube] No upload URI returned from resumable upload init.');
+            $initResponse = Http::withToken($account->access_token)
+                ->withHeaders([
+                    'X-Upload-Content-Type'   => 'video/*',
+                    'X-Upload-Content-Length' => '0', // unknown size for URL source
+                    'Content-Type'            => 'application/json; charset=UTF-8',
+                ])
+                ->post(self::UPLOAD_URL . '?uploadType=resumable&part=snippet,status', $videoMeta)
+                ->throw();
+
+            $uploadUri = $initResponse->header('Location');
+            if (! $uploadUri) {
+                throw new \RuntimeException('[YouTube] No upload URI returned from resumable upload init.');
+            }
+
+            // Persist upload URI immediately so a retry can resume without re-initing
+            $meta = $entry->metadata ?? [];
+            $meta['youtube_upload_uri'] = $uploadUri;
+            $entry->update(['metadata' => $meta]);
+        } else {
+            Log::info("[YouTube] Resuming upload from stored URI for entry {$entry->id}");
         }
 
         // Step 2: Fetch video from source URL and stream to YouTube resumable URI
@@ -145,6 +158,11 @@ class YouTubeService implements SocialPlatformInterface
             ->json();
 
         $videoId = $uploadResponse['id'];
+
+        // Clear stored upload URI on success
+        $meta = $entry->metadata ?? [];
+        unset($meta['youtube_upload_uri']);
+        $entry->update(['metadata' => $meta]);
 
         Log::info("[YouTube] Published video id={$videoId} for calendar entry {$entry->id}" . ($isShort ? ' [Short]' : ''));
 

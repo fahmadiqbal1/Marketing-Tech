@@ -119,4 +119,37 @@ class SocialPlatformService
     {
         return ['instagram', 'twitter', 'linkedin', 'facebook', 'tiktok', 'youtube'];
     }
+
+    /**
+     * Ensure a media path is a publicly accessible HTTPS URL.
+     *
+     * If the path is already an http(s) URL it is returned as-is.
+     * If it is a local storage path, the file is uploaded to the configured
+     * default disk and a 2-hour temporary/signed URL is returned.
+     *
+     * @throws \RuntimeException if the local file does not exist.
+     */
+    public static function ensurePublicUrl(string $path): string
+    {
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Normalise storage/ prefix
+        $storagePath = ltrim(preg_replace('#^storage/#', '', $path), '/');
+
+        $disk = \Illuminate\Support\Facades\Storage::disk(config('filesystems.default', 'local'));
+
+        if (! $disk->exists($storagePath)) {
+            throw new \RuntimeException("ensurePublicUrl: local file not found: {$storagePath}");
+        }
+
+        // S3-compatible disks support temporary URLs; local disk returns a plain URL
+        try {
+            return $disk->temporaryUrl($storagePath, now()->addHours(2));
+        } catch (\RuntimeException) {
+            // Local disk doesn't support temporaryUrl — return public URL instead
+            return $disk->url($storagePath);
+        }
+    }
 }

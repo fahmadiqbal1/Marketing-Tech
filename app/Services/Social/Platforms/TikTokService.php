@@ -6,6 +6,7 @@ use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
 use App\Jobs\PollTikTokPublishStatus;
+use App\Services\Social\SocialPlatformService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -165,6 +166,8 @@ class TikTokService implements SocialPlatformInterface
             throw new \RuntimeException('[TikTok] Video publish requires metadata.media_url');
         }
 
+        $mediaUrl = SocialPlatformService::ensurePublicUrl($mediaUrl);
+
         $payload = [
             'post_info' => [
                 'title'         => $caption,
@@ -217,6 +220,8 @@ class TikTokService implements SocialPlatformInterface
         if (empty($mediaUrls) && ! empty($entry->metadata['media_url'])) {
             $mediaUrls = [$entry->metadata['media_url']];
         }
+
+        $mediaUrls = array_map([SocialPlatformService::class, 'ensurePublicUrl'], $mediaUrls);
 
         if (empty($mediaUrls)) {
             throw new \RuntimeException('[TikTok] Photo post requires metadata.media_urls[]');
