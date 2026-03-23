@@ -757,13 +757,18 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'LinkedIn API credentials not configured. Set SOCIAL_LINKEDIN_CLIENT_ID and SOCIAL_LINKEDIN_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_linkedin_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialLinkedInCallback(Request $request): \Illuminate\Http\RedirectResponse
     {
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'LinkedIn authorization denied: ' . $request->get('error_description'));
+        }
+        if ($request->get('state') !== session('oauth_linkedin_state')) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn OAuth state mismatch — possible CSRF.');
         }
         $svc = new LinkedInService();
         try {
@@ -786,6 +791,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            session()->forget('oauth_linkedin_state');
             return redirect('/dashboard/social')->with('success', 'LinkedIn connected successfully.');
         } catch (\Throwable $e) {
             Log::error('LinkedIn OAuth callback failed', ['error' => $e->getMessage()]);
@@ -801,13 +807,18 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'Facebook API credentials not configured. Set SOCIAL_FACEBOOK_CLIENT_ID and SOCIAL_FACEBOOK_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_facebook_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialFacebookCallback(Request $request): \Illuminate\Http\RedirectResponse
     {
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'Facebook authorization denied: ' . $request->get('error_description'));
+        }
+        if ($request->get('state') !== session('oauth_facebook_state')) {
+            return redirect('/dashboard/social')->with('error', 'Facebook OAuth state mismatch — possible CSRF.');
         }
         $svc = new FacebookService();
         try {
@@ -830,6 +841,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            session()->forget('oauth_facebook_state');
             return redirect('/dashboard/social')->with('success', "Facebook Page \"{$pageName}\" connected successfully.");
         } catch (\Throwable $e) {
             Log::error('Facebook OAuth callback failed', ['error' => $e->getMessage()]);
@@ -897,13 +909,18 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'YouTube API credentials not configured. Set SOCIAL_YOUTUBE_CLIENT_ID and SOCIAL_YOUTUBE_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_youtube_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialYouTubeCallback(Request $request): \Illuminate\Http\RedirectResponse
     {
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'YouTube authorization denied: ' . $request->get('error'));
+        }
+        if ($request->get('state') !== session('oauth_youtube_state')) {
+            return redirect('/dashboard/social')->with('error', 'YouTube OAuth state mismatch — possible CSRF.');
         }
         $svc = new YouTubeService();
         try {
@@ -928,6 +945,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            session()->forget('oauth_youtube_state');
             return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
         } catch (\Throwable $e) {
             Log::error('YouTube OAuth callback failed', ['error' => $e->getMessage()]);

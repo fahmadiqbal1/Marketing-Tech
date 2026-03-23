@@ -47,6 +47,21 @@ class SocialPlatformService
      */
     public function publishWithRateLimit(SocialAccount $account, ContentCalendar $entry): array
     {
+        // Dry-run mode: log intent, return mock result, never call real API
+        if (config('services.social.dry_run', false)) {
+            $message = "[DRY_RUN] Would publish entry {$entry->id} ({$account->platform}): \"{$entry->title}\"";
+            Log::info($message);
+            \App\Models\SystemEvent::create(['level' => 'info', 'message' => $message]);
+            return [
+                'post_id'     => 'dry_run_' . \Illuminate\Support\Str::random(8),
+                'url'         => '#dry-run',
+                'impressions' => 0,
+                'clicks'      => 0,
+                'conversions' => 0,
+                'simulated'   => true,
+            ];
+        }
+
         $key      = "social-post:{$account->platform}:{$account->id}";
         $perMin   = $this->rateLimit($account->platform);
 

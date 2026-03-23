@@ -34,17 +34,19 @@ class YouTubeService implements SocialPlatformInterface
             && ! empty(config('services.youtube.client_secret'));
     }
 
-    public function getAuthorizationUrl(): string
+    public function getAuthorizationUrl(): array
     {
-        return self::OAUTH_URL . '?' . http_build_query([
-            'client_id'             => config('services.youtube.client_id'),
-            'redirect_uri'          => config('services.youtube.redirect_uri'),
-            'response_type'         => 'code',
-            'scope'                 => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
-            'access_type'           => 'offline',
-            'prompt'                => 'consent', // always prompt to get refresh_token
-            'state'                 => bin2hex(random_bytes(16)),
+        $state = bin2hex(random_bytes(16));
+        $url   = self::OAUTH_URL . '?' . http_build_query([
+            'client_id'    => config('services.youtube.client_id'),
+            'redirect_uri' => config('services.youtube.redirect_uri'),
+            'response_type'=> 'code',
+            'scope'        => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+            'access_type'  => 'offline',
+            'prompt'       => 'consent', // always prompt to get refresh_token
+            'state'        => $state,
         ]);
+        return ['url' => $url, 'state' => $state];
     }
 
     public function exchangeCode(string $code): array

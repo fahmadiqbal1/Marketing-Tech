@@ -32,15 +32,17 @@ class FacebookService implements SocialPlatformInterface
             && ! empty(config('services.facebook.client_secret'));
     }
 
-    public function getAuthorizationUrl(): string
+    public function getAuthorizationUrl(): array
     {
-        return self::OAUTH_URL . '?' . http_build_query([
+        $state = bin2hex(random_bytes(16));
+        $url   = self::OAUTH_URL . '?' . http_build_query([
             'client_id'     => config('services.facebook.client_id'),
             'redirect_uri'  => config('services.facebook.redirect_uri'),
             'scope'         => 'pages_manage_posts,pages_read_engagement,pages_show_list,read_insights,public_profile',
             'response_type' => 'code',
-            'state'         => bin2hex(random_bytes(16)),
+            'state'         => $state,
         ]);
+        return ['url' => $url, 'state' => $state];
     }
 
     /**
