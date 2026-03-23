@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@claude-flow/cli": "^3.5.42"
+  }
+}

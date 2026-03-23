@@ -1,0 +1,11 @@
+{
+  "agentId": "swarm-mn31krv4-agent-3",
+  "role": "Coder",
+  "type": "coder",
+  "purpose": "Implementation",
+  "status": "active",
+  "swarmId": "swarm-mn31krv4",
+  "createdAt": "2026-03-23T10:27:31.216Z",
+  "health": 1,
+  "taskCount": 0
+}

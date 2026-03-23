@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find app/ database/ routes/ -name \"*.php\" -exec php -l {})",
+      "Bash(2)",
+      "Bash(grep -v \"^$\")",
+      "Bash(npx --version)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "claude-flow"
+  ]
+}

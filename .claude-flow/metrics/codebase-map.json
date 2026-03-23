@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-03-23T11:17:49.721Z",
+  "projectRoot": "D:\\Projects\\Marketing-Tech\\Marketing-Tech",
+  "structure": {
+    "hasPackageJson": true,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1774264669721
+}

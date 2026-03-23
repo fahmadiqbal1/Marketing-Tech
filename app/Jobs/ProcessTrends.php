@@ -19,7 +19,7 @@ class ProcessTrends implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public string $queue   = 'low';
+    public $queue   = 'low';
     public int    $tries   = 1;
     public int    $timeout = 60;
 

@@ -1,0 +1,133 @@
+{
+  "agents": {
+    "swarm-mn31krv4-agent-1": {
+      "agentId": "swarm-mn31krv4-agent-1",
+      "agentType": "coordinator",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Orchestrate workflow"
+      },
+      "createdAt": "2026-03-23T10:27:31.229Z",
+      "domain": "Coordinator",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-2": {
+      "agentId": "swarm-mn31krv4-agent-2",
+      "agentType": "architect",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "System design"
+      },
+      "createdAt": "2026-03-23T10:27:31.234Z",
+      "domain": "Architect",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-3": {
+      "agentId": "swarm-mn31krv4-agent-3",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Implementation"
+      },
+      "createdAt": "2026-03-23T10:27:31.238Z",
+      "domain": "Coder",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-4": {
+      "agentId": "swarm-mn31krv4-agent-4",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Implementation"
+      },
+      "createdAt": "2026-03-23T10:27:31.240Z",
+      "domain": "Coder",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-5": {
+      "agentId": "swarm-mn31krv4-agent-5",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Implementation"
+      },
+      "createdAt": "2026-03-23T10:27:31.242Z",
+      "domain": "Coder",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-6": {
+      "agentId": "swarm-mn31krv4-agent-6",
+      "agentType": "tester",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Quality assurance"
+      },
+      "createdAt": "2026-03-23T10:27:31.243Z",
+      "domain": "Tester",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-7": {
+      "agentId": "swarm-mn31krv4-agent-7",
+      "agentType": "tester",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Quality assurance"
+      },
+      "createdAt": "2026-03-23T10:27:31.247Z",
+      "domain": "Tester",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "swarm-mn31krv4-agent-8": {
+      "agentId": "swarm-mn31krv4-agent-8",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "swarmId": "swarm-mn31krv4",
+        "strategy": "development",
+        "purpose": "Code review"
+      },
+      "createdAt": "2026-03-23T10:27:31.250Z",
+      "domain": "Reviewer",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    }
+  },
+  "version": "3.0.0"
+}

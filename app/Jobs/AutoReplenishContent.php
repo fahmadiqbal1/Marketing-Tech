@@ -20,7 +20,7 @@ class AutoReplenishContent implements ShouldQueue
 
     public int    $tries   = 1;
     public int    $timeout = 60;
-    public string $queue   = 'low';
+    public $queue   = 'low';
 
     public function handle(): void
     {

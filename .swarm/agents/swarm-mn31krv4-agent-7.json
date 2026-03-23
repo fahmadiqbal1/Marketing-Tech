@@ -1,0 +1,11 @@
+{
+  "agentId": "swarm-mn31krv4-agent-7",
+  "role": "Tester",
+  "type": "tester",
+  "purpose": "Quality assurance",
+  "status": "active",
+  "swarmId": "swarm-mn31krv4",
+  "createdAt": "2026-03-23T10:27:31.216Z",
+  "health": 1,
+  "taskCount": 0
+}

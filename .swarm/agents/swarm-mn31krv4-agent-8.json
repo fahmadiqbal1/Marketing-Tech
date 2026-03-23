@@ -1,0 +1,11 @@
+{
+  "agentId": "swarm-mn31krv4-agent-8",
+  "role": "Reviewer",
+  "type": "reviewer",
+  "purpose": "Code review",
+  "status": "active",
+  "swarmId": "swarm-mn31krv4",
+  "createdAt": "2026-03-23T10:27:31.216Z",
+  "health": 1,
+  "taskCount": 0
+}

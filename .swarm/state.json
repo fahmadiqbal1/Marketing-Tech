@@ -1,0 +1,12 @@
+{
+  "id": "swarm-mn31krv4",
+  "topology": "hierarchical-mesh",
+  "maxAgents": 8,
+  "strategy": "development",
+  "objective": "Build Marketing Tech Platform",
+  "status": "running",
+  "startedAt": "2026-03-23T10:27:31.216Z",
+  "agentCount": 8,
+  "taskCount": 5,
+  "parallel": true
+}
