@@ -15,7 +15,10 @@ class PruneRejectedCandidates implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public string $queue = 'low';
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(): void
     {

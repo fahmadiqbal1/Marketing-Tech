@@ -413,7 +413,7 @@ PROMPT;
                 'nice_to_have'    => $args['nice_to_have']    ?? [],
                 'salary_range'    => $args['salary_range']    ?? null,
                 'status'          => 'active',
-                'agent_job_id'    => $job->id,
+                'agent_run_id'    => $job->id,
                 'metadata'        => [
                     'platforms'      => ['rozee.pk', 'indeed.pk', 'linkedin'],
                     'auto_published' => true,

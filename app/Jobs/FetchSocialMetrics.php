@@ -20,8 +20,12 @@ class FetchSocialMetrics implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int    $tries   = 2;
-    public string $queue   = 'low';
     public int $timeout = 120;
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(SocialPlatformService $social, IterationEngineService $iteration): void
     {

@@ -202,7 +202,7 @@ class DashboardController extends Controller
             'phone'          => $data['phone'] ?? null,
             'linkedin_url'   => $data['linkedin_url'] ?? null,
             'cv_raw'         => $data['cv_raw'],
-            'job_posting_id' => $job->id,
+            'applied_job_id' => $job->id,
             'pipeline_stage' => 'applied',
             'stage_updated_at' => now(),
             'source'         => 'direct_apply',

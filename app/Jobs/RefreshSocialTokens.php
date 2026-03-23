@@ -18,7 +18,11 @@ class RefreshSocialTokens implements ShouldQueue
 
     public int    $tries   = 2;
     public int    $timeout = 60;
-    public string $queue   = 'low';
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(SocialPlatformService $social): void
     {

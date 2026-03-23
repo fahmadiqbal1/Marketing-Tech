@@ -47,6 +47,7 @@
 | 36 | hiring | PruneRejectedCandidates uses stage_updated_at (not updated_at) for 30-day retention — ensure stage_updated_at is always set on pipeline transitions | 2026-03-23 | Phase 10 |
 | 37 | media | Runway Gen-3 video generation is synchronous polling — max 60s (12×5s) within tool; long videos need async job instead | 2026-03-23 | Phase 10 |
 | 38 | controller | mb_strlen($content, 'UTF-8') for platform char limits — emojis count as 2 bytes in strlen() but 1 char in mb_strlen; always use mb variant | 2026-03-23 | Phase 10 |
+| 39 | jobs | Laravel Queueable already defines `$queue`; setting `public string $queue = 'low'`/`'social'` on jobs fatals under PHP 8.2 — use `$this->onQueue(...)` in `__construct()` instead | 2026-03-23 | Merge Hardening |
 
 ---
 
@@ -87,6 +88,11 @@
 - Calendar modal: last_error red error box for failed entries
 - Credential health: RefreshCredentialStatus nightly job; token_expires_soon field in apiSocialAccounts; amber badge in accounts tab
 - GeneratedOutput::contentVariation() BelongsTo relationship added
+
+### 2026-03-23 — Merge Hardening / Silent Data Loss Fixes
+- Fixed Candidate apply flow to persist `applied_job_id` instead of ignored `job_posting_id`
+- Fixed HiringAgent job-post creation to persist `agent_run_id` instead of ignored `agent_job_id`
+- Replaced incompatible typed `$queue` job properties with `onQueue(...)` constructors so `php artisan list` boots cleanly on PHP 8.2
 
 ### 2026-03-23 — Phase 9F (Social Platform Hardening — 6 commits)
 - Moderation gate: ContentCalendar.scheduledNow() requires moderation_status IN (approved, auto_approved)
