@@ -778,6 +778,27 @@ class DashboardController extends Controller
                 ->get('https://api.linkedin.com/v2/me', ['projection' => '(id,localizedFirstName,localizedLastName)'])->json();
             $userId    = $profile['id'] ?? null;
             $name      = trim(($profile['localizedFirstName'] ?? '') . ' ' . ($profile['localizedLastName'] ?? '')) ?: 'unknown';
+
+            // Fetch organizations the user admins — store for org selection
+            $orgsResponse = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
+                ->get('https://api.linkedin.com/v2/organizationAcls', [
+                    'q'    => 'roleAssignee',
+                    'role' => 'ADMINISTRATOR',
+                ]);
+
+            $organizations = [];
+            if ($orgsResponse->ok()) {
+                foreach ($orgsResponse->json('elements', []) as $acl) {
+                    $orgUrn = $acl['organization'] ?? null;
+                    if ($orgUrn) {
+                        $organizations[] = ['urn' => $orgUrn, 'name' => $acl['organizationName'] ?? $orgUrn];
+                    }
+                }
+            }
+
+            $defaultOrgUrn = $organizations[0]['urn'] ?? null;
+
             SocialAccount::updateOrCreate(
                 ['platform' => 'linkedin', 'handle' => $userId ?? $name],
                 [
@@ -786,13 +807,18 @@ class DashboardController extends Controller
                     'access_token'     => $tokenData['access_token'],
                     'refresh_token'    => $tokenData['refresh_token'] ?? null,
                     'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'metadata'         => [
+                        'organization_urn'  => $defaultOrgUrn,
+                        'organizations'     => $organizations,
+                    ],
                     'is_connected'     => true,
                     'last_error'       => null,
                     'last_synced_at'   => now(),
                 ]
             );
             session()->forget('oauth_linkedin_state');
-            return redirect('/dashboard/social')->with('success', 'LinkedIn connected successfully.');
+            $orgMsg = $defaultOrgUrn ? ' (' . count($organizations) . ' organization(s) found)' : '';
+            return redirect('/dashboard/social')->with('success', "LinkedIn connected successfully{$orgMsg}.");
         } catch (\Throwable $e) {
             Log::error('LinkedIn OAuth callback failed', ['error' => $e->getMessage()]);
             return redirect('/dashboard/social')->with('error', 'Failed to connect LinkedIn: ' . $e->getMessage());
@@ -822,27 +848,65 @@ class DashboardController extends Controller
         }
         $svc = new FacebookService();
         try {
-            $tokenData = $svc->exchangeCode($request->get('code'));
-            $pageId    = $tokenData['page_id']   ?? null;
-            $pageName  = $tokenData['page_name'] ?? 'Facebook Page';
-            $handle    = $pageId ?? 'page';
-            SocialAccount::updateOrCreate(
-                ['platform' => 'facebook', 'handle' => $handle],
-                [
-                    'platform_user_id' => $pageId,
-                    'display_name'     => $pageName,
-                    'access_token'     => $tokenData['page_access_token'],
-                    'token_expires_at' => ($tokenData['expires_in'] ?? 0) > 0
-                                            ? now()->addSeconds($tokenData['expires_in'])
-                                            : null,
-                    'metadata'         => ['user_access_token' => $tokenData['user_access_token'], 'page_id' => $pageId, 'page_name' => $pageName],
-                    'is_connected'     => true,
-                    'last_error'       => null,
-                    'last_synced_at'   => now(),
-                ]
+            $tokenData   = $svc->exchangeCode($request->get('code'));
+            $userToken   = $tokenData['user_access_token'];
+
+            // Fetch ALL managed pages and create/update a SocialAccount per page
+            $pagesResponse = \Illuminate\Support\Facades\Http::get(
+                'https://graph.facebook.com/v19.0/me/accounts',
+                ['access_token' => $userToken]
             );
+
+            $pages     = $pagesResponse->ok() ? $pagesResponse->json('data', []) : [];
+            $pageCount = 0;
+
+            foreach ($pages as $page) {
+                $pageId    = $page['id'];
+                $pageName  = $page['name'] ?? 'Facebook Page';
+                $pageToken = $page['access_token'] ?? $userToken;
+
+                SocialAccount::updateOrCreate(
+                    ['platform' => 'facebook', 'handle' => $pageId],
+                    [
+                        'platform_user_id' => $pageId,
+                        'display_name'     => $pageName,
+                        'access_token'     => $pageToken,
+                        'token_expires_at' => null, // page tokens don't expire
+                        'metadata'         => [
+                            'user_access_token' => $userToken,
+                            'page_id'           => $pageId,
+                            'page_name'         => $pageName,
+                        ],
+                        'is_connected'  => true,
+                        'last_error'    => null,
+                        'last_synced_at'=> now(),
+                    ]
+                );
+                $pageCount++;
+            }
+
+            // Fallback: if no pages returned, store with the single page from exchangeCode
+            if ($pageCount === 0) {
+                $pageId   = $tokenData['page_id']   ?? 'page';
+                $pageName = $tokenData['page_name'] ?? 'Facebook Page';
+                SocialAccount::updateOrCreate(
+                    ['platform' => 'facebook', 'handle' => $pageId],
+                    [
+                        'platform_user_id' => $pageId,
+                        'display_name'     => $pageName,
+                        'access_token'     => $tokenData['page_access_token'],
+                        'token_expires_at' => null,
+                        'metadata'         => ['user_access_token' => $userToken, 'page_id' => $pageId, 'page_name' => $pageName],
+                        'is_connected'     => true,
+                        'last_error'       => null,
+                        'last_synced_at'   => now(),
+                    ]
+                );
+                $pageCount = 1;
+            }
+
             session()->forget('oauth_facebook_state');
-            return redirect('/dashboard/social')->with('success', "Facebook Page \"{$pageName}\" connected successfully.");
+            return redirect('/dashboard/social')->with('success', "Facebook connected: {$pageCount} page(s) linked.");
         } catch (\Throwable $e) {
             Log::error('Facebook OAuth callback failed', ['error' => $e->getMessage()]);
             return redirect('/dashboard/social')->with('error', 'Failed to connect Facebook: ' . $e->getMessage());
@@ -1249,6 +1313,17 @@ class DashboardController extends Controller
         );
 
         return response()->json($account, 201);
+    }
+
+    public function apiPatchSocialAccount(Request $request, string $id): JsonResponse
+    {
+        $account   = SocialAccount::findOrFail($id);
+        $validated = $request->validate(['metadata' => 'required|array']);
+
+        // Merge into existing metadata so callers can update a single key
+        $account->update(['metadata' => array_merge($account->metadata ?? [], $validated['metadata'])]);
+
+        return response()->json($account->fresh());
     }
 
     public function apiDeleteSocialAccount(string $id): JsonResponse

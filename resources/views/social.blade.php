@@ -216,6 +216,23 @@
                             <p class="text-xs text-red-400 mb-2 bg-red-500/10 rounded px-2 py-1 truncate" x-text="accountFor('{{ $platform }}').last_error"></p>
                         </template>
 
+                        @if($platform === 'linkedin')
+                        {{-- LinkedIn: organisation selector (shown when ≥1 org in metadata) --}}
+                        <template x-if="accountFor('linkedin') && accountFor('linkedin').is_connected && accountFor('linkedin').metadata && (accountFor('linkedin').metadata.organizations || []).length > 0">
+                            <div class="mb-3">
+                                <label class="block text-xs text-slate-400 mb-1">Posting as organisation</label>
+                                <select class="form-input w-full text-xs"
+                                        @change="updateOrgUrn(accountFor('linkedin').id, $event.target.value)">
+                                    <template x-for="org in (accountFor('linkedin').metadata.organizations ?? [])" :key="org.urn">
+                                        <option :value="org.urn"
+                                                :selected="org.urn === accountFor('linkedin').metadata.organization_urn"
+                                                x-text="org.name ?? org.urn"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+                        @endif
+
                         {{-- All platforms: real OAuth redirect --}}
                         <div class="flex gap-2 mt-auto">
                             <a href="/dashboard/social/auth/{{ $platform }}/redirect"
@@ -496,6 +513,14 @@ function accountsComponent() {
             await apiDelete(`/dashboard/api/social-accounts/${acct.id}`);
             await this.load();
         },
+
+        async updateOrgUrn(accountId, urn) {
+            const acct = this.accounts.find(a => a.id === accountId);
+            if (! acct) return;
+            const meta = { ...(acct.metadata ?? {}), organization_urn: urn };
+            await apiPatch(`/dashboard/api/social-accounts/${accountId}`, { metadata: meta });
+            await this.load();
+        },
     };
 }
 
@@ -572,6 +597,15 @@ function trendComponent() {
 async function apiPut(url, data) {
     const r = await fetch(url, {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return r.json();
+}
+
+async function apiPatch(url, data) {
+    const r = await fetch(url, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
         body: JSON.stringify(data),
     });
