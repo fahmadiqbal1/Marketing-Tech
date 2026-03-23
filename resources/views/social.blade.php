@@ -65,6 +65,7 @@
                             <option value="facebook">Facebook</option>
                             <option value="twitter">Twitter/X</option>
                             <option value="linkedin">LinkedIn</option>
+                            <option value="youtube">YouTube</option>
                         </select>
                         <button @click="openCreate()" class="btn-primary text-sm px-4 py-1.5">+ New Entry</button>
                     </div>
@@ -117,6 +118,7 @@
                                         <option value="facebook">Facebook</option>
                                         <option value="twitter">Twitter/X</option>
                                         <option value="linkedin">LinkedIn</option>
+                                        <option value="youtube">YouTube</option>
                                     </select>
                                 </div>
                                 <div>
