@@ -1,11 +1,14 @@
 <?php
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration {
-    public function up(): void {
+return new class extends Migration
+{
+    public function up(): void
+    {
         Schema::create('context_graph_nodes', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('type', 100);         // fact|campaign|candidate|experiment|result|learning|entity
@@ -25,9 +28,14 @@ return new class extends Migration {
             $table->index(['type', 'category']);
         });
 
-        if (DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
+        if (DB::connection()->getDriverName() === 'pgsql'
+            && DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
             DB::statement('ALTER TABLE context_graph_nodes ADD COLUMN embedding vector(2000)');
             DB::statement('CREATE INDEX context_graph_nodes_content_fts ON context_graph_nodes USING gin(to_tsvector(\'english\', content))');
+        } else {
+            Schema::table('context_graph_nodes', function (Blueprint $table) {
+                $table->longText('embedding')->nullable();
+            });
         }
 
         Schema::create('context_graph_edges', function (Blueprint $table) {
@@ -47,7 +55,12 @@ return new class extends Migration {
             $table->index('target_node_id');
         });
     }
-    public function down(): void {
+
+    public function down(): void
+    {
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            DB::statement('DROP INDEX IF EXISTS context_graph_nodes_content_fts');
+        }
         Schema::dropIfExists('context_graph_edges');
         Schema::dropIfExists('context_graph_nodes');
     }

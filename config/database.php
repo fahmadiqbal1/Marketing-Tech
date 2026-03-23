@@ -2,14 +2,8 @@
 
 use Illuminate\Support\Str;
 
-$defaultConnection = env('DB_CONNECTION', extension_loaded('pdo_pgsql') ? 'pgsql' : 'sqlite');
-
-if ($defaultConnection === 'pgsql' && ! extension_loaded('pdo_pgsql')) {
-    $defaultConnection = env('DB_FALLBACK_CONNECTION', 'sqlite');
-}
-
 return [
-    'default' => $defaultConnection,
+    'default' => env('DB_CONNECTION', 'mysql'),
 
     'connections' => [
         'sqlite' => [

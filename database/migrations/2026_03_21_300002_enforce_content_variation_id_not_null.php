@@ -12,7 +12,7 @@ return new class extends Migration
     {
         // Step 1: Best-effort backfill — link orphaned outputs to the earliest variation
         // for the same agent_job_id. Outputs with no variation at all will be deleted below.
-        DB::statement("
+        DB::statement('
             UPDATE generated_outputs
             SET content_variation_id = (
                 SELECT cv.id
@@ -23,7 +23,7 @@ return new class extends Migration
             )
             WHERE content_variation_id IS NULL
               AND agent_job_id IS NOT NULL
-        ");
+        ');
 
         // Step 2: Delete any remaining nulls (no variation exists for that job, or no agent_job_id)
         $remaining = DB::table('generated_outputs')->whereNull('content_variation_id')->count();
@@ -37,9 +37,11 @@ return new class extends Migration
         // Step 3: Drop old index if it exists (replaced by FK index)
         try {
             if (Schema::hasIndex('generated_outputs', 'idx_generated_outputs_variation')) {
-                DB::statement('DROP INDEX IF EXISTS idx_generated_outputs_variation');
+                Schema::table('generated_outputs', function (Blueprint $table) {
+                    $table->dropIndex('idx_generated_outputs_variation');
+                });
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::warning('enforce_content_variation_id_not_null: could not drop old index', [
                 'error' => $e->getMessage(),
             ]);

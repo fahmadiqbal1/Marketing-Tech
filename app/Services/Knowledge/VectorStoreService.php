@@ -4,12 +4,14 @@ namespace App\Services\Knowledge;
 
 use App\Models\KnowledgeBase;
 use App\Services\AI\AIRouter;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class VectorStoreService
 {
-    private int $chunkSize    = 1000;
+    private int $chunkSize = 1000;
+
     private int $chunkOverlap = 200;
 
     public function __construct(private readonly AIRouter $aiRouter) {}
@@ -24,11 +26,11 @@ class VectorStoreService
      * agent skills seeder, etc.) — no per-source logic needed.
      */
     public function store(
-        string  $title,
-        string  $content,
-        array   $tags     = [],
-        string  $category = 'general',
-        ?string $source   = null,
+        string $title,
+        string $content,
+        array $tags = [],
+        string $category = 'general',
+        ?string $source = null,
     ): string {
         // Soft growth cap: prevent unbounded accumulation (50k entries)
         $totalEntries = KnowledgeBase::whereNull('parent_id')->count();
@@ -55,43 +57,45 @@ class VectorStoreService
         }
 
         // Compute content hash for deduplication (1000 chars = lower collision risk)
-        $normalised  = strtolower(preg_replace('/\s+/', ' ', trim($content)));
+        $normalised = strtolower(preg_replace('/\s+/', ' ', trim($content)));
         $contentHash = md5(mb_substr($normalised, 0, 1000, 'UTF-8'));
 
         // Check for duplicate (any source)
         $existing = KnowledgeBase::where('content_hash', $contentHash)->first();
         if ($existing) {
-            Log::debug("Knowledge store skipped — duplicate content hash", [
-                'title'    => $title,
-                'hash'     => $contentHash,
+            Log::debug('Knowledge store skipped — duplicate content hash', [
+                'title' => $title,
+                'hash' => $contentHash,
                 'existing' => $existing->title,
             ]);
+
             return (string) ($existing->parent_id ?? $existing->id);
         }
 
-        $chunks   = $this->chunkText($content);
+        $chunks = $this->chunkText($content);
         $parentId = (string) Str::uuid();
 
         foreach ($chunks as $i => $chunk) {
             $embeddingText = "{$title}\n{$chunk}";
-            $embedding     = $this->aiRouter->embed($embeddingText);
+            $embedding = $this->aiRouter->embed($embeddingText);
 
             KnowledgeBase::create([
-                'id'           => $i === 0 ? $parentId : (string) Str::uuid(),
-                'title'        => $title,
-                'content'      => $chunk,
-                'category'     => $category,
-                'tags'         => $tags,
-                'source'       => $source,
-                'embedding'    => '[' . implode(',', $embedding) . ']',
-                'chunk_index'  => $i,
-                'parent_id'    => $i > 0 ? $parentId : null,
+                'id' => $i === 0 ? $parentId : (string) Str::uuid(),
+                'title' => $title,
+                'content' => $chunk,
+                'category' => $category,
+                'tags' => $tags,
+                'source' => $source,
+                'embedding' => '['.implode(',', $embedding).']',
+                'chunk_index' => $i,
+                'parent_id' => $i > 0 ? $parentId : null,
                 // Store hash only on the parent chunk; child chunks inherit dedup via parent
                 'content_hash' => $i === 0 ? $contentHash : null,
             ]);
         }
 
-        Log::debug("Knowledge stored", ['title' => $title, 'chunks' => count($chunks)]);
+        Log::debug('Knowledge stored', ['title' => $title, 'chunks' => count($chunks)]);
+
         return $parentId;
     }
 
@@ -101,18 +105,38 @@ class VectorStoreService
     public function search(string $query, int $topK = 5, ?string $category = null): array
     {
         try {
-            $embedding = $this->aiRouter->embed($query);
-            $results   = KnowledgeBase::semanticSearch($embedding, $topK, $category);
+            if (DB::connection()->getDriverName() !== 'pgsql') {
+                $results = KnowledgeBase::query()
+                    ->when($category, fn ($q) => $q->where('category', $category))
+                    ->where(function ($q) use ($query) {
+                        $q->where('title', 'like', "%{$query}%")
+                            ->orWhere('content', 'like', "%{$query}%");
+                    })
+                    ->limit($topK)
+                    ->get(['id', 'title', 'content', 'category']);
 
-            return $results->map(fn($r) => [
-                'id'         => $r->id,
-                'title'      => $r->title,
-                'content'    => $r->content,
-                'category'   => $r->category,
+                return $results->map(fn ($r) => [
+                    'id' => $r->id,
+                    'title' => $r->title,
+                    'content' => $r->content,
+                    'category' => $r->category,
+                    'similarity' => null,
+                ])->toArray();
+            }
+
+            $embedding = $this->aiRouter->embed($query);
+            $results = KnowledgeBase::semanticSearch($embedding, $topK, $category);
+
+            return $results->map(fn ($r) => [
+                'id' => $r->id,
+                'title' => $r->title,
+                'content' => $r->content,
+                'category' => $r->category,
                 'similarity' => round($r->similarity ?? 0, 4),
             ])->toArray();
         } catch (\Throwable $e) {
-            Log::warning("Vector search failed", ['error' => $e->getMessage()]);
+            Log::warning('Vector search failed', ['error' => $e->getMessage()]);
+
             return [];
         }
     }
@@ -133,8 +157,8 @@ class VectorStoreService
             return [$text];
         }
 
-        $chunks  = [];
-        $words   = explode(' ', $text);
+        $chunks = [];
+        $words = explode(' ', $text);
         $current = '';
 
         foreach ($words as $word) {
@@ -144,9 +168,9 @@ class VectorStoreService
                 }
                 // Start new chunk with overlap from end of previous
                 $overlapWords = array_slice(explode(' ', $current), -20);
-                $current      = implode(' ', $overlapWords) . ' ' . $word;
+                $current = implode(' ', $overlapWords).' '.$word;
             } else {
-                $current .= ($current ? ' ' : '') . $word;
+                $current .= ($current ? ' ' : '').$word;
             }
         }
 

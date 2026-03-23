@@ -1,11 +1,14 @@
 <?php
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration {
-    public function up(): void {
+return new class extends Migration
+{
+    public function up(): void
+    {
         Schema::table('workflows', function (Blueprint $table) {
             // Rename instruction -> keep it, add input_payload as jsonb alias
             $table->jsonb('input_payload')->default('{}')->after('status');
@@ -17,16 +20,22 @@ return new class extends Migration {
             $table->timestamp('scheduled_at')->nullable()->after('approved_by');
         });
 
-        // Copy instruction into input_payload for existing rows
-        DB::statement("UPDATE workflows SET input_payload = jsonb_build_object('instruction', instruction) WHERE instruction IS NOT NULL");
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            DB::statement("UPDATE workflows SET input_payload = jsonb_build_object('instruction', instruction) WHERE instruction IS NOT NULL");
+        } else {
+            DB::statement("UPDATE workflows SET input_payload = JSON_OBJECT('instruction', instruction) WHERE instruction IS NOT NULL");
+        }
 
-        // Add composite indexes
-        DB::statement('CREATE INDEX IF NOT EXISTS workflows_status_priority_idx ON workflows (status, priority, scheduled_at)');
+        Schema::table('workflows', function (Blueprint $table) {
+            $table->index(['status', 'priority', 'scheduled_at'], 'workflows_status_priority_idx');
+        });
     }
 
-    public function down(): void {
+    public function down(): void
+    {
         Schema::table('workflows', function (Blueprint $table) {
-            $table->dropColumn(['input_payload','description','output','priority','current_task_id','approved_by','scheduled_at']);
+            $table->dropIndex('workflows_status_priority_idx');
+            $table->dropColumn(['input_payload', 'description', 'output', 'priority', 'current_task_id', 'approved_by', 'scheduled_at']);
         });
     }
 };
