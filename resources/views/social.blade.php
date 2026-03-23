@@ -496,9 +496,11 @@ function calendarComponent() {
         },
 
         async approveEntry(id) {
-            await apiPost(`/dashboard/api/content-calendar/${id}/approve`, {});
-            this.showModal = false;
-            await this.load();
+            try {
+                await apiPost(`/dashboard/api/content-calendar/${id}/approve`, {});
+                this.showModal = false;
+                await this.load();
+            } catch (e) { this.modalError = e.message; }
         },
 
         async rejectEntry(id) {

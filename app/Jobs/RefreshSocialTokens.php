@@ -16,8 +16,9 @@ class RefreshSocialTokens implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 2;
-    public int $timeout = 60;
+    public int    $tries   = 2;
+    public int    $timeout = 60;
+    public string $queue   = 'low';
 
     public function handle(SocialPlatformService $social): void
     {
