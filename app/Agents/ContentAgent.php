@@ -5,9 +5,9 @@ namespace App\Agents;
 use App\Models\AgentJob;
 use App\Models\ContentCalendar;
 use App\Models\ContentItem;
+use App\Models\ContentVariation;
 use App\Models\HashtagSet;
 use App\Models\KnowledgeBase;
-use App\Models\ContentPerformance;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
 use App\Services\AI\OpenAIService;
@@ -16,6 +16,8 @@ use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
 use App\Services\Knowledge\VectorStoreService;
 use App\Services\Telegram\TelegramBotService;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ContentAgent extends BaseAgent
@@ -23,53 +25,52 @@ class ContentAgent extends BaseAgent
     protected string $agentType = 'content';
 
     public function __construct(
-        OpenAIService          $openai,
-        AnthropicService       $anthropic,
-        GeminiService          $gemini,
-        TelegramBotService     $telegram,
-        VectorStoreService     $knowledge,
-        ApiCredentialService   $credentials,
+        OpenAIService $openai,
+        AnthropicService $anthropic,
+        GeminiService $gemini,
+        TelegramBotService $telegram,
+        VectorStoreService $knowledge,
+        ApiCredentialService $credentials,
         IterationEngineService $iterationEngine,
         CampaignContextService $campaignContext,
     ) {
         parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
     }
 
-
     protected function executeTool(string $name, array $args, AgentJob $job): mixed
     {
         // Social tool gating: check task_type first, fall back to keyword regex for NULL (backward compat)
         $socialTools = ['hashtag_strategy', 'trend_analysis', 'cross_platform_adapt', 'create_content_calendar', 'select_hashtags'];
         if (in_array($name, $socialTools)) {
-            $taskType    = $job->task_type;
+            $taskType = $job->task_type;
             $instruction = strtolower($job->instruction ?? '');
-            $isSocial    = $taskType === 'social'
+            $isSocial = $taskType === 'social'
                 || ($taskType === null && preg_match('/social|calendar|hashtag|trend|platform|schedule|instagram|tiktok|linkedin|twitter|facebook/', $instruction));
 
             if (! $isSocial) {
                 return $this->toolResult(false, null,
-                    "Tool '{$name}' requires task_type=social. " .
-                    "Current task_type: " . ($taskType ?? 'null (keyword match also failed)') . ". " .
-                    "Set task_type=social on the agent job, or include social keywords in the instruction."
+                    "Tool '{$name}' requires task_type=social. ".
+                    'Current task_type: '.($taskType ?? 'null (keyword match also failed)').'. '.
+                    'Set task_type=social on the agent job, or include social keywords in the instruction.'
                 );
             }
         }
 
         return match ($name) {
-            'generate_content'        => $this->toolGenerateContent($args, $job),
-            'check_seo'               => $this->toolCheckSEO($args),
-            'save_to_knowledge'       => $this->toolSaveToKnowledge($args),
-            'search_knowledge'        => $this->toolSearchKnowledge($args),
-            'publish_content'         => $this->toolPublishContent($args),
-            'repurpose_content'       => $this->toolRepurposeContent($args, $job),
-            'analyse_content'         => $this->toolAnalyseContent($args),
-            'keyword_research'        => $this->toolKeywordResearch($args),
-            'hashtag_strategy'        => $this->toolHashtagStrategy($args),
-            'trend_analysis'          => $this->toolTrendAnalysis($args),
-            'cross_platform_adapt'    => $this->toolCrossPlatformAdapt($args),
+            'generate_content' => $this->toolGenerateContent($args, $job),
+            'check_seo' => $this->toolCheckSEO($args),
+            'save_to_knowledge' => $this->toolSaveToKnowledge($args),
+            'search_knowledge' => $this->toolSearchKnowledge($args),
+            'publish_content' => $this->toolPublishContent($args),
+            'repurpose_content' => $this->toolRepurposeContent($args, $job),
+            'analyse_content' => $this->toolAnalyseContent($args),
+            'keyword_research' => $this->toolKeywordResearch($args),
+            'hashtag_strategy' => $this->toolHashtagStrategy($args),
+            'trend_analysis' => $this->toolTrendAnalysis($args),
+            'cross_platform_adapt' => $this->toolCrossPlatformAdapt($args),
             'create_content_calendar' => $this->toolCreateContentCalendar($args),
-            'select_hashtags'         => $this->toolSelectHashtags($args),
-            default                   => $this->toolResult(false, null, "Unknown tool: {$name}"),
+            'select_hashtags' => $this->toolSelectHashtags($args),
+            default => $this->toolResult(false, null, "Unknown tool: {$name}"),
         };
     }
 
@@ -77,221 +78,221 @@ class ContentAgent extends BaseAgent
     {
         return [
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'generate_content',
+                    'name' => 'generate_content',
                     'description' => 'Generate high-quality content for a given platform and purpose',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'type'        => ['type' => 'string', 'enum' => ['blog_post', 'social_twitter', 'social_linkedin', 'social_instagram', 'email_newsletter', 'ad_copy', 'product_description', 'video_script', 'press_release']],
-                            'topic'       => ['type' => 'string'],
-                            'tone'        => ['type' => 'string', 'enum' => ['professional', 'casual', 'authoritative', 'friendly', 'urgent', 'inspiring']],
-                            'keywords'    => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Target SEO keywords'],
-                            'word_count'  => ['type' => 'integer', 'description' => 'Target word count (0 = platform default)'],
-                            'audience'    => ['type' => 'string', 'description' => 'Target audience description'],
+                            'type' => ['type' => 'string', 'enum' => ['blog_post', 'social_twitter', 'social_linkedin', 'social_instagram', 'email_newsletter', 'ad_copy', 'product_description', 'video_script', 'press_release']],
+                            'topic' => ['type' => 'string'],
+                            'tone' => ['type' => 'string', 'enum' => ['professional', 'casual', 'authoritative', 'friendly', 'urgent', 'inspiring']],
+                            'keywords' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Target SEO keywords'],
+                            'word_count' => ['type' => 'integer', 'description' => 'Target word count (0 = platform default)'],
+                            'audience' => ['type' => 'string', 'description' => 'Target audience description'],
                             'brand_voice' => ['type' => 'string', 'description' => 'Brand voice notes or style guidelines'],
-                            'cta'         => ['type' => 'string', 'description' => 'Call to action to include'],
+                            'cta' => ['type' => 'string', 'description' => 'Call to action to include'],
                         ],
-                        'required'   => ['type', 'topic'],
+                        'required' => ['type', 'topic'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'check_seo',
+                    'name' => 'check_seo',
                     'description' => 'Analyse content for SEO quality and provide improvement suggestions',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'content'     => ['type' => 'string'],
+                            'content' => ['type' => 'string'],
                             'target_keywords' => ['type' => 'array', 'items' => ['type' => 'string']],
-                            'url_slug'    => ['type' => 'string'],
+                            'url_slug' => ['type' => 'string'],
                         ],
-                        'required'   => ['content'],
+                        'required' => ['content'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'save_to_knowledge',
+                    'name' => 'save_to_knowledge',
                     'description' => 'Save content or facts to the long-term knowledge base for future reference',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'title'    => ['type' => 'string'],
-                            'content'  => ['type' => 'string'],
-                            'tags'     => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'title' => ['type' => 'string'],
+                            'content' => ['type' => 'string'],
+                            'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
                             'category' => ['type' => 'string'],
                         ],
-                        'required'   => ['title', 'content'],
+                        'required' => ['title', 'content'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'search_knowledge',
+                    'name' => 'search_knowledge',
                     'description' => 'Search the knowledge base for relevant content, brand guidelines, or facts',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'query'  => ['type' => 'string'],
-                            'limit'  => ['type' => 'integer'],
+                            'query' => ['type' => 'string'],
+                            'limit' => ['type' => 'integer'],
                             'category' => ['type' => 'string'],
                         ],
-                        'required'   => ['query'],
+                        'required' => ['query'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'publish_content',
+                    'name' => 'publish_content',
                     'description' => 'Save finalised content to the content library with metadata',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'title'       => ['type' => 'string'],
-                            'body'        => ['type' => 'string'],
-                            'type'        => ['type' => 'string'],
-                            'platform'    => ['type' => 'string'],
-                            'status'      => ['type' => 'string', 'enum' => ['draft', 'ready', 'scheduled', 'published']],
-                            'tags'        => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'title' => ['type' => 'string'],
+                            'body' => ['type' => 'string'],
+                            'type' => ['type' => 'string'],
+                            'platform' => ['type' => 'string'],
+                            'status' => ['type' => 'string', 'enum' => ['draft', 'ready', 'scheduled', 'published']],
+                            'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
                             'scheduled_at' => ['type' => 'string'],
                         ],
-                        'required'   => ['title', 'body', 'type'],
+                        'required' => ['title', 'body', 'type'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'repurpose_content',
+                    'name' => 'repurpose_content',
                     'description' => 'Repurpose existing content into a different format (e.g. blog post → Twitter thread)',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
                             'source_content' => ['type' => 'string'],
-                            'source_type'    => ['type' => 'string'],
-                            'target_type'    => ['type' => 'string', 'enum' => ['social_twitter', 'social_linkedin', 'email_newsletter', 'video_script', 'ad_copy']],
+                            'source_type' => ['type' => 'string'],
+                            'target_type' => ['type' => 'string', 'enum' => ['social_twitter', 'social_linkedin', 'email_newsletter', 'video_script', 'ad_copy']],
                         ],
-                        'required'   => ['source_content', 'target_type'],
+                        'required' => ['source_content', 'target_type'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'analyse_content',
+                    'name' => 'analyse_content',
                     'description' => 'Analyse content for readability, tone, engagement prediction',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'content'  => ['type' => 'string'],
+                            'content' => ['type' => 'string'],
                             'platform' => ['type' => 'string'],
                         ],
-                        'required'   => ['content'],
+                        'required' => ['content'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'keyword_research',
+                    'name' => 'keyword_research',
                     'description' => 'Research and analyse keywords for a topic and platform. Stores results to knowledge base.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'topic'    => ['type' => 'string', 'description' => 'Main topic to research'],
+                            'topic' => ['type' => 'string', 'description' => 'Main topic to research'],
                             'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin', 'google', 'general']],
-                            'niche'    => ['type' => 'string', 'description' => 'Industry or content niche'],
+                            'niche' => ['type' => 'string', 'description' => 'Industry or content niche'],
                         ],
-                        'required'   => ['topic'],
+                        'required' => ['topic'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'hashtag_strategy',
+                    'name' => 'hashtag_strategy',
                     'description' => 'Generate a platform-specific hashtag strategy with tiered reach. Requires task_type=social.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'topic'    => ['type' => 'string'],
+                            'topic' => ['type' => 'string'],
                             'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']],
-                            'niche'    => ['type' => 'string'],
+                            'niche' => ['type' => 'string'],
                             'save_set' => ['type' => 'boolean', 'description' => 'Save this hashtag set to the library for reuse'],
                             'set_name' => ['type' => 'string', 'description' => 'Name for the saved hashtag set (required if save_set=true)'],
                         ],
-                        'required'   => ['topic', 'platform'],
+                        'required' => ['topic', 'platform'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'trend_analysis',
+                    'name' => 'trend_analysis',
                     'description' => 'Analyse patterns from existing knowledge base and performance data. Returns analytical insights only — does NOT fetch live trends. Requires task_type=social.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
                             'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin', 'all']],
-                            'niche'    => ['type' => 'string'],
-                            'limit'    => ['type' => 'integer', 'description' => 'Max number of insights to return (default 5)'],
+                            'niche' => ['type' => 'string'],
+                            'limit' => ['type' => 'integer', 'description' => 'Max number of insights to return (default 5)'],
                         ],
-                        'required'   => ['platform'],
+                        'required' => ['platform'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'cross_platform_adapt',
+                    'name' => 'cross_platform_adapt',
                     'description' => 'Adapt source content for multiple target platforms, respecting platform constraints. Requires task_type=social.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'source_content'   => ['type' => 'string'],
-                            'source_platform'  => ['type' => 'string'],
+                            'source_content' => ['type' => 'string'],
+                            'source_platform' => ['type' => 'string'],
                             'target_platforms' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']]],
                         ],
-                        'required'   => ['source_content', 'target_platforms'],
+                        'required' => ['source_content', 'target_platforms'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'create_content_calendar',
+                    'name' => 'create_content_calendar',
                     'description' => 'Create a 7-day content calendar and save entries to the database as drafts. Validates platform/content_type combos. Requires task_type=social.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
-                            'brand_name'      => ['type' => 'string'],
-                            'platforms'       => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']]],
-                            'frequency'       => ['type' => 'string', 'description' => 'Posting frequency e.g. "daily", "3x per week"'],
+                            'brand_name' => ['type' => 'string'],
+                            'platforms' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']]],
+                            'frequency' => ['type' => 'string', 'description' => 'Posting frequency e.g. "daily", "3x per week"'],
                             'content_pillars' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Content themes/pillars'],
                         ],
-                        'required'   => ['brand_name', 'platforms'],
+                        'required' => ['brand_name', 'platforms'],
                     ],
                 ],
             ],
             [
-                'type'     => 'function',
+                'type' => 'function',
                 'function' => [
-                    'name'        => 'select_hashtags',
+                    'name' => 'select_hashtags',
                     'description' => 'Select the best matching hashtag set from the library for a platform and topic. Requires task_type=social.',
-                    'parameters'  => [
-                        'type'       => 'object',
+                    'parameters' => [
+                        'type' => 'object',
                         'properties' => [
                             'platform' => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'facebook', 'twitter', 'linkedin']],
-                            'niche'    => ['type' => 'string', 'description' => 'Content niche or topic'],
+                            'niche' => ['type' => 'string', 'description' => 'Content niche or topic'],
                         ],
-                        'required'   => ['platform'],
+                        'required' => ['platform'],
                     ],
                 ],
             ],
@@ -303,33 +304,33 @@ class ContentAgent extends BaseAgent
     private function toolGenerateContent(array $args, AgentJob $job): string
     {
         $platformDefaults = [
-            'blog_post'           => 1200,
-            'social_twitter'      => 280,
-            'social_linkedin'     => 1300,
-            'social_instagram'    => 400,
-            'email_newsletter'    => 600,
-            'ad_copy'             => 150,
+            'blog_post' => 1200,
+            'social_twitter' => 280,
+            'social_linkedin' => 1300,
+            'social_instagram' => 400,
+            'email_newsletter' => 600,
+            'ad_copy' => 150,
             'product_description' => 300,
-            'video_script'        => 800,
-            'press_release'       => 500,
+            'video_script' => 800,
+            'press_release' => 500,
         ];
 
-        $wordCount  = $args['word_count'] ?: ($platformDefaults[$args['type']] ?? 500);
-        $keywords   = ! empty($args['keywords']) ? 'Target SEO keywords: ' . implode(', ', $args['keywords']) : '';
-        $audience   = $args['audience']    ?? 'general professional audience';
-        $tone       = $args['tone']        ?? 'professional';
+        $wordCount = $args['word_count'] ?: ($platformDefaults[$args['type']] ?? 500);
+        $keywords = ! empty($args['keywords']) ? 'Target SEO keywords: '.implode(', ', $args['keywords']) : '';
+        $audience = $args['audience'] ?? 'general professional audience';
+        $tone = $args['tone'] ?? 'professional';
         $brandVoice = $args['brand_voice'] ?? '';
-        $cta        = $args['cta']         ? "Include a natural call-to-action: {$args['cta']}" : '';
+        $cta = $args['cta'] ? "Include a natural call-to-action: {$args['cta']}" : '';
 
         $typeInstructions = match ($args['type']) {
-            'social_twitter'   => "Write a Twitter/X thread. Each tweet max 280 chars. Number each tweet. Make it engaging and shareable.",
-            'social_linkedin'  => "Write a LinkedIn post. Use line breaks, bold sparingly. Include a hook opening line.",
-            'social_instagram' => "Write an Instagram caption. Engaging, with relevant hashtags at end.",
-            'blog_post'        => "Write a full blog post with H2/H3 headings, introduction, body sections, and conclusion.",
-            'email_newsletter' => "Write an email newsletter with subject line, preview text, and body.",
-            'video_script'     => "Write a video script with scene directions, on-screen text notes, and spoken dialogue.",
-            'press_release'    => "Write a press release in AP style with dateline, lead paragraph, body, and boilerplate.",
-            default            => "Write professional {$args['type']} content.",
+            'social_twitter' => 'Write a Twitter/X thread. Each tweet max 280 chars. Number each tweet. Make it engaging and shareable.',
+            'social_linkedin' => 'Write a LinkedIn post. Use line breaks, bold sparingly. Include a hook opening line.',
+            'social_instagram' => 'Write an Instagram caption. Engaging, with relevant hashtags at end.',
+            'blog_post' => 'Write a full blog post with H2/H3 headings, introduction, body sections, and conclusion.',
+            'email_newsletter' => 'Write an email newsletter with subject line, preview text, and body.',
+            'video_script' => 'Write a video script with scene directions, on-screen text notes, and spoken dialogue.',
+            'press_release' => 'Write a press release in AP style with dateline, lead paragraph, body, and boilerplate.',
+            default => "Write professional {$args['type']} content.",
         };
 
         try {
@@ -365,7 +366,7 @@ PROMPT;
 
             if (is_array($parsed) && isset($parsed['A'], $parsed['B'], $parsed['C'])) {
                 // Soft guard: skip if this job already has 5+ variations stored
-                $existingCount = \App\Models\ContentVariation::where('agent_job_id', $job->id)->count();
+                $existingCount = ContentVariation::where('agent_job_id', $job->id)->count();
 
                 // Store all three variations atomically (ContentVariation + GeneratedOutput in one transaction)
                 foreach (['A', 'B', 'C'] as $label) {
@@ -374,12 +375,12 @@ PROMPT;
                         break;
                     }
 
-                    $v       = $parsed[$label];
+                    $v = $parsed[$label];
                     $content = $v['content'] ?? '';
 
                     // Stronger hash: normalise whitespace over first 500 chars
-                    $hash   = md5(preg_replace('/\s+/', ' ', substr($content, 0, 500)));
-                    $exists = \App\Models\ContentVariation::where('agent_job_id', $job->id)
+                    $hash = md5(preg_replace('/\s+/', ' ', substr($content, 0, 500)));
+                    $exists = ContentVariation::where('agent_job_id', $job->id)
                         ->whereRaw("md5(regexp_replace(substr(content, 1, 500), '\s+', ' ', 'g')) = ?", [$hash])
                         ->exists();
                     if ($exists) {
@@ -389,13 +390,13 @@ PROMPT;
                     // Atomic: variation + output created together or not at all
                     $this->iterationEngine->storeVariationWithOutput(
                         agentJobId: $job->id,
-                        label:      $label,
-                        content:    $content,
+                        label: $label,
+                        content: $content,
                         outputType: 'content',
-                        metadata:   [
-                            'tone'       => $v['tone']       ?? null,
-                            'hook_type'  => $v['hook_type']  ?? null,
-                            'structure'  => $v['structure']  ?? null,
+                        metadata: [
+                            'tone' => $v['tone'] ?? null,
+                            'hook_type' => $v['hook_type'] ?? null,
+                            'structure' => $v['structure'] ?? null,
                             'word_count' => str_word_count($content),
                         ],
                     );
@@ -407,27 +408,27 @@ PROMPT;
                 // Fallback: treat raw response as single piece of content
                 Log::warning('ContentAgent: variation JSON parse failed, using raw response as variation A', [
                     'job_id' => $job->id,
-                    'raw'    => substr($raw, 0, 200),
+                    'raw' => substr($raw, 0, 200),
                 ]);
                 $primaryContent = $raw;
                 // Atomic: variation + output in one transaction
                 $this->iterationEngine->storeVariationWithOutput(
                     agentJobId: $job->id,
-                    label:      'A',
-                    content:    $raw,
+                    label: 'A',
+                    content: $raw,
                     outputType: 'content',
-                    metadata:   [
-                        'tone'       => $tone,
+                    metadata: [
+                        'tone' => $tone,
                         'word_count' => str_word_count($raw),
                     ],
                 );
             }
 
             return $this->toolResult(true, [
-                'content'         => $primaryContent,
-                'type'            => $args['type'],
-                'word_count'      => str_word_count($primaryContent),
-                'char_count'      => strlen($primaryContent),
+                'content' => $primaryContent,
+                'type' => $args['type'],
+                'word_count' => str_word_count($primaryContent),
+                'char_count' => strlen($primaryContent),
                 'variations_stored' => is_array($parsed) && isset($parsed['A']) ? 3 : 1,
             ]);
 
@@ -438,7 +439,7 @@ PROMPT;
 
     private function toolCheckSEO(array $args): string
     {
-        $content  = $args['content'];
+        $content = $args['content'];
         $keywords = $args['target_keywords'] ?? [];
 
         $prompt = <<<PROMPT
@@ -469,8 +470,9 @@ Return:
 PROMPT;
 
         try {
-            $raw    = $this->openai->complete($prompt, 'gpt-4o-mini', 1024, 0.1);
+            $raw = $this->openai->complete($prompt, 'gpt-4o-mini', 1024, 0.1);
             $result = json_decode($raw, true);
+
             return $this->toolResult(true, $result ?? ['raw' => $raw]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -481,11 +483,12 @@ PROMPT;
     {
         try {
             $id = $this->knowledge->store(
-                title:    $args['title'],
-                content:  $args['content'],
-                tags:     $args['tags']     ?? [],
+                title: $args['title'],
+                content: $args['content'],
+                tags: $args['tags'] ?? [],
                 category: $args['category'] ?? 'content',
             );
+
             return $this->toolResult(true, ['knowledge_id' => $id, 'title' => $args['title']]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -496,10 +499,11 @@ PROMPT;
     {
         try {
             $results = $this->knowledge->search(
-                query:    $args['query'],
-                topK:     $args['limit']    ?? 5,
+                query: $args['query'],
+                topK: $args['limit'] ?? 5,
                 category: $args['category'] ?? null,
             );
+
             return $this->toolResult(true, $results);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -510,14 +514,14 @@ PROMPT;
     {
         try {
             $item = ContentItem::create([
-                'title'        => $args['title'],
-                'body'         => $args['body'],
-                'type'         => $args['type'],
-                'platform'     => $args['platform']     ?? null,
-                'status'       => $args['status']       ?? 'draft',
-                'tags'         => $args['tags']          ?? [],
-                'scheduled_at' => isset($args['scheduled_at']) ? \Carbon\Carbon::parse($args['scheduled_at']) : null,
-                'word_count'   => str_word_count($args['body']),
+                'title' => $args['title'],
+                'body' => $args['body'],
+                'type' => $args['type'],
+                'platform' => $args['platform'] ?? null,
+                'status' => $args['status'] ?? 'draft',
+                'tags' => $args['tags'] ?? [],
+                'scheduled_at' => isset($args['scheduled_at']) ? Carbon::parse($args['scheduled_at']) : null,
+                'word_count' => str_word_count($args['body']),
             ]);
 
             return $this->toolResult(true, ['content_id' => $item->id, 'status' => $item->status]);
@@ -529,10 +533,10 @@ PROMPT;
     private function toolRepurposeContent(array $args, AgentJob $job): string
     {
         $result = $this->toolGenerateContent([
-            'type'           => $args['target_type'],
-            'topic'          => "Repurpose this content:\n\n{$args['source_content']}",
-            'tone'           => 'professional',
-            'word_count'     => 0,
+            'type' => $args['target_type'],
+            'topic' => "Repurpose this content:\n\n{$args['source_content']}",
+            'tone' => 'professional',
+            'word_count' => 0,
         ], $job);
 
         return $result;
@@ -561,8 +565,9 @@ Return:
 PROMPT;
 
         try {
-            $raw    = $this->openai->complete($prompt, 'gpt-4o-mini', 1024, 0.1);
+            $raw = $this->openai->complete($prompt, 'gpt-4o-mini', 1024, 0.1);
             $result = json_decode($raw, true);
+
             return $this->toolResult(true, $result ?? ['raw' => $raw]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -571,9 +576,9 @@ PROMPT;
 
     private function toolKeywordResearch(array $args): string
     {
-        $topic    = $args['topic'];
+        $topic = $args['topic'];
         $platform = $args['platform'] ?? 'general';
-        $niche    = $args['niche']    ?? '';
+        $niche = $args['niche'] ?? '';
 
         $prompt = <<<PROMPT
 Perform keyword research for the following. Return ONLY valid JSON.
@@ -597,14 +602,14 @@ Return:
 PROMPT;
 
         try {
-            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.2);
+            $raw = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.2);
             $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
 
             // Store to knowledge base for future reference
             $this->knowledge->store(
-                title:    "Keyword Research: {$topic} ({$platform})",
-                content:  json_encode($result),
-                tags:     ['keywords', $platform, $niche],
+                title: "Keyword Research: {$topic} ({$platform})",
+                content: json_encode($result),
+                tags: ['keywords', $platform, $niche],
                 category: 'keyword-research',
             );
 
@@ -616,16 +621,16 @@ PROMPT;
 
     private function toolHashtagStrategy(array $args): string
     {
-        $topic    = $args['topic'];
+        $topic = $args['topic'];
         $platform = $args['platform'];
-        $niche    = $args['niche'] ?? '';
+        $niche = $args['niche'] ?? '';
 
         $platformRules = [
-            'tiktok'    => '3-5 hashtags total: 1 niche (<100k), 1 medium (100k-1M), 1 broad (1M+)',
+            'tiktok' => '3-5 hashtags total: 1 niche (<100k), 1 medium (100k-1M), 1 broad (1M+)',
             'instagram' => '5-10 hashtags: 60% niche, 30% medium, 10% broad',
-            'linkedin'  => '3-5 professional hashtags only, no personal/generic',
-            'twitter'   => '2-3 hashtags maximum; more reduces engagement',
-            'facebook'  => '3-5 hashtags; focus on community/group-relevant tags',
+            'linkedin' => '3-5 professional hashtags only, no personal/generic',
+            'twitter' => '2-3 hashtags maximum; more reduces engagement',
+            'facebook' => '3-5 hashtags; focus on community/group-relevant tags',
         ];
 
         $rules = $platformRules[$platform] ?? '5-10 relevant hashtags';
@@ -648,21 +653,21 @@ Return:
 PROMPT;
 
         try {
-            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.3);
+            $raw = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 1024, 0.3);
             $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
 
             // Optionally save to hashtag_sets library
             if (! empty($args['save_set']) && $args['save_set'] && ! empty($args['set_name']) && is_array($result['hashtags'] ?? null)) {
                 $tags = array_column($result['hashtags'], 'tag');
                 HashtagSet::create([
-                    'name'      => $args['set_name'],
-                    'platform'  => $platform,
-                    'niche'     => $niche ?: null,
-                    'tags'      => $tags,
-                    'reach_tier'=> 'medium',
+                    'name' => $args['set_name'],
+                    'platform' => $platform,
+                    'niche' => $niche ?: null,
+                    'tags' => $tags,
+                    'reach_tier' => 'medium',
                 ]);
                 $result['saved_to_library'] = true;
-                $result['set_name']         = $args['set_name'];
+                $result['set_name'] = $args['set_name'];
             }
 
             return $this->toolResult(true, $result);
@@ -675,16 +680,18 @@ PROMPT;
     {
         // Analyses EXISTING data only — no LLM hallucination of "live trends"
         $platform = $args['platform'];
-        $niche    = $args['niche'] ?? null;
-        $limit    = min((int) ($args['limit'] ?? 5), 10);
+        $niche = $args['niche'] ?? null;
+        $limit = min((int) ($args['limit'] ?? 5), 10);
 
         try {
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+
             // Query recent knowledge base entries for this platform
             $knowledgeQuery = KnowledgeBase::whereNull('deleted_at')
-                ->where(function ($q) use ($platform, $niche) {
-                    $q->where('content', 'ilike', "%{$platform}%");
+                ->where(function ($q) use ($platform, $niche, $like) {
+                    $q->where('content', $like, "%{$platform}%");
                     if ($niche) {
-                        $q->orWhere('content', 'ilike', "%{$niche}%");
+                        $q->orWhere('content', $like, "%{$niche}%");
                     }
                 })
                 ->latest()
@@ -692,8 +699,8 @@ PROMPT;
                 ->get(['title', 'content', 'category', 'created_at']);
 
             $patterns = $knowledgeQuery->map(fn ($k) => [
-                'title'    => $k->title,
-                'excerpt'  => mb_substr($k->content, 0, 300),
+                'title' => $k->title,
+                'excerpt' => mb_substr($k->content, 0, 300),
                 'category' => $k->category,
                 'age_days' => $k->created_at->diffInDays(now()),
             ])->toArray();
@@ -702,22 +709,22 @@ PROMPT;
             $insights = [];
             foreach (array_slice($patterns, 0, $limit) as $i => $pattern) {
                 $insights[] = [
-                    'type'        => 'analytical_insight',
-                    'platform'    => $platform,
-                    'source'      => 'knowledge_base',
-                    'title'       => $pattern['title'],
-                    'excerpt'     => $pattern['excerpt'],
-                    'age_days'    => $pattern['age_days'],
-                    'confidence'  => $pattern['age_days'] < 7 ? 'high' : ($pattern['age_days'] < 30 ? 'medium' : 'low'),
+                    'type' => 'analytical_insight',
+                    'platform' => $platform,
+                    'source' => 'knowledge_base',
+                    'title' => $pattern['title'],
+                    'excerpt' => $pattern['excerpt'],
+                    'age_days' => $pattern['age_days'],
+                    'confidence' => $pattern['age_days'] < 7 ? 'high' : ($pattern['age_days'] < 30 ? 'medium' : 'low'),
                 ];
             }
 
             return $this->toolResult(true, [
-                'type'        => 'analytical_insight',
-                'platform'    => $platform,
-                'insights'    => $insights,
+                'type' => 'analytical_insight',
+                'platform' => $platform,
+                'insights' => $insights,
                 'total_found' => count($patterns),
-                'note'        => 'Insights derived from existing knowledge base entries only. No live data fetched.',
+                'note' => 'Insights derived from existing knowledge base entries only. No live data fetched.',
             ]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -726,21 +733,21 @@ PROMPT;
 
     private function toolCrossPlatformAdapt(array $args): string
     {
-        $source          = $args['source_content'];
-        $sourcePlatform  = $args['source_platform'] ?? 'general';
+        $source = $args['source_content'];
+        $sourcePlatform = $args['source_platform'] ?? 'general';
         $targetPlatforms = $args['target_platforms'] ?? [];
 
         $constraints = [
-            'tiktok'    => 'Max 150 chars caption + 3-5 hashtags. Hook in first line. Vertical video cue.',
+            'tiktok' => 'Max 150 chars caption + 3-5 hashtags. Hook in first line. Vertical video cue.',
             'instagram' => 'Max 2200 chars. 5-10 hashtags at end. First line must hook before "more" truncation.',
-            'linkedin'  => 'Max 3000 chars. No hashtags in body — add 3-5 at very end. Professional tone.',
-            'twitter'   => 'Max 280 chars per tweet. Thread of 3-5 tweets. No more than 2-3 hashtags.',
-            'facebook'  => 'Max 500 chars for best reach. Conversational tone. No more than 3 hashtags.',
+            'linkedin' => 'Max 3000 chars. No hashtags in body — add 3-5 at very end. Professional tone.',
+            'twitter' => 'Max 280 chars per tweet. Thread of 3-5 tweets. No more than 2-3 hashtags.',
+            'facebook' => 'Max 500 chars for best reach. Conversational tone. No more than 3 hashtags.',
         ];
 
         $platformList = implode(', ', $targetPlatforms);
         $constraintText = collect($targetPlatforms)
-            ->map(fn ($p) => "{$p}: " . ($constraints[$p] ?? 'standard format'))
+            ->map(fn ($p) => "{$p}: ".($constraints[$p] ?? 'standard format'))
             ->implode("\n");
 
         $prompt = <<<PROMPT
@@ -768,8 +775,9 @@ Return:
 PROMPT;
 
         try {
-            $raw    = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.7);
+            $raw = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.7);
             $result = json_decode(trim($raw), true) ?? ['raw' => $raw];
+
             return $this->toolResult(true, $result);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -778,25 +786,25 @@ PROMPT;
 
     private function toolCreateContentCalendar(array $args): string
     {
-        $brandName     = $args['brand_name'];
-        $platforms     = $args['platforms'] ?? [];
-        $frequency     = $args['frequency'] ?? 'daily';
-        $pillars       = $args['content_pillars'] ?? ['educational', 'entertaining', 'promotional'];
+        $brandName = $args['brand_name'];
+        $platforms = $args['platforms'] ?? [];
+        $frequency = $args['frequency'] ?? 'daily';
+        $pillars = $args['content_pillars'] ?? ['educational', 'entertaining', 'promotional'];
 
         // Validation matrix: invalid platform/content_type combos
         $invalidCombos = [
             'instagram' => ['thread'],
-            'twitter'   => ['reel', 'story', 'carousel'],
-            'linkedin'  => ['reel', 'story'],
-            'facebook'  => ['thread'],
+            'twitter' => ['reel', 'story', 'carousel'],
+            'linkedin' => ['reel', 'story'],
+            'facebook' => ['thread'],
         ];
 
         $defaultTypes = [
-            'tiktok'    => ['reel', 'post'],
+            'tiktok' => ['reel', 'post'],
             'instagram' => ['reel', 'carousel', 'post', 'story'],
-            'facebook'  => ['post', 'reel'],
-            'twitter'   => ['post', 'thread'],
-            'linkedin'  => ['post', 'carousel'],
+            'facebook' => ['post', 'reel'],
+            'twitter' => ['post', 'thread'],
+            'linkedin' => ['post', 'carousel'],
         ];
 
         $prompt = <<<PROMPT
@@ -824,18 +832,18 @@ Return:
 PROMPT;
 
         try {
-            $raw  = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.8);
+            $raw = $this->anthropic->complete($prompt, config('agents.anthropic.default_model', 'claude-haiku-4-5-20251001'), 4096, 0.8);
             $plan = json_decode(trim($raw), true);
 
             if (! is_array($plan) || empty($plan['calendar'])) {
                 return $this->toolResult(false, null, 'Failed to generate calendar plan');
             }
 
-            $created   = [];
-            $skipped   = [];
+            $created = [];
+            $skipped = [];
 
             foreach ($plan['calendar'] as $entry) {
-                $platform    = $entry['platform']     ?? '';
+                $platform = $entry['platform'] ?? '';
                 $contentType = $entry['content_type'] ?? 'post';
 
                 // Validate combo
@@ -848,21 +856,21 @@ PROMPT;
                 $scheduledAt = now()->addDays((int) ($entry['day'] ?? 1));
 
                 $calendar = ContentCalendar::create([
-                    'title'        => $entry['title']        ?? "Day {$entry['day']} — {$platform}",
-                    'platform'     => $platform,
+                    'title' => $entry['title'] ?? "Day {$entry['day']} — {$platform}",
+                    'platform' => $platform,
                     'content_type' => $contentType,
-                    'draft_content'=> $entry['draft_content'] ?? null,
-                    'status'       => 'draft',
+                    'draft_content' => $entry['draft_content'] ?? null,
+                    'status' => 'draft',
                     'scheduled_at' => $scheduledAt,
-                    'hashtags'     => $entry['hashtags'] ?? [],
-                    'metadata'     => ['pillar' => $entry['pillar'] ?? null, 'brand' => $brandName],
+                    'hashtags' => $entry['hashtags'] ?? [],
+                    'metadata' => ['pillar' => $entry['pillar'] ?? null, 'brand' => $brandName],
                 ]);
 
                 $created[] = [
-                    'id'           => $calendar->id,
-                    'platform'     => $platform,
+                    'id' => $calendar->id,
+                    'platform' => $platform,
                     'content_type' => $contentType,
-                    'title'        => $calendar->title,
+                    'title' => $calendar->title,
                     'scheduled_at' => $scheduledAt->toDateString(),
                 ];
             }
@@ -870,7 +878,7 @@ PROMPT;
             return $this->toolResult(true, [
                 'created' => $created,
                 'skipped' => $skipped,
-                'total'   => count($created),
+                'total' => count($created),
             ]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
@@ -880,7 +888,7 @@ PROMPT;
     private function toolSelectHashtags(array $args): string
     {
         $platform = $args['platform'];
-        $niche    = $args['niche'] ?? null;
+        $niche = $args['niche'] ?? null;
 
         try {
             $query = HashtagSet::forPlatform($platform)
@@ -895,20 +903,20 @@ PROMPT;
             $set = $query->first();
 
             if (! $set) {
-                return $this->toolResult(false, null, "No hashtag sets found for platform={$platform}" . ($niche ? " niche={$niche}" : '') . ". Use hashtag_strategy to create one.");
+                return $this->toolResult(false, null, "No hashtag sets found for platform={$platform}".($niche ? " niche={$niche}" : '').'. Use hashtag_strategy to create one.');
             }
 
             // Increment usage count
             $set->incrementUsage();
 
             return $this->toolResult(true, [
-                'set_id'     => $set->id,
-                'name'       => $set->name,
-                'platform'   => $set->platform,
-                'niche'      => $set->niche,
-                'tags'       => $set->tags,
+                'set_id' => $set->id,
+                'name' => $set->name,
+                'platform' => $set->platform,
+                'niche' => $set->niche,
+                'tags' => $set->tags,
                 'reach_tier' => $set->reach_tier,
-                'usage_count'=> $set->usage_count,
+                'usage_count' => $set->usage_count,
             ]);
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());

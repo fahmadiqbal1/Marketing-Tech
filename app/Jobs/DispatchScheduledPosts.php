@@ -18,8 +18,8 @@ class DispatchScheduledPosts implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int    $tries   = 3;
-    public int    $timeout = 120;
+    public int $tries = 3;
+    public int $timeout = 120;
     public function __construct()
     {
         $this->onQueue('social');
@@ -47,10 +47,10 @@ class DispatchScheduledPosts implements ShouldQueue
                         try {
                             $result = $social->publishWithRateLimit($account, $entry);
                             $entry->update([
-                                'status'           => 'published',
-                                'published_at'     => now(),
+                                'status' => 'published',
+                                'published_at' => now(),
                                 'external_post_id' => $result['post_id'] ?? null,
-                                'last_error'       => null,
+                                'last_error' => null,
                             ]);
                             $posted = true;
                         } catch (\RuntimeException $e) {
@@ -58,9 +58,10 @@ class DispatchScheduledPosts implements ShouldQueue
                             if (str_starts_with($e->getMessage(), 'RATE_LIMITED:')) {
                                 $delay = SocialPlatformService::backoffSeconds($entry->retry_count + 1);
                                 $entry->increment('retry_count');
-                                $entry->update(['last_error' => 'Rate limited — retry in ' . $delay . 's']);
+                                $entry->update(['last_error' => 'Rate limited — retry in '.$delay.'s']);
                                 Log::warning("Rate limited for entry {$entry->id}. Retry in {$delay}s.");
                                 SystemEvent::create(['level' => 'warning', 'message' => "Rate limited [{$account->platform}] @{$account->handle} — \"{$entry->title}\" delayed {$delay}s (retry {$entry->retry_count}/3)"]);
+
                                 continue; // Scheduler will re-pick up next minute
                             }
                             throw $e;
@@ -75,9 +76,10 @@ class DispatchScheduledPosts implements ShouldQueue
                         : "no connected account for {$entry->platform}";
                     Log::info("DispatchScheduledPosts: skipping entry {$entry->id} — {$reason}");
                     SystemEvent::create([
-                        'level'   => 'info',
+                        'level' => 'info',
                         'message' => "Scheduled post skipped: {$entry->platform} → {$entry->title} [{$reason}]",
                     ]);
+
                     continue;
                 }
 
@@ -93,7 +95,7 @@ class DispatchScheduledPosts implements ShouldQueue
                 }
 
                 SystemEvent::create([
-                    'level'   => 'info',
+                    'level' => 'info',
                     'message' => sprintf('Scheduled post published: %s → %s', $entry->platform, $entry->title),
                 ]);
 

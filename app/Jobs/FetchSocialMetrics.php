@@ -19,9 +19,13 @@ class FetchSocialMetrics implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int    $tries   = 2;
-    public $queue   = 'low';
+    public int $tries = 2;
     public int $timeout = 120;
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(SocialPlatformService $social, IterationEngineService $iteration): void
     {
@@ -38,7 +42,7 @@ class FetchSocialMetrics implements ShouldQueue
         Log::info("FetchSocialMetrics: fetching metrics for {$entries->count()} posts");
 
         $fetched = 0;
-        $failed  = 0;
+        $failed = 0;
 
         foreach ($entries as $entry) {
             try {
@@ -54,10 +58,10 @@ class FetchSocialMetrics implements ShouldQueue
                 ContentPerformance::updateOrCreate(
                     ['content_variation_id' => $entry->content_variation_id ?? $entry->id],
                     [
-                        'impressions'  => $metrics['impressions'],
-                        'clicks'       => $metrics['clicks'],
-                        'conversions'  => $metrics['conversions'] ?? 0,
-                        'metadata'     => array_merge($metrics, ['platform' => $entry->platform, 'post_id' => $entry->external_post_id]),
+                        'impressions' => $metrics['impressions'],
+                        'clicks' => $metrics['clicks'],
+                        'conversions' => $metrics['conversions'] ?? 0,
+                        'metadata' => array_merge($metrics, ['platform' => $entry->platform, 'post_id' => $entry->external_post_id]),
                     ]
                 );
 
@@ -77,7 +81,7 @@ class FetchSocialMetrics implements ShouldQueue
                     $engagementRate = ($metrics['engagement'] ?? $metrics['clicks']) / $metrics['impressions'];
                     $account->update([
                         'avg_engagement_rate' => round(($account->avg_engagement_rate + $engagementRate) / 2, 4),
-                        'last_synced_at'      => now(),
+                        'last_synced_at' => now(),
                     ]);
                 }
 
@@ -91,7 +95,7 @@ class FetchSocialMetrics implements ShouldQueue
 
         if ($fetched > 0 || $failed > 0) {
             SystemEvent::create([
-                'level'   => $failed > 0 ? 'warning' : 'info',
+                'level' => $failed > 0 ? 'warning' : 'info',
                 'message' => "FetchSocialMetrics: fetched={$fetched}, failed={$failed}",
             ]);
         }

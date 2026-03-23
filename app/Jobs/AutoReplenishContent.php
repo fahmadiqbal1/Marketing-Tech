@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Agents\ContentAgent;
 use App\Models\AgentJob;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
@@ -18,9 +19,13 @@ class AutoReplenishContent implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int    $tries   = 1;
-    public int    $timeout = 60;
-    public $queue   = 'low';
+    public int $tries = 1;
+    public int $timeout = 60;
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(): void
     {
@@ -34,6 +39,7 @@ class AutoReplenishContent implements ShouldQueue
         $runningJobs = AgentJob::whereIn('status', ['pending', 'running'])->count();
         if ($runningJobs >= 5) {
             Log::info('AutoReplenishContent: skipped — too many running agent jobs', ['count' => $runningJobs]);
+
             return;
         }
 
@@ -58,7 +64,7 @@ class AutoReplenishContent implements ShouldQueue
 
             // Log action BEFORE dispatching (anti-spam audit trail)
             SystemEvent::create([
-                'level'   => 'info',
+                'level' => 'info',
                 'message' => "AutoReplenish: dispatching ContentAgent for {$platform} (only {$upcomingCount} entries in next 7 days)",
             ]);
 
@@ -67,12 +73,12 @@ class AutoReplenishContent implements ShouldQueue
 
             // Dispatch ContentAgent to generate social content
             AgentJob::create([
-                'agent_type'        => 'content',
-                'agent_class'       => \App\Agents\ContentAgent::class,
-                'task_type'         => 'social',
-                'instruction'       => "Create 3 engaging {$platform} posts for the content calendar. Use the create_content_calendar tool. Focus on educational and entertaining content pillars.",
+                'agent_type' => 'content',
+                'agent_class' => ContentAgent::class,
+                'task_type' => 'social',
+                'instruction' => "Create 3 engaging {$platform} posts for the content calendar. Use the create_content_calendar tool. Focus on educational and entertaining content pillars.",
                 'short_description' => "Auto-replenish {$platform} content calendar",
-                'status'            => 'pending',
+                'status' => 'pending',
             ]);
 
             Log::info("AutoReplenishContent: dispatched ContentAgent for {$platform}");

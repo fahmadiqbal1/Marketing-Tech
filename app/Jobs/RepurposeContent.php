@@ -14,14 +14,19 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class RepurposeContent implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int    $tries   = 1;
-    public $queue   = 'low';
+    public int $tries = 1;
     public int $timeout = 120;
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(): void
     {
@@ -70,25 +75,25 @@ class RepurposeContent implements ShouldQueue
 
             foreach ($targetPlatforms as $platform) {
                 $defaultType = match ($platform) {
-                    'tiktok'    => 'reel',
+                    'tiktok' => 'reel',
                     'instagram' => 'post',
-                    'linkedin'  => 'post',
-                    'twitter'   => 'thread',
-                    'facebook'  => 'post',
-                    'youtube'   => 'video',
-                    default     => 'post',
+                    'linkedin' => 'post',
+                    'twitter' => 'thread',
+                    'facebook' => 'post',
+                    'youtube' => 'video',
+                    default => 'post',
                 };
 
                 ContentCalendar::create([
-                    'title'               => 'Repurposed: ' . \Illuminate\Support\Str::limit($variation->content, 60),
-                    'platform'            => $platform,
-                    'content_type'        => $defaultType,
-                    'draft_content'       => $variation->content,
-                    'status'              => 'draft',
-                    'moderation_status'   => 'pending',
-                    'content_variation_id'=> $variationId,
-                    'scheduled_at'        => now()->addDays(rand(1, 7)),
-                    'metadata'            => ['source' => 'auto_repurpose', 'original_variation_id' => $variationId],
+                    'title' => 'Repurposed: '.Str::limit($variation->content, 60),
+                    'platform' => $platform,
+                    'content_type' => $defaultType,
+                    'draft_content' => $variation->content,
+                    'status' => 'draft',
+                    'moderation_status' => 'pending',
+                    'content_variation_id' => $variationId,
+                    'scheduled_at' => now()->addDays(rand(1, 7)),
+                    'metadata' => ['source' => 'auto_repurpose', 'original_variation_id' => $variationId],
                 ]);
 
                 $created++;
@@ -98,7 +103,7 @@ class RepurposeContent implements ShouldQueue
             Cache::put($cooldownKey, true, now()->endOfWeek());
 
             SystemEvent::create([
-                'level'   => 'info',
+                'level' => 'info',
                 'message' => "RepurposeContent: created {$created} draft entries from top-performing variation {$variationId}",
             ]);
         }

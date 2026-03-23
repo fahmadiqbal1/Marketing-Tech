@@ -23,6 +23,11 @@ class DashboardStatsService
 
     private ?string $databaseError = null;
 
+    private function likeOperator(): string
+    {
+        return DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+    }
+
     public function getStats(): array
     {
         return $this->rescueArray(function (): array {
@@ -33,9 +38,9 @@ class DashboardStatsService
 
             $activeJobs = AgentJob::query()->whereIn('status', ['pending', 'running'])->count();
 
-            $aiCostToday     = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
+            $aiCostToday = AiRequest::query()->whereDate('requested_at', today())->sum('cost_usd');
             $aiCostYesterday = AiRequest::query()->whereDate('requested_at', today()->subDay())->sum('cost_usd');
-            $aiCostWeek      = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
+            $aiCostWeek = AiRequest::query()->where('requested_at', '>=', now()->subDays(7))->sum('cost_usd');
 
             $recentWorkflows = Workflow::query()
                 ->latest()
@@ -62,35 +67,35 @@ class DashboardStatsService
                 ->groupBy('pipeline_stage')
                 ->pluck('cnt', 'pipeline_stage');
 
-            $failedJobs    = AgentJob::where('status', 'failed')->count();
+            $failedJobs = AgentJob::where('status', 'failed')->count();
             $needsApproval = (int) ($workflowCounts->get('owner_approval', 0));
 
             return [
-                'workflows'         => $workflowCounts,
-                'active_jobs'       => $activeJobs,
-                'queue_depth'       => $queueDepth,
-                'ai_cost_today'     => round((float) $aiCostToday, 4),
+                'workflows' => $workflowCounts,
+                'active_jobs' => $activeJobs,
+                'queue_depth' => $queueDepth,
+                'ai_cost_today' => round((float) $aiCostToday, 4),
                 'ai_cost_yesterday' => round((float) $aiCostYesterday, 4),
-                'ai_cost_week'      => round((float) $aiCostWeek, 4),
-                'recent_workflows'  => $recentWorkflows,
-                'recent_events'     => $recentEvents,
-                'candidate_stages'  => $candidateStages,
-                'failed_jobs'       => $failedJobs,
-                'needs_approval'    => $needsApproval,
-                'meta'              => $this->meta(),
+                'ai_cost_week' => round((float) $aiCostWeek, 4),
+                'recent_workflows' => $recentWorkflows,
+                'recent_events' => $recentEvents,
+                'candidate_stages' => $candidateStages,
+                'failed_jobs' => $failedJobs,
+                'needs_approval' => $needsApproval,
+                'meta' => $this->meta(),
             ];
         }, [
-            'workflows'         => [],
-            'active_jobs'       => 0,
-            'queue_depth'       => 0,
-            'ai_cost_today'     => 0.0,
+            'workflows' => [],
+            'active_jobs' => 0,
+            'queue_depth' => 0,
+            'ai_cost_today' => 0.0,
             'ai_cost_yesterday' => 0.0,
-            'ai_cost_week'      => 0.0,
-            'recent_workflows'  => [],
-            'recent_events'     => [],
-            'candidate_stages'  => [],
-            'failed_jobs'       => 0,
-            'needs_approval'    => 0,
+            'ai_cost_week' => 0.0,
+            'recent_workflows' => [],
+            'recent_events' => [],
+            'candidate_stages' => [],
+            'failed_jobs' => 0,
+            'needs_approval' => 0,
         ]);
     }
 
@@ -106,7 +111,7 @@ class DashboardStatsService
                 $query->where('type', $filters['type']);
             }
             if (! empty($filters['search'])) {
-                $query->where('name', 'like', '%' . $filters['search'] . '%');
+                $query->where('name', 'like', '%'.$filters['search'].'%');
             }
 
             return $query->paginate($perPage, [
@@ -170,19 +175,19 @@ class DashboardStatsService
                 ->pluck('pending', 'queue');
 
             return $this->paginatedResponse($paginator, [
-                'by_status'     => $byStatus,
+                'by_status' => $byStatus,
                 'by_agent_type' => $byAgentType,
-                'queue_table'   => $queueTable,
-                'meta'          => $this->meta(),
+                'queue_table' => $queueTable,
+                'meta' => $this->meta(),
             ]);
         }, [
-            'data'          => [],
-            'current_page'  => 1,
-            'last_page'     => 1,
-            'total'         => 0,
-            'by_status'     => [],
+            'data' => [],
+            'current_page' => 1,
+            'last_page' => 1,
+            'total' => 0,
+            'by_status' => [],
             'by_agent_type' => [],
-            'queue_table'   => [],
+            'queue_table' => [],
         ]);
     }
 
@@ -216,9 +221,10 @@ class DashboardStatsService
 
             if (! empty($filters['search'])) {
                 $term = $filters['search'];
-                $query->where(function ($q) use ($term) {
-                    $q->where('name', 'ilike', '%' . $term . '%')
-                      ->orWhere('email', 'ilike', '%' . $term . '%');
+                $like = $this->likeOperator();
+                $query->where(function ($q) use ($term, $like) {
+                    $q->where('name', $like, '%'.$term.'%')
+                        ->orWhere('email', $like, '%'.$term.'%');
                 });
             }
             if (! empty($filters['pipeline_stage'])) {
@@ -241,14 +247,14 @@ class DashboardStatsService
 
             return $this->paginatedResponse($paginator, [
                 'by_stage' => $byStage,
-                'meta'     => $this->meta(),
+                'meta' => $this->meta(),
             ]);
         }, [
-            'data'         => [],
+            'data' => [],
             'current_page' => 1,
-            'last_page'    => 1,
-            'total'        => 0,
-            'by_stage'     => [],
+            'last_page' => 1,
+            'total' => 0,
+            'by_stage' => [],
         ]);
     }
 
@@ -264,7 +270,7 @@ class DashboardStatsService
                 $query->where('status', $filters['status']);
             }
             if (! empty($filters['search'])) {
-                $query->where('title', 'ilike', '%' . $filters['search'] . '%');
+                $query->where('title', $this->likeOperator(), '%'.$filters['search'].'%');
             }
 
             return $query->paginate($perPage, [
@@ -308,6 +314,7 @@ class DashboardStatsService
                 ->get()
                 ->map(function (AiRequest $row) {
                     $row->total_cost = round((float) $row->total_cost, 4);
+
                     return $row;
                 });
 
@@ -353,6 +360,7 @@ class DashboardStatsService
                 ->get()
                 ->map(function (AiRequest $row) {
                     $row->total_cost = round((float) $row->total_cost, 6);
+
                     return $row;
                 })
                 ->all();
@@ -416,11 +424,11 @@ class DashboardStatsService
     private function paginatedResponse(LengthAwarePaginator $p, array $extras = []): array
     {
         return array_merge([
-            'data'         => $p->items(),
+            'data' => $p->items(),
             'current_page' => $p->currentPage(),
-            'last_page'    => $p->lastPage(),
-            'total'        => $p->total(),
-            'per_page'     => $p->perPage(),
+            'last_page' => $p->lastPage(),
+            'total' => $p->total(),
+            'per_page' => $p->perPage(),
         ], $extras);
     }
 

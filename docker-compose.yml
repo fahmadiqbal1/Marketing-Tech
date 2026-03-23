@@ -8,9 +8,7 @@ services:
     volumes:
       - ./:/var/www/html
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "sh", "/var/www/html/docker/scripts/healthcheck.sh"]
@@ -30,21 +28,6 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
 
-  horizon:
-    build:
-      context: .
-      dockerfile: docker/php/Dockerfile
-    env_file:
-      - .env
-    command: php artisan horizon
-    volumes:
-      - ./:/var/www/html
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   scheduler:
     build:
       context: .
@@ -55,36 +38,24 @@ services:
     volumes:
       - ./:/var/www/html
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
+      mysql:
         condition: service_healthy
 
-  postgres:
-    image: pgvector/pgvector:pg16
+  mysql:
+    image: mysql:8.4
     environment:
-      POSTGRES_DB: opsplatform
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: admin
+      MYSQL_DATABASE: marketing_tech
+      MYSQL_USER: marketing_user
+      MYSQL_PASSWORD: admin
+      MYSQL_ROOT_PASSWORD: root
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d opsplatform"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
       interval: 5s
       timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
       retries: 10
 
   minio:
@@ -105,5 +76,5 @@ services:
       - "3310:3310"
 
 volumes:
-  pgdata:
+  mysql-data:
   minio-data:

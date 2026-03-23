@@ -42,6 +42,8 @@
 | 31 | social | Instagram OAuth lacked CSRF state — getAuthorizationUrl() must return array{url,state} for ALL 6 platforms (Instagram was returning string) | 2026-03-23 | Audit |
 | 32 | jobs | Social jobs need public string \$queue declared on the class; relying solely on Schedule::job($j, 'queue') means direct dispatch falls to 'default' | 2026-03-23 | Audit |
 | 33 | frontend | Never use Math.random() for chart data — replace with real API call; viewDetail() must fetch /campaigns/{id}/detail to drive chart | 2026-03-23 | Audit |
+| 34 | jobs | Queueable already defines `\$queue`; declaring a typed `public string \$queue` on jobs causes a PHP trait composition fatal — set the queue in `__construct()` via `onQueue()` instead | 2026-03-23 | Launch Audit |
+| 35 | mysql | When running this app on MySQL, guard PostgreSQL-only `ilike`, pgvector, and raw SQL migrations behind driver checks and provide portable fallbacks for local development | 2026-03-23 | MySQL Migration |
 
 ---
 
@@ -71,6 +73,12 @@
 - C2: Campaign detail chart → real agent-runs/outputs data (apiCampaignDetail); Delete+Reject buttons in calendar modal; video/short/live content types; resumeCampaign() JS method
 - C3: approveEntry() try/catch; moderation_status index migration; $queue on all 5 social jobs
 - Audit identified 3 critical, 3 high, 4 medium, 3 low issues; all C/H/M resolved except RBAC (deferred)
+
+### 2026-03-23 — Launch Hardening Follow-up
+- Fixed PHP trait composition fatal: queueable jobs now call `onQueue()` in constructors instead of redeclaring typed `$queue`, restoring artisan bootstrap, route discovery, and scheduled-job registration
+
+### 2026-03-23 — MySQL Local Runtime Alignment
+- Switched local defaults from PostgreSQL/Redis to MySQL/database queue, added MySQL docker service defaults, and guarded PostgreSQL-only query/migration paths so artisan can boot cleanly against a MySQL-configured app
 
 ### 2026-03-23 — Phase 9F (Social Platform Hardening — 6 commits)
 - Moderation gate: ContentCalendar.scheduledNow() requires moderation_status IN (approved, auto_approved)

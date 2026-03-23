@@ -19,12 +19,18 @@ class RunAgentTask implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $queue   = 'agents';
-    public int    $timeout = 600;       // 10 minutes
-    public int    $tries   = 1;         // do not auto-retry the whole job (AgentRunner handles step-level retries)
-    public int    $backoff = 0;
+    public int $timeout = 600;       // 10 minutes
+    public int $tries = 1;         // do not auto-retry the whole job (AgentRunner handles step-level retries)
+    public int $backoff = 0;
 
-    public function __construct(public readonly AgentTask $task) {}
+    public int $tries = 1;         // do not auto-retry the whole job (AgentRunner handles step-level retries)
+
+    public int $backoff = 0;
+
+    public function __construct(public readonly AgentTask $task)
+    {
+        $this->onQueue('agents');
+    }
 
     public function handle(AgentRunner $runner): void
     {
@@ -33,11 +39,11 @@ class RunAgentTask implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        Log::error("[RunAgentTask] Job failed for task {$this->task->id}: " . $exception->getMessage());
+        Log::error("[RunAgentTask] Job failed for task {$this->task->id}: ".$exception->getMessage());
 
         $this->task->update([
-            'status'        => 'failed',
-            'error_message' => 'Job worker error: ' . $exception->getMessage(),
+            'status' => 'failed',
+            'error_message' => 'Job worker error: '.$exception->getMessage(),
         ]);
     }
 }

@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'default' => env('QUEUE_CONNECTION', 'redis'),
+    'default' => env('QUEUE_CONNECTION', 'database'),
 
     'connections' => [
         'sync' => [
@@ -10,7 +10,7 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'sqlite')),
+            'connection' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'mysql')),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
@@ -29,12 +29,12 @@ return [
 
     'failed' => [
         'driver' => env('QUEUE_FAILED_DRIVER', 'database-uuids'),
-        'database' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'sqlite')),
+        'database' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'mysql')),
         'table' => 'failed_jobs',
     ],
 
     'batching' => [
-        'database' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'sqlite')),
+        'database' => env('DB_QUEUE_CONNECTION', env('DB_CONNECTION', 'mysql')),
         'table' => 'job_batches',
     ],
 ];
