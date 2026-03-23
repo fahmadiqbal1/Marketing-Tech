@@ -56,6 +56,7 @@ class DispatchScheduledPosts implements ShouldQueue
                                 $entry->increment('retry_count');
                                 $entry->update(['last_error' => 'Rate limited — retry in ' . $delay . 's']);
                                 Log::warning("Rate limited for entry {$entry->id}. Retry in {$delay}s.");
+                                SystemEvent::create(['level' => 'warning', 'message' => "Rate limited [{$account->platform}] @{$account->handle} — \"{$entry->title}\" delayed {$delay}s (retry {$entry->retry_count}/3)"]);
                                 continue; // Scheduler will re-pick up next minute
                             }
                             throw $e;
@@ -64,32 +65,32 @@ class DispatchScheduledPosts implements ShouldQueue
                 }
 
                 if (! $posted) {
-                    // Simulated publish (feature flag off or no connected account)
-                    $result = [
-                        'post_id'     => 'sim_' . \Illuminate\Support\Str::random(10),
-                        'impressions' => rand(100, 5000),
-                        'clicks'      => rand(5, 300),
-                        'conversions' => rand(0, 20),
-                        'simulated'   => true,
-                    ];
-                    $entry->update(['status' => 'published', 'published_at' => now()]);
+                    // Auto-post disabled or no connected account — leave as scheduled for next run
+                    $reason = ! $social->autoPostEnabled()
+                        ? 'auto-post disabled (SOCIAL_AUTO_POST_ENABLED=false)'
+                        : "no connected account for {$entry->platform}";
+                    Log::info("DispatchScheduledPosts: skipping entry {$entry->id} — {$reason}");
+                    SystemEvent::create([
+                        'level'   => 'info',
+                        'message' => "Scheduled post skipped: {$entry->platform} → {$entry->title} [{$reason}]",
+                    ]);
+                    continue;
                 }
 
-                // Feed IterationEngine
+                // Feed IterationEngine with real metrics only
                 if ($entry->content_variation_id) {
-                    $source = ($result['simulated'] ?? true) ? 'simulated' : 'real';
                     $iteration->recordPerformance(
                         $entry->content_variation_id,
                         $result['impressions'] ?? 0,
                         $result['clicks'] ?? 0,
                         $result['conversions'] ?? 0,
-                        $source
+                        'real'
                     );
                 }
 
                 SystemEvent::create([
                     'level'   => 'info',
-                    'message' => sprintf('Scheduled post published: %s → %s [%s]', $entry->platform, $entry->title, $posted ? 'real' : 'simulated'),
+                    'message' => sprintf('Scheduled post published: %s → %s', $entry->platform, $entry->title),
                 ]);
 
             } catch (\Throwable $e) {

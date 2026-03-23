@@ -5,6 +5,8 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Jobs\PollTikTokPublishStatus;
+use App\Services\Social\SocialPlatformService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -164,6 +166,8 @@ class TikTokService implements SocialPlatformInterface
             throw new \RuntimeException('[TikTok] Video publish requires metadata.media_url');
         }
 
+        $mediaUrl = SocialPlatformService::ensurePublicUrl($mediaUrl);
+
         $payload = [
             'post_info' => [
                 'title'         => $caption,
@@ -187,7 +191,13 @@ class TikTokService implements SocialPlatformInterface
 
         Log::info("[TikTok] Video publish initiated. publish_id={$publishId} for calendar entry {$entry->id}");
 
-        // TikTok processes async; publish_id is used to check status
+        // Dispatch async status poller — TikTok confirms video_id once processing is complete
+        if ($publishId) {
+            PollTikTokPublishStatus::dispatch($publishId, $entry->id)
+                ->delay(now()->addSeconds(30))
+                ->onQueue('social');
+        }
+
         return [
             'post_id'     => $publishId ?? 'pending',
             'url'         => 'https://www.tiktok.com/@' . ($account->handle ?? 'me'),
@@ -210,6 +220,8 @@ class TikTokService implements SocialPlatformInterface
         if (empty($mediaUrls) && ! empty($entry->metadata['media_url'])) {
             $mediaUrls = [$entry->metadata['media_url']];
         }
+
+        $mediaUrls = array_map([SocialPlatformService::class, 'ensurePublicUrl'], $mediaUrls);
 
         if (empty($mediaUrls)) {
             throw new \RuntimeException('[TikTok] Photo post requires metadata.media_urls[]');
@@ -237,6 +249,12 @@ class TikTokService implements SocialPlatformInterface
         $publishId = $response['data']['publish_id'] ?? null;
 
         Log::info("[TikTok] Photo post initiated. publish_id={$publishId} for calendar entry {$entry->id}");
+
+        if ($publishId) {
+            PollTikTokPublishStatus::dispatch($publishId, $entry->id)
+                ->delay(now()->addSeconds(30))
+                ->onQueue('social');
+        }
 
         return [
             'post_id'     => $publishId ?? 'pending',

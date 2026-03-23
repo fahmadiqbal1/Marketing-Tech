@@ -13,7 +13,7 @@ Laravel 11 AI marketing platform:
 - **Alpine.js + Tailwind CSS**: dark slate-950 palette frontend
 - **Chart.js 4.4.8** (CDN): pinned — 4.4.0 had a `fullSize` crash
 - **Laravel Horizon**: SPA at `resources/views/vendor/horizon/layout.blade.php` with dark-theme override
-- **Social Layer (Phase 9)**: `SocialPlatformService` (factory) → 6 real platform services, no stubs. Instagram (Graph API v19), Twitter (API v2 + PKCE), LinkedIn (ugcPosts v2), Facebook (Graph API v19 Page token), TikTok (Content Posting API v2 + PKCE), YouTube (Data API v3 resumable upload). Models: `ContentCalendar`, `HashtagSet`, `SocialAccount`. 6 automation jobs on `social`/`low` queues. Feature flag: `SOCIAL_AUTO_POST_ENABLED=false`.
+- **Social Layer (Phase 9F)**: `SocialPlatformService` (factory) → 6 real platform services, no stubs. Instagram (Graph API v19), Twitter (API v2 + PKCE), LinkedIn (ugcPosts v2), Facebook (Graph API v19 Page token, multi-page), TikTok (Content Posting API v2 + PKCE, async `PollTikTokPublishStatus`), YouTube (Data API v3 resumable upload with session recovery). Models: `ContentCalendar`, `HashtagSet`, `SocialAccount` (tokens encrypted at rest). 6 automation jobs on `social`/`low` queues. Feature flags: `SOCIAL_AUTO_POST_ENABLED=false`, `SOCIAL_DRY_RUN=false`. CSRF state validated for all 6 OAuth flows. Moderation gate: `scheduledNow()` requires `moderation_status IN (approved, auto_approved)`. Scheduling conflict: ±15 min check on create/update. `ensurePublicUrl()` converts local paths → S3 temporaryUrl.
 
 ---
 

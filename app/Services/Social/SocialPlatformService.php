@@ -47,6 +47,21 @@ class SocialPlatformService
      */
     public function publishWithRateLimit(SocialAccount $account, ContentCalendar $entry): array
     {
+        // Dry-run mode: log intent, return mock result, never call real API
+        if (config('services.social.dry_run', false)) {
+            $message = "[DRY_RUN] Would publish entry {$entry->id} ({$account->platform}): \"{$entry->title}\"";
+            Log::info($message);
+            \App\Models\SystemEvent::create(['level' => 'info', 'message' => $message]);
+            return [
+                'post_id'     => 'dry_run_' . \Illuminate\Support\Str::random(8),
+                'url'         => '#dry-run',
+                'impressions' => 0,
+                'clicks'      => 0,
+                'conversions' => 0,
+                'simulated'   => true,
+            ];
+        }
+
         $key      = "social-post:{$account->platform}:{$account->id}";
         $perMin   = $this->rateLimit($account->platform);
 
@@ -103,5 +118,38 @@ class SocialPlatformService
     public static function platforms(): array
     {
         return ['instagram', 'twitter', 'linkedin', 'facebook', 'tiktok', 'youtube'];
+    }
+
+    /**
+     * Ensure a media path is a publicly accessible HTTPS URL.
+     *
+     * If the path is already an http(s) URL it is returned as-is.
+     * If it is a local storage path, the file is uploaded to the configured
+     * default disk and a 2-hour temporary/signed URL is returned.
+     *
+     * @throws \RuntimeException if the local file does not exist.
+     */
+    public static function ensurePublicUrl(string $path): string
+    {
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Normalise storage/ prefix
+        $storagePath = ltrim(preg_replace('#^storage/#', '', $path), '/');
+
+        $disk = \Illuminate\Support\Facades\Storage::disk(config('filesystems.default', 'local'));
+
+        if (! $disk->exists($storagePath)) {
+            throw new \RuntimeException("ensurePublicUrl: local file not found: {$storagePath}");
+        }
+
+        // S3-compatible disks support temporary URLs; local disk returns a plain URL
+        try {
+            return $disk->temporaryUrl($storagePath, now()->addHours(2));
+        } catch (\RuntimeException) {
+            // Local disk doesn't support temporaryUrl — return public URL instead
+            return $disk->url($storagePath);
+        }
     }
 }

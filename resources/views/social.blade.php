@@ -5,6 +5,33 @@
 @section('content')
 <div class="space-y-6">
 
+    {{-- OAuth flash messages --}}
+    @if(session('success') || session('error') || session('info'))
+    <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 6000)"
+         x-transition:leave="transition ease-in duration-300"
+         x-transition:leave-start="opacity-100 translate-y-0"
+         x-transition:leave-end="opacity-0 -translate-y-2"
+         class="rounded-xl border px-4 py-3 flex items-start gap-3 text-sm
+                @if(session('success')) bg-emerald-500/10 border-emerald-500/20 text-emerald-300
+                @elseif(session('error'))   bg-red-500/10   border-red-500/20   text-red-300
+                @else                       bg-sky-500/10   border-sky-500/20   text-sky-300
+                @endif">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            @if(session('success'))
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            @elseif(session('error'))
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            @else
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            @endif
+        </svg>
+        <span>{{ session('success') ?? session('error') ?? session('info') }}</span>
+        <button @click="show = false" class="ml-auto opacity-60 hover:opacity-100 transition-opacity">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+    </div>
+    @endif
+
     {{-- Tab navigation --}}
     <div x-data="{ activeTab: 'calendar' }" class="space-y-6">
         <div class="flex gap-2 border-b border-slate-700/60 pb-0">
@@ -188,6 +215,23 @@
                         <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').last_error">
                             <p class="text-xs text-red-400 mb-2 bg-red-500/10 rounded px-2 py-1 truncate" x-text="accountFor('{{ $platform }}').last_error"></p>
                         </template>
+
+                        @if($platform === 'linkedin')
+                        {{-- LinkedIn: organisation selector (shown when ≥1 org in metadata) --}}
+                        <template x-if="accountFor('linkedin') && accountFor('linkedin').is_connected && accountFor('linkedin').metadata && (accountFor('linkedin').metadata.organizations || []).length > 0">
+                            <div class="mb-3">
+                                <label class="block text-xs text-slate-400 mb-1">Posting as organisation</label>
+                                <select class="form-input w-full text-xs"
+                                        @change="updateOrgUrn(accountFor('linkedin').id, $event.target.value)">
+                                    <template x-for="org in (accountFor('linkedin').metadata.organizations ?? [])" :key="org.urn">
+                                        <option :value="org.urn"
+                                                :selected="org.urn === accountFor('linkedin').metadata.organization_urn"
+                                                x-text="org.name ?? org.urn"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+                        @endif
 
                         {{-- All platforms: real OAuth redirect --}}
                         <div class="flex gap-2 mt-auto">
@@ -469,6 +513,14 @@ function accountsComponent() {
             await apiDelete(`/dashboard/api/social-accounts/${acct.id}`);
             await this.load();
         },
+
+        async updateOrgUrn(accountId, urn) {
+            const acct = this.accounts.find(a => a.id === accountId);
+            if (! acct) return;
+            const meta = { ...(acct.metadata ?? {}), organization_urn: urn };
+            await apiPatch(`/dashboard/api/social-accounts/${accountId}`, { metadata: meta });
+            await this.load();
+        },
     };
 }
 
@@ -545,6 +597,15 @@ function trendComponent() {
 async function apiPut(url, data) {
     const r = await fetch(url, {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return r.json();
+}
+
+async function apiPatch(url, data) {
+    const r = await fetch(url, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
         body: JSON.stringify(data),
     });

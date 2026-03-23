@@ -34,17 +34,19 @@ class YouTubeService implements SocialPlatformInterface
             && ! empty(config('services.youtube.client_secret'));
     }
 
-    public function getAuthorizationUrl(): string
+    public function getAuthorizationUrl(): array
     {
-        return self::OAUTH_URL . '?' . http_build_query([
-            'client_id'             => config('services.youtube.client_id'),
-            'redirect_uri'          => config('services.youtube.redirect_uri'),
-            'response_type'         => 'code',
-            'scope'                 => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
-            'access_type'           => 'offline',
-            'prompt'                => 'consent', // always prompt to get refresh_token
-            'state'                 => bin2hex(random_bytes(16)),
+        $state = bin2hex(random_bytes(16));
+        $url   = self::OAUTH_URL . '?' . http_build_query([
+            'client_id'    => config('services.youtube.client_id'),
+            'redirect_uri' => config('services.youtube.redirect_uri'),
+            'response_type'=> 'code',
+            'scope'        => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+            'access_type'  => 'offline',
+            'prompt'       => 'consent', // always prompt to get refresh_token
+            'state'        => $state,
         ]);
+        return ['url' => $url, 'state' => $state];
     }
 
     public function exchangeCode(string $code): array
@@ -80,7 +82,22 @@ class YouTubeService implements SocialPlatformInterface
             throw new \RuntimeException('[YouTube] Publish requires metadata.media_url (public video URL).');
         }
 
+        $mediaUrl = \App\Services\Social\SocialPlatformService::ensurePublicUrl($mediaUrl);
+
         $isShort      = $entry->content_type === 'short' || ($entry->metadata['is_short'] ?? false);
+
+        // Shorts validation: warn if duration metadata suggests video exceeds 60s
+        if ($isShort) {
+            $duration = (int) ($entry->metadata['duration_seconds'] ?? 0);
+            if ($duration > 60) {
+                Log::warning("[YouTube] Shorts duration {$duration}s exceeds 60s limit for entry {$entry->id} — YouTube may not treat this as a Short.");
+                \App\Models\SystemEvent::create([
+                    'level'   => 'warning',
+                    'message' => "[YouTube] Shorts post \"{$entry->title}\" has duration {$duration}s (>60s) — may not qualify as a Short.",
+                ]);
+            }
+        }
+
         $title        = $this->buildTitle($entry, $isShort);
         $description  = $this->buildDescription($entry, $isShort);
         $tags         = array_map(fn ($t) => ltrim($t, '#'), $entry->hashtags ?? []);
@@ -99,19 +116,30 @@ class YouTubeService implements SocialPlatformInterface
             ],
         ];
 
-        // Step 1: Initiate resumable upload session
-        $initResponse = Http::withToken($account->access_token)
-            ->withHeaders([
-                'X-Upload-Content-Type'   => 'video/*',
-                'X-Upload-Content-Length' => '0', // unknown size for URL source
-                'Content-Type'            => 'application/json; charset=UTF-8',
-            ])
-            ->post(self::UPLOAD_URL . '?uploadType=resumable&part=snippet,status', $videoMeta)
-            ->throw();
+        // Step 1: Initiate resumable upload session (skip if we have a stored URI from a failed retry)
+        $uploadUri = $entry->metadata['youtube_upload_uri'] ?? null;
 
-        $uploadUri = $initResponse->header('Location');
         if (! $uploadUri) {
-            throw new \RuntimeException('[YouTube] No upload URI returned from resumable upload init.');
+            $initResponse = Http::withToken($account->access_token)
+                ->withHeaders([
+                    'X-Upload-Content-Type'   => 'video/*',
+                    'X-Upload-Content-Length' => '0', // unknown size for URL source
+                    'Content-Type'            => 'application/json; charset=UTF-8',
+                ])
+                ->post(self::UPLOAD_URL . '?uploadType=resumable&part=snippet,status', $videoMeta)
+                ->throw();
+
+            $uploadUri = $initResponse->header('Location');
+            if (! $uploadUri) {
+                throw new \RuntimeException('[YouTube] No upload URI returned from resumable upload init.');
+            }
+
+            // Persist upload URI immediately so a retry can resume without re-initing
+            $meta = $entry->metadata ?? [];
+            $meta['youtube_upload_uri'] = $uploadUri;
+            $entry->update(['metadata' => $meta]);
+        } else {
+            Log::info("[YouTube] Resuming upload from stored URI for entry {$entry->id}");
         }
 
         // Step 2: Fetch video from source URL and stream to YouTube resumable URI
@@ -130,6 +158,11 @@ class YouTubeService implements SocialPlatformInterface
             ->json();
 
         $videoId = $uploadResponse['id'];
+
+        // Clear stored upload URI on success
+        $meta = $entry->metadata ?? [];
+        unset($meta['youtube_upload_uri']);
+        $entry->update(['metadata' => $meta]);
 
         Log::info("[YouTube] Published video id={$videoId} for calendar entry {$entry->id}" . ($isShort ? ' [Short]' : ''));
 
@@ -150,7 +183,7 @@ class YouTubeService implements SocialPlatformInterface
     {
         $response = Http::withToken($account->access_token)
             ->get(self::API_URL . '/videos', [
-                'part' => 'statistics',
+                'part' => 'statistics,contentDetails',
                 'id'   => $externalPostId,
             ]);
 
@@ -159,15 +192,24 @@ class YouTubeService implements SocialPlatformInterface
             return ['impressions' => 0, 'reach' => 0, 'clicks' => 0, 'engagement' => 0, 'conversions' => 0];
         }
 
-        $stats = $response->json('items.0.statistics', []);
+        $stats   = $response->json('items.0.statistics', []);
+        $details = $response->json('items.0.contentDetails', []);
+
+        // Parse ISO 8601 duration (e.g. PT1M3S) into seconds
+        $durationSec = 0;
+        if (! empty($details['duration'])) {
+            preg_match('/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/', $details['duration'], $m);
+            $durationSec = ((int) ($m[1] ?? 0)) * 3600 + ((int) ($m[2] ?? 0)) * 60 + (int) ($m[3] ?? 0);
+        }
 
         return [
-            'impressions' => (int) ($stats['viewCount']      ?? 0),
-            'reach'       => (int) ($stats['viewCount']      ?? 0),
-            'clicks'      => (int) ($stats['favoriteCount']  ?? 0),
-            'engagement'  => (int) ($stats['likeCount']      ?? 0)
-                           + (int) ($stats['commentCount']   ?? 0),
-            'conversions' => 0,
+            'impressions'      => (int) ($stats['viewCount']    ?? 0),
+            'reach'            => (int) ($stats['viewCount']    ?? 0),
+            'clicks'           => (int) ($stats['favoriteCount'] ?? 0),
+            'engagement'       => (int) ($stats['likeCount']    ?? 0)
+                                + (int) ($stats['commentCount'] ?? 0),
+            'conversions'      => 0,
+            'duration_seconds' => $durationSec,
         ];
     }
 

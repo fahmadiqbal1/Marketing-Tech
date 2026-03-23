@@ -43,6 +43,7 @@ class ContentCalendar extends Model
     public function scopeScheduledNow($query)
     {
         return $query->where('status', 'scheduled')
+            ->whereIn('moderation_status', ['approved', 'auto_approved'])
             ->where('scheduled_at', '<=', now())
             ->where('retry_count', '<', 3);
     }

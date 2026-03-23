@@ -30,6 +30,13 @@
 | 19 | social | YouTube tokens expire every 3600s — always check isTokenExpired() before publish; refresh_token only returned on first auth (prompt=consent) | 2026-03-22 | Phase 9E |
 | 20 | social | TikTok response wraps in data.{} — use ->json('data') not ->json() directly; publish_id is async, not a final post ID | 2026-03-22 | Phase 9E |
 | 21 | social | SocialPlatformService::driver() now throws InvalidArgumentException for unknown platforms — callers must use platforms() helper to validate | 2026-03-22 | Phase 9E |
+| 22 | social | CSRF state: LinkedIn/Facebook/YouTube getAuthorizationUrl() returns array{url,state}; store state in session, validate in callback, forget after use | 2026-03-23 | Phase 9F |
+| 23 | social | DispatchScheduledPosts simulated fallback removed — entries without real account stay `scheduled`; IterationEngine only fed on real publishes | 2026-03-23 | Phase 9F |
+| 24 | social | TikTok publish is async: init returns publish_id not video_id; PollTikTokPublishStatus polls up to 5×30s until PUBLISH_COMPLETE | 2026-03-23 | Phase 9F |
+| 25 | social | YouTube resumable upload URI stored in metadata['youtube_upload_uri'] immediately after Step 1; reused on retry; cleared on success | 2026-03-23 | Phase 9F |
+| 26 | social | ensurePublicUrl() converts local storage paths to S3 temporaryUrl (2h); falls back to disk->url() for local disk | 2026-03-23 | Phase 9F |
+| 27 | social | SocialAccount.access_token + refresh_token use 'encrypted' cast — stored as Laravel Crypt ciphertext, never plaintext in DB | 2026-03-23 | Phase 9F |
+| 28 | controller | PATCH /api/social-accounts/{id} updates only metadata (merge, not replace) — use apiPatch() JS helper | 2026-03-23 | Phase 9F |
 
 ---
 
@@ -53,6 +60,26 @@
 - Added Self-Correction Protocol to root CLAUDE.md
 - Created this MEMORY.md with 12 active lessons seeded from Phase 5–9 knowledge
 - Incorporated 18 improvement points into Phase 9 plan (11 added, 7 deferred to Phase 10)
+
+### 2026-03-23 — Phase 9F (Social Platform Hardening — 6 commits)
+- Moderation gate: ContentCalendar.scheduledNow() requires moderation_status IN (approved, auto_approved)
+- Removed simulated fallback from DispatchScheduledPosts — no fake metrics fed to IterationEngine
+- Flash banners in social.blade.php: success/error/info with Alpine auto-dismiss (6s)
+- CSRF state validation for LinkedIn, Facebook, YouTube OAuth callbacks
+- Dry-run mode: SOCIAL_DRY_RUN env flag — logs [DRY_RUN] SystemEvent, skips real API
+- Rate-limit requeue now creates SystemEvent(warning) for audit trail
+- Scheduling conflict prevention: ±15 min check in apiCreate/UpdateCalendarEntry
+- PollTikTokPublishStatus job: async poller (5×30s), updates external_post_id on PUBLISH_COMPLETE
+- YouTube Shorts validation: SystemEvent(warning) if duration_seconds > 60
+- YouTube resumable session recovery: metadata['youtube_upload_uri'] stored/reused/cleared
+- ensurePublicUrl() static helper: local storage path → S3 temporaryUrl (2h)
+- RepurposeContent: added youtube→video to content type match
+- RefreshSocialTokens: fixed "stub" log message
+- LinkedIn org selection: socialLinkedInCallback fetches orgs, stores in metadata; UI dropdown
+- Facebook multi-page: one SocialAccount per page via updateOrCreate
+- PATCH /api/social-accounts/{id}: metadata-merge endpoint + apiPatch() JS helper
+- SocialAccount encrypted casts: access_token + refresh_token stored as Crypt ciphertext
+- Migration 2026_03_23_100001: re-encrypts existing plaintext tokens idempotently
 
 ### 2026-03-22 — Phase 9E (Real Social API Integrations — all 6 platforms)
 - TwitterService: OAuth 2.0 PKCE, tweet + thread, organic_metrics, refresh_token grant

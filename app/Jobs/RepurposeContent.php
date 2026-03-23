@@ -74,6 +74,7 @@ class RepurposeContent implements ShouldQueue
                     'linkedin'  => 'post',
                     'twitter'   => 'thread',
                     'facebook'  => 'post',
+                    'youtube'   => 'video',
                     default     => 'post',
                 };
 

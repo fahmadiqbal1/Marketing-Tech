@@ -141,6 +141,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/hashtag-sets',                        [DashboardController::class, 'apiCreateHashtagSet']);
             Route::delete('/hashtag-sets/{id}',                 [DashboardController::class, 'apiDeleteHashtagSet']);
             Route::post('/social-accounts',                     [DashboardController::class, 'apiUpsertSocialAccount']);
+            Route::patch('/social-accounts/{id}',               [DashboardController::class, 'apiPatchSocialAccount']);
             Route::delete('/social-accounts/{id}',              [DashboardController::class, 'apiDeleteSocialAccount']);
         });
 

@@ -10,6 +10,7 @@ return [
 
     'social' => [
         'auto_post_enabled' => env('SOCIAL_AUTO_POST_ENABLED', false),
+        'dry_run'           => env('SOCIAL_DRY_RUN', false),
     ],
 
     'instagram' => [

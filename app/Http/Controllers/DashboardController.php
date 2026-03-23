@@ -757,13 +757,18 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'LinkedIn API credentials not configured. Set SOCIAL_LINKEDIN_CLIENT_ID and SOCIAL_LINKEDIN_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_linkedin_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialLinkedInCallback(Request $request): \Illuminate\Http\RedirectResponse
     {
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'LinkedIn authorization denied: ' . $request->get('error_description'));
+        }
+        if ($request->get('state') !== session('oauth_linkedin_state')) {
+            return redirect('/dashboard/social')->with('error', 'LinkedIn OAuth state mismatch — possible CSRF.');
         }
         $svc = new LinkedInService();
         try {
@@ -773,6 +778,27 @@ class DashboardController extends Controller
                 ->get('https://api.linkedin.com/v2/me', ['projection' => '(id,localizedFirstName,localizedLastName)'])->json();
             $userId    = $profile['id'] ?? null;
             $name      = trim(($profile['localizedFirstName'] ?? '') . ' ' . ($profile['localizedLastName'] ?? '')) ?: 'unknown';
+
+            // Fetch organizations the user admins — store for org selection
+            $orgsResponse = \Illuminate\Support\Facades\Http::withToken($tokenData['access_token'])
+                ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
+                ->get('https://api.linkedin.com/v2/organizationAcls', [
+                    'q'    => 'roleAssignee',
+                    'role' => 'ADMINISTRATOR',
+                ]);
+
+            $organizations = [];
+            if ($orgsResponse->ok()) {
+                foreach ($orgsResponse->json('elements', []) as $acl) {
+                    $orgUrn = $acl['organization'] ?? null;
+                    if ($orgUrn) {
+                        $organizations[] = ['urn' => $orgUrn, 'name' => $acl['organizationName'] ?? $orgUrn];
+                    }
+                }
+            }
+
+            $defaultOrgUrn = $organizations[0]['urn'] ?? null;
+
             SocialAccount::updateOrCreate(
                 ['platform' => 'linkedin', 'handle' => $userId ?? $name],
                 [
@@ -781,12 +807,18 @@ class DashboardController extends Controller
                     'access_token'     => $tokenData['access_token'],
                     'refresh_token'    => $tokenData['refresh_token'] ?? null,
                     'token_expires_at' => isset($tokenData['expires_in']) ? now()->addSeconds($tokenData['expires_in']) : null,
+                    'metadata'         => [
+                        'organization_urn'  => $defaultOrgUrn,
+                        'organizations'     => $organizations,
+                    ],
                     'is_connected'     => true,
                     'last_error'       => null,
                     'last_synced_at'   => now(),
                 ]
             );
-            return redirect('/dashboard/social')->with('success', 'LinkedIn connected successfully.');
+            session()->forget('oauth_linkedin_state');
+            $orgMsg = $defaultOrgUrn ? ' (' . count($organizations) . ' organization(s) found)' : '';
+            return redirect('/dashboard/social')->with('success', "LinkedIn connected successfully{$orgMsg}.");
         } catch (\Throwable $e) {
             Log::error('LinkedIn OAuth callback failed', ['error' => $e->getMessage()]);
             return redirect('/dashboard/social')->with('error', 'Failed to connect LinkedIn: ' . $e->getMessage());
@@ -801,7 +833,9 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'Facebook API credentials not configured. Set SOCIAL_FACEBOOK_CLIENT_ID and SOCIAL_FACEBOOK_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_facebook_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialFacebookCallback(Request $request): \Illuminate\Http\RedirectResponse
@@ -809,28 +843,70 @@ class DashboardController extends Controller
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'Facebook authorization denied: ' . $request->get('error_description'));
         }
+        if ($request->get('state') !== session('oauth_facebook_state')) {
+            return redirect('/dashboard/social')->with('error', 'Facebook OAuth state mismatch — possible CSRF.');
+        }
         $svc = new FacebookService();
         try {
-            $tokenData = $svc->exchangeCode($request->get('code'));
-            $pageId    = $tokenData['page_id']   ?? null;
-            $pageName  = $tokenData['page_name'] ?? 'Facebook Page';
-            $handle    = $pageId ?? 'page';
-            SocialAccount::updateOrCreate(
-                ['platform' => 'facebook', 'handle' => $handle],
-                [
-                    'platform_user_id' => $pageId,
-                    'display_name'     => $pageName,
-                    'access_token'     => $tokenData['page_access_token'],
-                    'token_expires_at' => ($tokenData['expires_in'] ?? 0) > 0
-                                            ? now()->addSeconds($tokenData['expires_in'])
-                                            : null,
-                    'metadata'         => ['user_access_token' => $tokenData['user_access_token'], 'page_id' => $pageId, 'page_name' => $pageName],
-                    'is_connected'     => true,
-                    'last_error'       => null,
-                    'last_synced_at'   => now(),
-                ]
+            $tokenData   = $svc->exchangeCode($request->get('code'));
+            $userToken   = $tokenData['user_access_token'];
+
+            // Fetch ALL managed pages and create/update a SocialAccount per page
+            $pagesResponse = \Illuminate\Support\Facades\Http::get(
+                'https://graph.facebook.com/v19.0/me/accounts',
+                ['access_token' => $userToken]
             );
-            return redirect('/dashboard/social')->with('success', "Facebook Page \"{$pageName}\" connected successfully.");
+
+            $pages     = $pagesResponse->ok() ? $pagesResponse->json('data', []) : [];
+            $pageCount = 0;
+
+            foreach ($pages as $page) {
+                $pageId    = $page['id'];
+                $pageName  = $page['name'] ?? 'Facebook Page';
+                $pageToken = $page['access_token'] ?? $userToken;
+
+                SocialAccount::updateOrCreate(
+                    ['platform' => 'facebook', 'handle' => $pageId],
+                    [
+                        'platform_user_id' => $pageId,
+                        'display_name'     => $pageName,
+                        'access_token'     => $pageToken,
+                        'token_expires_at' => null, // page tokens don't expire
+                        'metadata'         => [
+                            'user_access_token' => $userToken,
+                            'page_id'           => $pageId,
+                            'page_name'         => $pageName,
+                        ],
+                        'is_connected'  => true,
+                        'last_error'    => null,
+                        'last_synced_at'=> now(),
+                    ]
+                );
+                $pageCount++;
+            }
+
+            // Fallback: if no pages returned, store with the single page from exchangeCode
+            if ($pageCount === 0) {
+                $pageId   = $tokenData['page_id']   ?? 'page';
+                $pageName = $tokenData['page_name'] ?? 'Facebook Page';
+                SocialAccount::updateOrCreate(
+                    ['platform' => 'facebook', 'handle' => $pageId],
+                    [
+                        'platform_user_id' => $pageId,
+                        'display_name'     => $pageName,
+                        'access_token'     => $tokenData['page_access_token'],
+                        'token_expires_at' => null,
+                        'metadata'         => ['user_access_token' => $userToken, 'page_id' => $pageId, 'page_name' => $pageName],
+                        'is_connected'     => true,
+                        'last_error'       => null,
+                        'last_synced_at'   => now(),
+                    ]
+                );
+                $pageCount = 1;
+            }
+
+            session()->forget('oauth_facebook_state');
+            return redirect('/dashboard/social')->with('success', "Facebook connected: {$pageCount} page(s) linked.");
         } catch (\Throwable $e) {
             Log::error('Facebook OAuth callback failed', ['error' => $e->getMessage()]);
             return redirect('/dashboard/social')->with('error', 'Failed to connect Facebook: ' . $e->getMessage());
@@ -897,13 +973,18 @@ class DashboardController extends Controller
         if (! $svc->isConfigured()) {
             return redirect('/dashboard/social')->with('error', 'YouTube API credentials not configured. Set SOCIAL_YOUTUBE_CLIENT_ID and SOCIAL_YOUTUBE_CLIENT_SECRET in .env');
         }
-        return redirect($svc->getAuthorizationUrl());
+        $data = $svc->getAuthorizationUrl();
+        session(['oauth_youtube_state' => $data['state']]);
+        return redirect($data['url']);
     }
 
     public function socialYouTubeCallback(Request $request): \Illuminate\Http\RedirectResponse
     {
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'YouTube authorization denied: ' . $request->get('error'));
+        }
+        if ($request->get('state') !== session('oauth_youtube_state')) {
+            return redirect('/dashboard/social')->with('error', 'YouTube OAuth state mismatch — possible CSRF.');
         }
         $svc = new YouTubeService();
         try {
@@ -928,6 +1009,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            session()->forget('oauth_youtube_state');
             return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
         } catch (\Throwable $e) {
             Log::error('YouTube OAuth callback failed', ['error' => $e->getMessage()]);
@@ -966,8 +1048,8 @@ class DashboardController extends Controller
     {
         $validated = $request->validate([
             'title'         => 'required|string|max:255',
-            'platform'      => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
-            'content_type'  => 'required|in:reel,story,post,thread,carousel,live,ad',
+            'platform'      => 'required|in:tiktok,instagram,facebook,twitter,linkedin,youtube',
+            'content_type'  => 'required|in:reel,story,post,thread,carousel,live,ad,video,short',
             'draft_content' => 'nullable|string',
             'status'        => 'in:draft,scheduled,pending_approval',
             'scheduled_at'  => 'nullable|date',
@@ -977,16 +1059,31 @@ class DashboardController extends Controller
 
         // Validate platform/content_type combo
         $invalid = [
-            'instagram' => ['thread'],
-            'twitter'   => ['reel', 'story', 'carousel'],
-            'linkedin'  => ['reel', 'story'],
-            'facebook'  => ['thread'],
+            'instagram' => ['thread', 'video'],
+            'twitter'   => ['reel', 'story', 'carousel', 'video', 'short'],
+            'linkedin'  => ['reel', 'story', 'video', 'short'],
+            'facebook'  => ['thread', 'short'],
+            'youtube'   => ['thread', 'story', 'live', 'ad'],
         ];
 
         if (isset($invalid[$validated['platform']]) && in_array($validated['content_type'], $invalid[$validated['platform']])) {
             return response()->json([
                 'error' => "content_type '{$validated['content_type']}' is not supported on {$validated['platform']}",
             ], 422);
+        }
+
+        // Scheduling conflict check: no other non-failed entry within ±15 min on same platform
+        if (! empty($validated['scheduled_at'])) {
+            $time = \Carbon\Carbon::parse($validated['scheduled_at']);
+            $conflict = ContentCalendar::where('platform', $validated['platform'])
+                ->where('status', '!=', 'failed')
+                ->whereBetween('scheduled_at', [$time->copy()->subMinutes(15), $time->copy()->addMinutes(15)])
+                ->exists();
+            if ($conflict) {
+                return response()->json([
+                    'error' => "Another {$validated['platform']} post is already scheduled within 15 minutes of this time.",
+                ], 422);
+            }
         }
 
         $entry = ContentCalendar::create($validated);
@@ -1006,6 +1103,21 @@ class DashboardController extends Controller
             'hashtags'             => 'nullable|array',
             'metadata'             => 'nullable|array',
         ]);
+
+        // Scheduling conflict check on reschedule
+        if (! empty($validated['scheduled_at'])) {
+            $time = \Carbon\Carbon::parse($validated['scheduled_at']);
+            $conflict = ContentCalendar::where('platform', $entry->platform)
+                ->where('id', '!=', $entry->id)
+                ->where('status', '!=', 'failed')
+                ->whereBetween('scheduled_at', [$time->copy()->subMinutes(15), $time->copy()->addMinutes(15)])
+                ->exists();
+            if ($conflict) {
+                return response()->json([
+                    'error' => "Another {$entry->platform} post is already scheduled within 15 minutes of this time.",
+                ], 422);
+            }
+        }
 
         $entry->update($validated);
 
@@ -1201,6 +1313,17 @@ class DashboardController extends Controller
         );
 
         return response()->json($account, 201);
+    }
+
+    public function apiPatchSocialAccount(Request $request, string $id): JsonResponse
+    {
+        $account   = SocialAccount::findOrFail($id);
+        $validated = $request->validate(['metadata' => 'required|array']);
+
+        // Merge into existing metadata so callers can update a single key
+        $account->update(['metadata' => array_merge($account->metadata ?? [], $validated['metadata'])]);
+
+        return response()->json($account->fresh());
     }
 
     public function apiDeleteSocialAccount(string $id): JsonResponse

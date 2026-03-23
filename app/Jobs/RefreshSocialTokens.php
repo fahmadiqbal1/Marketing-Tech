@@ -35,8 +35,7 @@ class RefreshSocialTokens implements ShouldQueue
                 $driver = $social->driver($account->platform);
 
                 if (! $driver->isConfigured()) {
-                    // Stub platform — log but don't fail
-                    Log::info("RefreshSocialTokens: {$account->platform} is not configured for real refresh (stub)");
+                    Log::info("RefreshSocialTokens: {$account->platform} is not configured for real refresh (missing API credentials in .env)");
                     continue;
                 }
 

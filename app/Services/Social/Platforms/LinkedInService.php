@@ -31,15 +31,17 @@ class LinkedInService implements SocialPlatformInterface
             && ! empty(config('services.linkedin.client_secret'));
     }
 
-    public function getAuthorizationUrl(): string
+    public function getAuthorizationUrl(): array
     {
-        return self::OAUTH_URL . '?' . http_build_query([
+        $state = bin2hex(random_bytes(16));
+        $url   = self::OAUTH_URL . '?' . http_build_query([
             'response_type' => 'code',
             'client_id'     => config('services.linkedin.client_id'),
             'redirect_uri'  => config('services.linkedin.redirect_uri'),
             'scope'         => 'r_liteprofile r_emailaddress w_member_social w_organization_social rw_organization_admin offline_access',
-            'state'         => bin2hex(random_bytes(16)),
+            'state'         => $state,
         ]);
+        return ['url' => $url, 'state' => $state];
     }
 
     public function exchangeCode(string $code): array
