@@ -83,6 +83,19 @@ class YouTubeService implements SocialPlatformInterface
         }
 
         $isShort      = $entry->content_type === 'short' || ($entry->metadata['is_short'] ?? false);
+
+        // Shorts validation: warn if duration metadata suggests video exceeds 60s
+        if ($isShort) {
+            $duration = (int) ($entry->metadata['duration_seconds'] ?? 0);
+            if ($duration > 60) {
+                Log::warning("[YouTube] Shorts duration {$duration}s exceeds 60s limit for entry {$entry->id} — YouTube may not treat this as a Short.");
+                \App\Models\SystemEvent::create([
+                    'level'   => 'warning',
+                    'message' => "[YouTube] Shorts post \"{$entry->title}\" has duration {$duration}s (>60s) — may not qualify as a Short.",
+                ]);
+            }
+        }
+
         $title        = $this->buildTitle($entry, $isShort);
         $description  = $this->buildDescription($entry, $isShort);
         $tags         = array_map(fn ($t) => ltrim($t, '#'), $entry->hashtags ?? []);
@@ -152,7 +165,7 @@ class YouTubeService implements SocialPlatformInterface
     {
         $response = Http::withToken($account->access_token)
             ->get(self::API_URL . '/videos', [
-                'part' => 'statistics',
+                'part' => 'statistics,contentDetails',
                 'id'   => $externalPostId,
             ]);
 
@@ -161,15 +174,24 @@ class YouTubeService implements SocialPlatformInterface
             return ['impressions' => 0, 'reach' => 0, 'clicks' => 0, 'engagement' => 0, 'conversions' => 0];
         }
 
-        $stats = $response->json('items.0.statistics', []);
+        $stats   = $response->json('items.0.statistics', []);
+        $details = $response->json('items.0.contentDetails', []);
+
+        // Parse ISO 8601 duration (e.g. PT1M3S) into seconds
+        $durationSec = 0;
+        if (! empty($details['duration'])) {
+            preg_match('/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/', $details['duration'], $m);
+            $durationSec = ((int) ($m[1] ?? 0)) * 3600 + ((int) ($m[2] ?? 0)) * 60 + (int) ($m[3] ?? 0);
+        }
 
         return [
-            'impressions' => (int) ($stats['viewCount']      ?? 0),
-            'reach'       => (int) ($stats['viewCount']      ?? 0),
-            'clicks'      => (int) ($stats['favoriteCount']  ?? 0),
-            'engagement'  => (int) ($stats['likeCount']      ?? 0)
-                           + (int) ($stats['commentCount']   ?? 0),
-            'conversions' => 0,
+            'impressions'      => (int) ($stats['viewCount']    ?? 0),
+            'reach'            => (int) ($stats['viewCount']    ?? 0),
+            'clicks'           => (int) ($stats['favoriteCount'] ?? 0),
+            'engagement'       => (int) ($stats['likeCount']    ?? 0)
+                                + (int) ($stats['commentCount'] ?? 0),
+            'conversions'      => 0,
+            'duration_seconds' => $durationSec,
         ];
     }
 

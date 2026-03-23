@@ -56,6 +56,7 @@ class DispatchScheduledPosts implements ShouldQueue
                                 $entry->increment('retry_count');
                                 $entry->update(['last_error' => 'Rate limited — retry in ' . $delay . 's']);
                                 Log::warning("Rate limited for entry {$entry->id}. Retry in {$delay}s.");
+                                SystemEvent::create(['level' => 'warning', 'message' => "Rate limited [{$account->platform}] @{$account->handle} — \"{$entry->title}\" delayed {$delay}s (retry {$entry->retry_count}/3)"]);
                                 continue; // Scheduler will re-pick up next minute
                             }
                             throw $e;

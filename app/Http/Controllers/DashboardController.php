@@ -984,8 +984,8 @@ class DashboardController extends Controller
     {
         $validated = $request->validate([
             'title'         => 'required|string|max:255',
-            'platform'      => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
-            'content_type'  => 'required|in:reel,story,post,thread,carousel,live,ad',
+            'platform'      => 'required|in:tiktok,instagram,facebook,twitter,linkedin,youtube',
+            'content_type'  => 'required|in:reel,story,post,thread,carousel,live,ad,video,short',
             'draft_content' => 'nullable|string',
             'status'        => 'in:draft,scheduled,pending_approval',
             'scheduled_at'  => 'nullable|date',
@@ -995,16 +995,31 @@ class DashboardController extends Controller
 
         // Validate platform/content_type combo
         $invalid = [
-            'instagram' => ['thread'],
-            'twitter'   => ['reel', 'story', 'carousel'],
-            'linkedin'  => ['reel', 'story'],
-            'facebook'  => ['thread'],
+            'instagram' => ['thread', 'video'],
+            'twitter'   => ['reel', 'story', 'carousel', 'video', 'short'],
+            'linkedin'  => ['reel', 'story', 'video', 'short'],
+            'facebook'  => ['thread', 'short'],
+            'youtube'   => ['thread', 'story', 'live', 'ad'],
         ];
 
         if (isset($invalid[$validated['platform']]) && in_array($validated['content_type'], $invalid[$validated['platform']])) {
             return response()->json([
                 'error' => "content_type '{$validated['content_type']}' is not supported on {$validated['platform']}",
             ], 422);
+        }
+
+        // Scheduling conflict check: no other non-failed entry within ±15 min on same platform
+        if (! empty($validated['scheduled_at'])) {
+            $time = \Carbon\Carbon::parse($validated['scheduled_at']);
+            $conflict = ContentCalendar::where('platform', $validated['platform'])
+                ->where('status', '!=', 'failed')
+                ->whereBetween('scheduled_at', [$time->copy()->subMinutes(15), $time->copy()->addMinutes(15)])
+                ->exists();
+            if ($conflict) {
+                return response()->json([
+                    'error' => "Another {$validated['platform']} post is already scheduled within 15 minutes of this time.",
+                ], 422);
+            }
         }
 
         $entry = ContentCalendar::create($validated);
@@ -1024,6 +1039,21 @@ class DashboardController extends Controller
             'hashtags'             => 'nullable|array',
             'metadata'             => 'nullable|array',
         ]);
+
+        // Scheduling conflict check on reschedule
+        if (! empty($validated['scheduled_at'])) {
+            $time = \Carbon\Carbon::parse($validated['scheduled_at']);
+            $conflict = ContentCalendar::where('platform', $entry->platform)
+                ->where('id', '!=', $entry->id)
+                ->where('status', '!=', 'failed')
+                ->whereBetween('scheduled_at', [$time->copy()->subMinutes(15), $time->copy()->addMinutes(15)])
+                ->exists();
+            if ($conflict) {
+                return response()->json([
+                    'error' => "Another {$entry->platform} post is already scheduled within 15 minutes of this time.",
+                ], 422);
+            }
+        }
 
         $entry->update($validated);
 
