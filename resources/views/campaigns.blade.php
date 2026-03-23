@@ -78,6 +78,7 @@
                     <div class="flex gap-1.5 ml-2">
                         <button @click="viewDetail(c)" class="text-xs text-violet-400 hover:text-violet-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">View</button>
                         <button x-show="c.status === 'active'" @click="pauseCampaign(c.id)" class="text-xs text-amber-400 hover:text-amber-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">Pause</button>
+                        <button x-show="c.status === 'paused'" @click="resumeCampaign(c.id)" class="text-xs text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">Resume</button>
                     </div>
                 </div>
 
@@ -223,6 +224,7 @@ function campaignsApp() {
         showCreate: false,
         showDetail: false,
         detail: {},
+        detailData: {},
         saving: false,
         createError: '',
         newCampaign: { name: '', type: 'email', audience: '', subject: '', schedule_at: '' },
@@ -269,24 +271,54 @@ function campaignsApp() {
             finally { this.saving = false; }
         },
 
-        viewDetail(campaign) {
+        async viewDetail(campaign) {
             this.detail = campaign;
+            this.detailData = {};
             this.showDetail = true;
-            this.$nextTick(() => this.renderDetailChart(campaign));
+            try {
+                const r = await apiGet(`/dashboard/api/campaigns/${campaign.id}/detail`);
+                this.detailData = r;
+            } catch (e) { /* non-fatal — chart will show empty */ }
+            this.$nextTick(() => this.renderDetailChart());
         },
 
-        renderDetailChart(campaign) {
+        renderDetailChart() {
             const ctx = document.getElementById('campaignDetailChart');
             if (! ctx) return;
             if (ctx._chart) ctx._chart.destroy();
-            const labels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+            // Build last-7-days labels
+            const days = [];
+            const dayLabels = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(); d.setDate(d.getDate() - i);
+                days.push(d.toISOString().slice(0, 10));
+                dayLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+            }
+
+            // Count agent jobs per day from real API data
+            const jobs = this.detailData.jobs ?? [];
+            const jobsByDay = Object.fromEntries(days.map(d => [d, 0]));
+            jobs.forEach(j => {
+                const day = (j.created_at ?? '').slice(0, 10);
+                if (day in jobsByDay) jobsByDay[day]++;
+            });
+
+            // Count generated outputs per day
+            const outputs = this.detailData.outputs ?? [];
+            const outputsByDay = Object.fromEntries(days.map(d => [d, 0]));
+            outputs.forEach(o => {
+                const day = (o.created_at ?? '').slice(0, 10);
+                if (day in outputsByDay) outputsByDay[day]++;
+            });
+
             ctx._chart = new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
-                    labels,
+                    labels: dayLabels,
                     datasets: [
-                        { label: 'Opens', data: labels.map(() => Math.floor(Math.random() * 40 + 10)), borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', tension: 0.4, fill: true },
-                        { label: 'Clicks', data: labels.map(() => Math.floor(Math.random() * 15 + 2)), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.4, fill: true },
+                        { label: 'Agent runs', data: days.map(d => jobsByDay[d]), backgroundColor: 'rgba(139,92,246,0.6)', borderColor: '#8b5cf6', borderWidth: 1 },
+                        { label: 'Outputs', data: days.map(d => outputsByDay[d]), backgroundColor: 'rgba(16,185,129,0.5)', borderColor: '#10b981', borderWidth: 1 },
                     ]
                 },
                 options: {
@@ -294,7 +326,7 @@ function campaignsApp() {
                     plugins: { title: { display: false }, subtitle: { display: false }, legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
                     scales: {
                         x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                        y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { ticks: { color: '#64748b', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
                     }
                 }
             });
@@ -302,6 +334,11 @@ function campaignsApp() {
 
         async pauseCampaign(id) {
             await apiPost(`/dashboard/api/campaigns/${id}/pause`, {});
+            await this.load();
+        },
+
+        async resumeCampaign(id) {
+            await apiPost(`/dashboard/api/campaigns/${id}/resume`, {});
             await this.load();
         },
 
