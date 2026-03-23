@@ -21,6 +21,8 @@ class SocialAccount extends Model
     ];
 
     protected $casts = [
+        'access_token'      => 'encrypted',
+        'refresh_token'     => 'encrypted',
         'metadata'          => 'array',
         'token_expires_at'  => 'datetime',
         'last_synced_at'    => 'datetime',
