@@ -48,8 +48,12 @@ class MediaAgent extends BaseAgent
             'scan_file'       => $this->toolScanFile($args),
             'store_media'     => $this->toolStoreMedia($args, $job),
             'get_media_info'  => $this->toolGetMediaInfo($args),
-            'generate_thumbnail' => $this->toolGenerateThumbnail($args, $job),
-            default           => $this->toolResult(false, null, "Unknown tool: {$name}"),
+            'generate_thumbnail'  => $this->toolGenerateThumbnail($args, $job),
+            'generate_image'      => $this->toolGenerateImage($args, $job),
+            'generate_video'      => $this->toolGenerateVideo($args, $job),
+            'remove_background'   => $this->toolRemoveBackground($args, $job),
+            'enhance_image'       => $this->toolEnhanceImage($args, $job),
+            default               => $this->toolResult(false, null, "Unknown tool: {$name}"),
         };
     }
 
@@ -179,6 +183,71 @@ class MediaAgent extends BaseAgent
                             'height'     => ['type' => 'integer'],
                         ],
                         'required'   => ['video_path'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_image',
+                    'description' => 'Generate an image from a text prompt using Stability AI. Returns a storage URL for the generated image.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'prompt'         => ['type' => 'string', 'description' => 'Detailed image generation prompt'],
+                            'negative_prompt'=> ['type' => 'string', 'description' => 'Elements to avoid in the image'],
+                            'aspect_ratio'   => ['type' => 'string', 'enum' => ['1:1', '16:9', '9:16', '4:3', '3:4'], 'description' => 'Image aspect ratio'],
+                            'style_preset'   => ['type' => 'string', 'enum' => ['photographic', 'digital-art', 'anime', 'cinematic', 'comic-book', 'enhance'], 'description' => 'Visual style'],
+                        ],
+                        'required'   => ['prompt'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'remove_background',
+                    'description' => 'Remove the background from an image using Remove.bg API',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'image_url'   => ['type' => 'string', 'description' => 'URL or storage path of the source image'],
+                            'output_format' => ['type' => 'string', 'enum' => ['png', 'jpg', 'zip'], 'description' => 'Output format (png preserves transparency)'],
+                        ],
+                        'required'   => ['image_url'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'enhance_image',
+                    'description' => 'Upscale and enhance an image using Stability AI upscaler (up to 4x resolution)',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'image_url'  => ['type' => 'string', 'description' => 'URL or storage path of the source image'],
+                            'prompt'     => ['type' => 'string', 'description' => 'Optional enhancement guidance prompt'],
+                            'creativity' => ['type' => 'number', 'description' => 'Creative enhancement level 0.0–0.35 (higher = more creative changes)'],
+                        ],
+                        'required'   => ['image_url'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_video',
+                    'description' => 'Generate a short video from a text prompt or image using Runway Gen-3. Returns a storage URL when complete.',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'prompt'      => ['type' => 'string', 'description' => 'Video generation prompt'],
+                            'image_url'   => ['type' => 'string', 'description' => 'Optional source image URL for image-to-video'],
+                            'duration'    => ['type' => 'integer', 'enum' => [5, 10], 'description' => 'Video duration in seconds'],
+                            'ratio'       => ['type' => 'string', 'enum' => ['1280:768', '768:1280'], 'description' => 'Video aspect ratio'],
+                        ],
+                        'required'   => ['prompt'],
                     ],
                 ],
             ],
@@ -329,6 +398,172 @@ class MediaAgent extends BaseAgent
             );
 
             return $this->toolResult(true, ['thumbnail_path' => $outputPath]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolGenerateImage(array $args, AgentJob $job): string
+    {
+        $apiKey = config('services.stability_ai.api_key');
+        if (! $apiKey) {
+            return $this->toolResult(false, null, 'Stability AI API key not configured. Set STABILITY_AI_API_KEY in environment.');
+        }
+
+        try {
+            $payload = [
+                'prompt'          => $args['prompt'],
+                'output_format'   => 'webp',
+                'aspect_ratio'    => $args['aspect_ratio'] ?? '1:1',
+            ];
+            if (! empty($args['negative_prompt'])) {
+                $payload['negative_prompt'] = $args['negative_prompt'];
+            }
+            if (! empty($args['style_preset'])) {
+                $payload['style_preset'] = $args['style_preset'];
+            }
+
+            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                ->accept('image/*')
+                ->asMultipart()
+                ->post('https://api.stability.ai/v2beta/stable-image/generate/core', $payload);
+
+            if (! $response->successful()) {
+                $err = $response->json('errors.0') ?? $response->body();
+                return $this->toolResult(false, null, "Stability AI error: {$err}");
+            }
+
+            $filename = 'generated/' . $job->id . '_' . uniqid() . '.webp';
+            Storage::disk('minio')->put($filename, $response->body());
+            $url = Storage::disk('minio')->temporaryUrl($filename, now()->addDays(7));
+
+            return $this->toolResult(true, ['url' => $url, 'storage_key' => $filename, 'prompt' => $args['prompt']]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolRemoveBackground(array $args, AgentJob $job): string
+    {
+        $apiKey = config('services.removebg.api_key');
+        if (! $apiKey) {
+            return $this->toolResult(false, null, 'Remove.bg API key not configured. Set REMOVEBG_API_KEY in environment.');
+        }
+
+        try {
+            $outputFormat = $args['output_format'] ?? 'png';
+
+            $response = \Illuminate\Support\Facades\Http::withHeaders(['X-Api-Key' => $apiKey])
+                ->post('https://api.remove.bg/v1.0/removebg', [
+                    'image_url'     => $args['image_url'],
+                    'size'          => 'auto',
+                    'format'        => $outputFormat,
+                ]);
+
+            if (! $response->successful()) {
+                $err = $response->json('errors.0.title') ?? $response->body();
+                return $this->toolResult(false, null, "Remove.bg error: {$err}");
+            }
+
+            $filename = 'processed/nobg_' . $job->id . '_' . uniqid() . '.' . $outputFormat;
+            Storage::disk('minio')->put($filename, $response->body());
+            $url = Storage::disk('minio')->temporaryUrl($filename, now()->addDays(7));
+
+            return $this->toolResult(true, ['url' => $url, 'storage_key' => $filename]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolEnhanceImage(array $args, AgentJob $job): string
+    {
+        $apiKey = config('services.stability_ai.api_key');
+        if (! $apiKey) {
+            return $this->toolResult(false, null, 'Stability AI API key not configured. Set STABILITY_AI_API_KEY in environment.');
+        }
+
+        try {
+            $imageData = \Illuminate\Support\Facades\Http::get($args['image_url'])->body();
+
+            $payload = [
+                'output_format' => 'webp',
+                'creativity'    => (float) ($args['creativity'] ?? 0.2),
+            ];
+            if (! empty($args['prompt'])) {
+                $payload['prompt'] = $args['prompt'];
+            }
+
+            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                ->accept('image/*')
+                ->asMultipart()
+                ->attach('image', $imageData, 'source.webp', ['Content-Type' => 'image/webp'])
+                ->post('https://api.stability.ai/v2beta/stable-image/upscale/conservative', $payload);
+
+            if (! $response->successful()) {
+                $err = $response->json('errors.0') ?? $response->body();
+                return $this->toolResult(false, null, "Stability AI enhance error: {$err}");
+            }
+
+            $filename = 'enhanced/' . $job->id . '_' . uniqid() . '.webp';
+            Storage::disk('minio')->put($filename, $response->body());
+            $url = Storage::disk('minio')->temporaryUrl($filename, now()->addDays(7));
+
+            return $this->toolResult(true, ['url' => $url, 'storage_key' => $filename]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolGenerateVideo(array $args, AgentJob $job): string
+    {
+        $apiKey = config('services.runway.api_key');
+        if (! $apiKey) {
+            return $this->toolResult(false, null, 'Runway API key not configured. Set RUNWAY_API_KEY in environment.');
+        }
+
+        try {
+            $payload = [
+                'promptText'  => $args['prompt'],
+                'model'       => 'gen3a_turbo',
+                'duration'    => $args['duration'] ?? 5,
+                'ratio'       => $args['ratio'] ?? '1280:768',
+            ];
+            if (! empty($args['image_url'])) {
+                $payload['promptImage'] = $args['image_url'];
+            }
+
+            // Submit generation task
+            $response = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                ->withHeaders(['X-Runway-Version' => '2024-11-06'])
+                ->post('https://api.dev.runwayml.com/v1/image_to_video', $payload);
+
+            if (! $response->successful()) {
+                $err = $response->json('error') ?? $response->body();
+                return $this->toolResult(false, null, "Runway error: {$err}");
+            }
+
+            $taskId = $response->json('id');
+
+            // Poll for completion (max 60s for short clips)
+            $maxAttempts = 12;
+            for ($i = 0; $i < $maxAttempts; $i++) {
+                sleep(5);
+                $poll = \Illuminate\Support\Facades\Http::withToken($apiKey)
+                    ->withHeaders(['X-Runway-Version' => '2024-11-06'])
+                    ->get("https://api.dev.runwayml.com/v1/tasks/{$taskId}");
+
+                $status = $poll->json('status');
+                if ($status === 'SUCCEEDED') {
+                    $videoUrl = $poll->json('output.0');
+                    return $this->toolResult(true, ['url' => $videoUrl, 'task_id' => $taskId, 'prompt' => $args['prompt']]);
+                }
+                if ($status === 'FAILED') {
+                    $err = $poll->json('failure') ?? 'Generation failed';
+                    return $this->toolResult(false, null, "Runway generation failed: {$err}");
+                }
+            }
+
+            return $this->toolResult(false, null, "Runway video generation timed out after 60s. Task ID: {$taskId}");
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
         }

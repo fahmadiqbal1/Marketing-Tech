@@ -108,11 +108,20 @@ class PollTikTokPublishStatus implements ShouldQueue
     private function scheduleRetryOrAbandon(ContentCalendar $entry): void
     {
         if ($this->attempt >= self::MAX_POLLS - 1) {
-            // Leave entry as published — TikTok may still finish processing
-            Log::warning("[TikTok] PollPublishStatus: max polls reached for publish_id={$this->publishId}. Leaving entry as-is.");
+            // Mark as failed — polling timed out
+            $entry->update([
+                'status'     => 'failed',
+                'last_error' => 'TikTok publish polling timed out after ' . self::MAX_POLLS . ' attempts. Check TikTok Studio for actual status.',
+            ]);
+            Log::warning("[TikTok] PollPublishStatus: max polls reached for publish_id={$this->publishId}. Marked entry as failed.");
             SystemEvent::create([
-                'level'   => 'warning',
-                'message' => "[TikTok] Publish status unconfirmed after " . self::MAX_POLLS . " polls for \"{$entry->title}\" — TikTok may still be processing.",
+                'event_type'  => 'tiktok_poll_timeout',
+                'severity'    => 'warning',
+                'source'      => 'poll_tiktok_publish_status',
+                'entity_id'   => (string) $entry->id,
+                'entity_type' => 'content_calendar',
+                'message'     => "[TikTok] Publish polling timed out after " . self::MAX_POLLS . " polls for \"{$entry->title}\" — marked failed",
+                'occurred_at' => now(),
             ]);
             return;
         }

@@ -34,6 +34,9 @@ abstract class BaseAgent
     /** Minimum RAG similarity score to include a chunk. */
     private float $ragThreshold = 0.75;
 
+    /** Tools whose failure warrants immediate Telegram notification. */
+    protected array $criticalTools = ['publish_content', 'create_content_calendar'];
+
     /** Max tool retries on failure. */
     private int $toolMaxRetries = 2;
 
@@ -393,7 +396,11 @@ abstract class BaseAgent
             }
         }
 
-        // All retries exhausted — return fallback
+        // All retries exhausted — notify via Telegram if this is a critical tool
+        if (in_array($name, $this->criticalTools)) {
+            $this->notifyUser($job, "⚠️ *Critical tool failure* in *{$this->agentType}*: `{$name}` failed after {$this->toolMaxRetries} retries.\nError: " . \Illuminate\Support\Str::limit($lastError, 200));
+        }
+
         $fallback = $this->toolResult(false, null, "Tool {$name} failed after {$this->toolMaxRetries} retries: {$lastError}");
         return [$fallback, false, $lastError];
     }

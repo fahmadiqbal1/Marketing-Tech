@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\IngestGitHubRepo;
+use App\Jobs\RunAgentJob;
+use App\Models\JobPosting;
 use App\Models\AgentJob;
 use App\Models\Campaign;
 use App\Models\Candidate;
@@ -181,6 +183,49 @@ class DashboardController extends Controller
         }
     }
 
+    public function apiCandidateApply(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'job_id'       => 'required|integer|exists:job_postings,id',
+            'name'         => 'required|string|max:255',
+            'email'        => 'required|email|max:255',
+            'phone'        => 'nullable|string|max:50',
+            'cv_raw'       => 'required|string|min:50',
+            'linkedin_url' => 'nullable|url|max:500',
+        ]);
+
+        $job = JobPosting::findOrFail($data['job_id']);
+
+        $candidate = Candidate::create([
+            'name'           => $data['name'],
+            'email'          => $data['email'],
+            'phone'          => $data['phone'] ?? null,
+            'linkedin_url'   => $data['linkedin_url'] ?? null,
+            'cv_raw'         => $data['cv_raw'],
+            'job_posting_id' => $job->id,
+            'pipeline_stage' => 'applied',
+            'stage_updated_at' => now(),
+            'source'         => 'direct_apply',
+        ]);
+
+        // Dispatch HiringAgent for auto-screening
+        $agentJob = AgentJob::create([
+            'agent_type'  => 'hiring',
+            'status'      => 'pending',
+            'instruction' => "Screen new applicant {$candidate->name} (ID:{$candidate->id}) for job '{$job->title}' (ID:{$job->id}). Parse their CV, score them against requirements, and update pipeline stage accordingly. Notify via Telegram with score and decision.",
+            'task_type'   => 'screening',
+            'metadata'    => ['candidate_id' => $candidate->id, 'job_id' => $job->id],
+        ]);
+
+        RunAgentJob::dispatch($agentJob->id)->onQueue('hiring');
+
+        return response()->json([
+            'ok'           => true,
+            'candidate_id' => $candidate->id,
+            'message'      => 'Application received. Our team will review and be in touch shortly.',
+        ], 201);
+    }
+
     // ── API: Content ──────────────────────────────────────────────────
 
     public function apiContent(Request $request): JsonResponse
@@ -249,6 +294,13 @@ class DashboardController extends Controller
             ->groupBy('agent_type')
             ->pluck('cnt', 'agent_type');
 
+        // Current running job per agent (for live progress display) — single query, no N+1
+        $currentJobs = AgentJob::where('status', 'running')
+            ->latest('started_at')
+            ->get(['id', 'agent_type', 'instruction', 'steps_taken', 'started_at'])
+            ->groupBy('agent_type')
+            ->map(fn ($jobs) => $jobs->first());
+
         // Count knowledge entries per agent.
         // Agents store knowledge under their own name as category (e.g. 'content', 'marketing').
         // AgentSkillsSeeder also stores entries under 'agent-skills' with title "Agent Skills: {Name}".
@@ -285,6 +337,12 @@ class DashboardController extends Controller
                 'knowledge_count' => (int) ($knowledgeCounts[$name] ?? 0) + (int) ($skillCounts[strtolower($name)] ?? 0),
                 'recent_steps'    => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
                 'active_jobs'     => (int) ($runningPerAgent[$name] ?? 0),
+                'current_job'     => ($cj = $currentJobs->get($name)) ? [
+                    'id'          => $cj->id,
+                    'instruction' => $cj->instruction,
+                    'steps_taken' => (int) $cj->steps_taken,
+                    'started_at'  => $cj->started_at,
+                ] : null,
             ];
         }
 
@@ -1086,6 +1144,15 @@ class DashboardController extends Controller
         return response()->json($entries);
     }
 
+    private const PLATFORM_CHAR_LIMITS = [
+        'twitter'   => 280,
+        'tiktok'    => 2200,
+        'linkedin'  => 3000,
+        'instagram' => 2200,
+        'facebook'  => 63206,
+        'youtube'   => 5000,
+    ];
+
     public function apiCreateCalendarEntry(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -1098,6 +1165,17 @@ class DashboardController extends Controller
             'hashtags'      => 'nullable|array',
             'metadata'      => 'nullable|array',
         ]);
+
+        // Character limit validation
+        if (! empty($validated['draft_content']) && isset(self::PLATFORM_CHAR_LIMITS[$validated['platform']])) {
+            $limit = self::PLATFORM_CHAR_LIMITS[$validated['platform']];
+            $count = mb_strlen($validated['draft_content'], 'UTF-8');
+            if ($count > $limit) {
+                return response()->json([
+                    'error' => ucfirst($validated['platform']) . " posts must be under {$limit} characters (currently {$count})",
+                ], 422);
+            }
+        }
 
         // Validate platform/content_type combo
         $invalid = [
@@ -1145,6 +1223,17 @@ class DashboardController extends Controller
             'hashtags'             => 'nullable|array',
             'metadata'             => 'nullable|array',
         ]);
+
+        // Character limit validation on update
+        if (! empty($validated['draft_content']) && isset(self::PLATFORM_CHAR_LIMITS[$entry->platform])) {
+            $limit = self::PLATFORM_CHAR_LIMITS[$entry->platform];
+            $count = mb_strlen($validated['draft_content'], 'UTF-8');
+            if ($count > $limit) {
+                return response()->json([
+                    'error' => ucfirst($entry->platform) . " posts must be under {$limit} characters (currently {$count})",
+                ], 422);
+            }
+        }
 
         // Scheduling conflict check on reschedule
         if (! empty($validated['scheduled_at'])) {
@@ -1331,7 +1420,15 @@ class DashboardController extends Controller
 
     public function apiSocialAccounts(): JsonResponse
     {
-        $accounts = SocialAccount::orderBy('platform')->get()->makeVisible(['platform_user_id', 'token_expires_at', 'last_error', 'last_synced_at']);
+        $accounts = SocialAccount::orderBy('platform')
+            ->get()
+            ->makeVisible(['platform_user_id', 'token_expires_at', 'last_error', 'last_synced_at'])
+            ->map(function ($account) {
+                $data = $account->toArray();
+                $data['token_expires_soon'] = $account->token_expires_at
+                    && $account->token_expires_at->lt(now()->addDays(3));
+                return $data;
+            });
 
         return response()->json(['data' => $accounts]);
     }

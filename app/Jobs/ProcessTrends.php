@@ -92,7 +92,7 @@ class ProcessTrends implements ShouldQueue
             // Dispatch ContentAgent with task_type=social
             $runningJobs = AgentJob::whereIn('status', ['pending', 'running'])->count();
             if ($runningJobs < 5) {
-                AgentJob::create([
+                $agentJob = AgentJob::create([
                     'agent_type'        => 'content',
                     'agent_class'       => \App\Agents\ContentAgent::class,
                     'task_type'         => 'social',
@@ -110,7 +110,12 @@ class ProcessTrends implements ShouldQueue
                 'draft_content'     => null,
                 'status'            => 'draft',
                 'moderation_status' => 'pending', // ALWAYS pending — never auto-publish trends
-                'metadata'          => ['source' => 'process_trends', 'topic' => $topic, 'frequency' => $frequency],
+                'metadata'          => [
+                    'source'              => 'process_trends',
+                    'topic'               => $topic,
+                    'frequency'           => $frequency,
+                    'source_agent_job_id' => $agentJob->id ?? null,
+                ],
             ]);
 
             // 12h cooldown per platform+topic

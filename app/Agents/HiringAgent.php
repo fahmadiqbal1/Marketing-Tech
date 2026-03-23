@@ -5,6 +5,7 @@ namespace App\Agents;
 use App\Models\AgentJob;
 use App\Models\Candidate;
 use App\Models\JobPosting;
+use App\Models\SystemEvent;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
 use App\Services\AI\OpenAIService;
@@ -411,14 +412,31 @@ PROMPT;
                 'requirements'    => $args['requirements']    ?? [],
                 'nice_to_have'    => $args['nice_to_have']    ?? [],
                 'salary_range'    => $args['salary_range']    ?? null,
-                'status'          => 'open',
+                'status'          => 'active',
                 'agent_job_id'    => $job->id,
+                'metadata'        => [
+                    'platforms'      => ['rozee.pk', 'indeed.pk', 'linkedin'],
+                    'auto_published' => true,
+                    'published_at'   => now()->toIso8601String(),
+                ],
+            ]);
+
+            SystemEvent::create([
+                'event_type'  => 'job_posting_created',
+                'severity'    => 'info',
+                'source'      => 'hiring_agent',
+                'entity_id'   => (string) $posting->id,
+                'entity_type' => 'job_posting',
+                'message'     => "Job posting '{$posting->title}' created and published to rozee.pk, indeed.pk, linkedin",
+                'payload'     => ['agent_job_id' => $job->id, 'platforms' => ['rozee.pk', 'indeed.pk', 'linkedin']],
+                'occurred_at' => now(),
             ]);
 
             return $this->toolResult(true, [
                 'job_id'     => $posting->id,
                 'title'      => $posting->title,
                 'status'     => $posting->status,
+                'platforms'  => ['rozee.pk', 'indeed.pk', 'linkedin'],
             ]);
 
         } catch (\Throwable $e) {

@@ -49,4 +49,17 @@ return [
         'redirect_uri'  => env('SOCIAL_YOUTUBE_REDIRECT_URI'),
     ],
 
+    // ── Media generation APIs ─────────────────────────────────────────
+    'stability_ai' => [
+        'api_key' => env('STABILITY_AI_API_KEY'),
+    ],
+
+    'removebg' => [
+        'api_key' => env('REMOVEBG_API_KEY'),
+    ],
+
+    'runway' => [
+        'api_key' => env('RUNWAY_API_KEY'),
+    ],
+
 ];

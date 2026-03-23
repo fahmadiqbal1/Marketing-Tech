@@ -36,6 +36,11 @@ class TelegramController extends Controller
             return response()->json(['ok' => true]);
         }
 
+        // Extract chat_id before try so we can notify on failure
+        $chatId = $update['message']['chat']['id']
+            ?? $update['callback_query']['message']['chat']['id']
+            ?? null;
+
         try {
             // Dispatch to async handler — never block the webhook
             $this->bot->handleUpdate($update);
@@ -45,6 +50,14 @@ class TelegramController extends Controller
                 'error'     => $e->getMessage(),
                 'update_id' => $update['update_id'],
             ]);
+            // Notify the user so they know their command failed
+            if ($chatId) {
+                try {
+                    $this->bot->sendMessage((string) $chatId, "⚠️ Sorry, an internal error occurred processing your request. Please try again.");
+                } catch (\Throwable) {
+                    // Suppress — don't let notification failure affect response
+                }
+            }
         }
 
         return response()->json(['ok' => true]);

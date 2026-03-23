@@ -145,6 +145,12 @@
                             <div x-show="editEntry.moderation_status === 'pending'" class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-300">
                                 Awaiting moderation approval
                             </div>
+                            <template x-if="editEntry.status === 'failed' && editEntry.last_error">
+                                <div class="rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-300 flex items-start gap-2">
+                                    <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    <span x-text="'Publish failed: ' + editEntry.last_error"></span>
+                                </div>
+                            </template>
                             <div class="flex gap-2 flex-wrap">
                                 <button @click="saveEntry()" :disabled="saving" class="btn-primary flex-1 text-sm py-2" x-text="saving ? 'Saving…' : 'Save'"></button>
                                 <template x-if="editEntry.id && editEntry.status !== 'published'">
@@ -225,6 +231,12 @@
 
                         <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').last_error">
                             <p class="text-xs text-red-400 mb-2 bg-red-500/10 rounded px-2 py-1 truncate" x-text="accountFor('{{ $platform }}').last_error"></p>
+                        </template>
+
+                        <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').token_expires_soon">
+                            <p class="text-xs text-amber-400 mb-2 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-1">
+                                ⚠ Token expiring soon — reconnect to avoid interruptions
+                            </p>
                         </template>
 
                         @if($platform === 'linkedin')

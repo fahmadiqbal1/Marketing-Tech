@@ -42,6 +42,11 @@
 | 31 | social | Instagram OAuth lacked CSRF state — getAuthorizationUrl() must return array{url,state} for ALL 6 platforms (Instagram was returning string) | 2026-03-23 | Audit |
 | 32 | jobs | Social jobs need public string \$queue declared on the class; relying solely on Schedule::job($j, 'queue') means direct dispatch falls to 'default' | 2026-03-23 | Audit |
 | 33 | frontend | Never use Math.random() for chart data — replace with real API call; viewDetail() must fetch /campaigns/{id}/detail to drive chart | 2026-03-23 | Audit |
+| 34 | agents | BaseAgent.$criticalTools defines tools that trigger Telegram notification on exhausted retries — override per agent subclass as needed | 2026-03-23 | Phase 10 |
+| 35 | social | SocialCredential.client_id/client_secret use 'encrypted' cast — validateCredentials() must decrypt via model attribute, never raw DB value | 2026-03-23 | Phase 10 |
+| 36 | hiring | PruneRejectedCandidates uses stage_updated_at (not updated_at) for 30-day retention — ensure stage_updated_at is always set on pipeline transitions | 2026-03-23 | Phase 10 |
+| 37 | media | Runway Gen-3 video generation is synchronous polling — max 60s (12×5s) within tool; long videos need async job instead | 2026-03-23 | Phase 10 |
+| 38 | controller | mb_strlen($content, 'UTF-8') for platform char limits — emojis count as 2 bytes in strlen() but 1 char in mb_strlen; always use mb variant | 2026-03-23 | Phase 10 |
 
 ---
 
@@ -71,6 +76,17 @@
 - C2: Campaign detail chart → real agent-runs/outputs data (apiCampaignDetail); Delete+Reject buttons in calendar modal; video/short/live content types; resumeCampaign() JS method
 - C3: approveEntry() try/catch; moderation_status index migration; $queue on all 5 social jobs
 - Audit identified 3 critical, 3 high, 4 medium, 3 low issues; all C/H/M resolved except RBAC (deferred)
+
+### 2026-03-23 — Phase 10: Final Launch Implementation
+- Social credential UI (Settings tab) with per-platform cards, rollback-safe save+verify, health badges — complete
+- Pipeline agent cards enhanced: current_job field, progress bar, idle state, 5-step feed
+- HiringAgent: platform metadata on job posts, PruneRejectedCandidates job (30-day retention), apiCandidateApply endpoint
+- MediaAgent: generate_image (Stability AI), remove_background (Remove.bg), enhance_image (Stability AI upscale), generate_video (Runway Gen-3)
+- Pipeline integrity: PLATFORM_CHAR_LIMITS with mb_strlen, TikTok poll timeout marks entry failed, BaseAgent critical tool Telegram notify
+- ProcessTrends: source_agent_job_id linkage in calendar metadata; TelegramController: user error notification in catch block
+- Calendar modal: last_error red error box for failed entries
+- Credential health: RefreshCredentialStatus nightly job; token_expires_soon field in apiSocialAccounts; amber badge in accounts tab
+- GeneratedOutput::contentVariation() BelongsTo relationship added
 
 ### 2026-03-23 — Phase 9F (Social Platform Hardening — 6 commits)
 - Moderation gate: ContentCalendar.scheduledNow() requires moderation_status IN (approved, auto_approved)

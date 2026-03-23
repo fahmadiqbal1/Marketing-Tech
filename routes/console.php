@@ -1,6 +1,8 @@
 <?php
 
 use App\Jobs\AutoReplenishContent;
+use App\Jobs\PruneRejectedCandidates;
+use App\Jobs\RefreshCredentialStatus;
 use App\Jobs\DispatchScheduledPosts;
 use App\Jobs\FetchSocialMetrics;
 use App\Jobs\ProcessTrends;
@@ -28,3 +30,9 @@ Schedule::job(new ProcessTrends, 'low')->everyFourHours();
 
 // Social: refresh OAuth tokens expiring within 24h (queue: low)
 Schedule::job(new RefreshSocialTokens, 'low')->dailyAt('03:00');
+
+// Hiring: purge rejected candidates older than 30 days (GDPR/retention, queue: low)
+Schedule::job(new PruneRejectedCandidates, 'low')->dailyAt('01:00');
+
+// Social credentials: nightly health check — deactivate stale creds (queue: low)
+Schedule::job(new RefreshCredentialStatus, 'low')->dailyAt('02:00');

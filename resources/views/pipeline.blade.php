@@ -130,6 +130,34 @@
                           title="Add entries in the Knowledge tab">⚠ no knowledge</span>
                 </div>
 
+                {{-- Current Task / Idle State --}}
+                <template x-if="agent.current_job">
+                    <div class="mb-3 p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot flex-shrink-0"></span>
+                            <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">Working on</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed"
+                           x-text="agent.current_job.instruction && agent.current_job.instruction.length > 100 ? agent.current_job.instruction.substring(0,100) + '…' : (agent.current_job.instruction || 'Processing…')"></p>
+                        <div class="mt-2">
+                            <div class="flex justify-between text-xs text-slate-500 mb-1">
+                                <span x-text="'Step ' + agent.current_job.steps_taken + ' / ' + agent.max_steps"></span>
+                                <span x-text="Math.round((agent.current_job.steps_taken / agent.max_steps) * 100) + '%'"></span>
+                            </div>
+                            <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                                     :style="'width:' + Math.min(Math.round((agent.current_job.steps_taken / agent.max_steps) * 100), 100) + '%'"></div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="!agent.current_job && agent.active_jobs === 0">
+                    <div class="mb-3 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-slate-600 flex-shrink-0"></span>
+                        <span class="text-xs text-slate-500 italic">Idle — waiting for tasks</span>
+                    </div>
+                </template>
+
                 {{-- Capabilities / Tools --}}
                 <div class="mb-3">
                     <p class="text-xs font-semibold text-slate-500 uppercase mb-1.5">Capabilities</p>
@@ -175,7 +203,7 @@
                 <div x-show="agent.recent_steps && agent.recent_steps.length > 0">
                     <p class="text-xs font-semibold text-slate-500 uppercase mb-1.5">Recent Activity</p>
                     <div class="space-y-1">
-                        <template x-for="(step, idx) in agent.recent_steps.slice(0,3)" :key="idx">
+                        <template x-for="(step, idx) in agent.recent_steps.slice(0,5)" :key="idx">
                             <div class="flex items-center gap-2 text-xs py-1 px-2 rounded-lg bg-slate-900/60">
                                 <span class="badge py-0 text-xs"
                                       :class="{

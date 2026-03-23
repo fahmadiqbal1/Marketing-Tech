@@ -35,4 +35,9 @@ class GeneratedOutput extends Model
     {
         return $this->belongsTo(AgentJob::class, 'agent_job_id');
     }
+
+    public function contentVariation(): BelongsTo
+    {
+        return $this->belongsTo(ContentVariation::class, 'content_variation_id');
+    }
 }
