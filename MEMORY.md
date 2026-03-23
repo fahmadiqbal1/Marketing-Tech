@@ -37,6 +37,11 @@
 | 26 | social | ensurePublicUrl() converts local storage paths to S3 temporaryUrl (2h); falls back to disk->url() for local disk | 2026-03-23 | Phase 9F |
 | 27 | social | SocialAccount.access_token + refresh_token use 'encrypted' cast — stored as Laravel Crypt ciphertext, never plaintext in DB | 2026-03-23 | Phase 9F |
 | 28 | controller | PATCH /api/social-accounts/{id} updates only metadata (merge, not replace) — use apiPatch() JS helper | 2026-03-23 | Phase 9F |
+| 29 | horizon | Always add supervisor-{queue} for every named queue jobs use — missing supervisor-social caused DispatchScheduledPosts to silently stall | 2026-03-23 | Audit |
+| 30 | controller | POST /api/campaigns route was missing despite UI calling it — always verify route exists before marking feature done | 2026-03-23 | Audit |
+| 31 | social | Instagram OAuth lacked CSRF state — getAuthorizationUrl() must return array{url,state} for ALL 6 platforms (Instagram was returning string) | 2026-03-23 | Audit |
+| 32 | jobs | Social jobs need public string \$queue declared on the class; relying solely on Schedule::job($j, 'queue') means direct dispatch falls to 'default' | 2026-03-23 | Audit |
+| 33 | frontend | Never use Math.random() for chart data — replace with real API call; viewDetail() must fetch /campaigns/{id}/detail to drive chart | 2026-03-23 | Audit |
 
 ---
 
@@ -60,6 +65,12 @@
 - Added Self-Correction Protocol to root CLAUDE.md
 - Created this MEMORY.md with 12 active lessons seeded from Phase 5–9 knowledge
 - Incorporated 18 improvement points into Phase 9 plan (11 added, 7 deferred to Phase 10)
+
+### 2026-03-23 — Launch Readiness Audit (3 commits)
+- C1: POST /api/campaigns route + apiCreateCampaign/Pause/Resume; Instagram CSRF state; supervisor-social in Horizon
+- C2: Campaign detail chart → real agent-runs/outputs data (apiCampaignDetail); Delete+Reject buttons in calendar modal; video/short/live content types; resumeCampaign() JS method
+- C3: approveEntry() try/catch; moderation_status index migration; $queue on all 5 social jobs
+- Audit identified 3 critical, 3 high, 4 medium, 3 low issues; all C/H/M resolved except RBAC (deferred)
 
 ### 2026-03-23 — Phase 9F (Social Platform Hardening — 6 commits)
 - Moderation gate: ContentCalendar.scheduledNow() requires moderation_status IN (approved, auto_approved)
