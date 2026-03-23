@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
+use App\Models\Campaign;
 use App\Models\Candidate;
 use App\Models\ContentCalendar;
 use App\Models\ContentItem;
@@ -128,6 +129,37 @@ class DashboardController extends Controller
     public function apiCampaigns(): JsonResponse
     {
         return response()->json($this->stats->getCampaigns());
+    }
+
+    public function apiCreateCampaign(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'        => 'required|string|max:255',
+            'type'        => 'required|in:email,social,sms,push,ads',
+            'audience'    => 'nullable|string|max:255',
+            'subject'     => 'nullable|string|max:500',
+            'schedule_at' => 'nullable|date',
+        ]);
+
+        $campaign = Campaign::create(array_merge($validated, ['status' => 'draft']));
+
+        return response()->json($campaign, 201);
+    }
+
+    public function apiPauseCampaign(string $id): JsonResponse
+    {
+        $campaign = Campaign::findOrFail($id);
+        $campaign->update(['status' => 'paused']);
+
+        return response()->json($campaign->fresh());
+    }
+
+    public function apiResumeCampaign(string $id): JsonResponse
+    {
+        $campaign = Campaign::findOrFail($id);
+        $campaign->update(['status' => 'active']);
+
+        return response()->json($campaign->fresh());
     }
 
     // ── API: Candidates ───────────────────────────────────────────────
@@ -660,7 +692,10 @@ class DashboardController extends Controller
             return redirect('/dashboard/social')->with('error', 'Instagram API credentials are not configured. Set SOCIAL_INSTAGRAM_CLIENT_ID and SOCIAL_INSTAGRAM_CLIENT_SECRET in .env');
         }
 
-        return redirect($instagram->getAuthorizationUrl());
+        $data = $instagram->getAuthorizationUrl();
+        session(['oauth_instagram_state' => $data['state']]);
+
+        return redirect($data['url']);
     }
 
     public function socialInstagramCallback(Request $request): \Illuminate\Http\RedirectResponse
@@ -668,6 +703,11 @@ class DashboardController extends Controller
         if ($request->has('error')) {
             return redirect('/dashboard/social')->with('error', 'Instagram authorization denied: ' . $request->get('error_description'));
         }
+
+        if ($request->get('state') !== session('oauth_instagram_state')) {
+            return redirect('/dashboard/social')->with('error', 'Instagram OAuth state mismatch — possible CSRF.');
+        }
+        session()->forget('oauth_instagram_state');
 
         $code      = $request->get('code');
         $instagram = new InstagramService();

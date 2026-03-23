@@ -25,14 +25,18 @@ class InstagramService implements SocialPlatformInterface
     /**
      * Build the OAuth redirect URL for Instagram authorization.
      */
-    public function getAuthorizationUrl(): string
+    public function getAuthorizationUrl(): array
     {
-        return self::OAUTH_URL . '?' . http_build_query([
+        $state = bin2hex(random_bytes(16));
+        $url   = self::OAUTH_URL . '?' . http_build_query([
             'client_id'     => config('services.instagram.client_id'),
             'redirect_uri'  => config('services.instagram.redirect_uri'),
             'scope'         => 'instagram_basic,instagram_content_publish,instagram_manage_insights',
             'response_type' => 'code',
+            'state'         => $state,
         ]);
+
+        return ['url' => $url, 'state' => $state];
     }
 
     /**

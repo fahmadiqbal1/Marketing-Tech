@@ -127,6 +127,9 @@
                                         <option value="story">Story</option>
                                         <option value="carousel">Carousel</option>
                                         <option value="thread">Thread</option>
+                                        <option value="video">Video</option>
+                                        <option value="short">Short</option>
+                                        <option value="live">Live</option>
                                         <option value="ad">Ad</option>
                                     </select>
                                 </div>
@@ -142,13 +145,21 @@
                             <div x-show="editEntry.moderation_status === 'pending'" class="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-300">
                                 Awaiting moderation approval
                             </div>
-                            <div class="flex gap-2">
+                            <div class="flex gap-2 flex-wrap">
                                 <button @click="saveEntry()" :disabled="saving" class="btn-primary flex-1 text-sm py-2" x-text="saving ? 'Saving…' : 'Save'"></button>
                                 <template x-if="editEntry.id && editEntry.status !== 'published'">
                                     <button @click="publishEntry(editEntry.id)" :disabled="publishing" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-4 text-sm py-2 transition-colors" x-text="publishing ? 'Publishing…' : 'Publish'"></button>
                                 </template>
                                 <template x-if="editEntry.id && editEntry.moderation_status === 'pending'">
                                     <button @click="approveEntry(editEntry.id)" class="bg-violet-600 hover:bg-violet-500 text-white rounded-lg px-4 text-sm py-2 transition-colors">Approve</button>
+                                </template>
+                                <template x-if="editEntry.id && editEntry.moderation_status === 'pending'">
+                                    <button @click="rejectEntry(editEntry.id)" class="bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-600/30 rounded-lg px-3 text-sm py-2 transition-colors">Reject</button>
+                                </template>
+                                <template x-if="editEntry.id && editEntry.status !== 'published'">
+                                    <button @click="deleteEntry(editEntry.id)" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg px-3 text-sm py-2 transition-colors" title="Delete entry">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                    </button>
                                 </template>
                             </div>
                             <div x-show="modalError" x-text="modalError" class="text-red-400 text-sm"></div>
@@ -485,9 +496,29 @@ function calendarComponent() {
         },
 
         async approveEntry(id) {
-            await apiPost(`/dashboard/api/content-calendar/${id}/approve`, {});
-            this.showModal = false;
-            await this.load();
+            try {
+                await apiPost(`/dashboard/api/content-calendar/${id}/approve`, {});
+                this.showModal = false;
+                await this.load();
+            } catch (e) { this.modalError = e.message; }
+        },
+
+        async rejectEntry(id) {
+            if (! confirm('Reject this entry? It will be moved back to draft.')) return;
+            try {
+                await apiPost(`/dashboard/api/content-calendar/${id}/reject`, {});
+                this.showModal = false;
+                await this.load();
+            } catch (e) { this.modalError = e.message; }
+        },
+
+        async deleteEntry(id) {
+            if (! confirm('Delete this entry? This cannot be undone.')) return;
+            try {
+                await apiDelete(`/dashboard/api/content-calendar/${id}`);
+                this.showModal = false;
+                await this.load();
+            } catch (e) { this.modalError = e.message; }
         },
     };
 }
