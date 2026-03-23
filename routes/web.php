@@ -114,6 +114,9 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
 
         // ── Write / action endpoints — 10 req/min ────────────────────────────────
         Route::middleware('throttle:10,1')->group(function () {
+            Route::post('/campaigns',                           [DashboardController::class,      'apiCreateCampaign']);
+            Route::post('/campaigns/{id}/pause',               [DashboardController::class,      'apiPauseCampaign']);
+            Route::post('/campaigns/{id}/resume',              [DashboardController::class,      'apiResumeCampaign']);
             Route::post('/workflows/{id}/approve',              [DashboardController::class,      'apiWorkflowApprove']);
             Route::post('/workflows/{id}/cancel',               [DashboardController::class,      'apiWorkflowCancel']);
             Route::post('/workflows/{id}/retry',                [DashboardController::class,      'apiWorkflowRetry']);

@@ -133,6 +133,15 @@ return [
                 'tries'        => 3,
                 'timeout'      => 120,
             ],
+            // Social posting: DispatchScheduledPosts runs every minute on this queue
+            'supervisor-social' => [
+                'connection'   => 'redis',
+                'queue'        => ['social'],
+                'balance'      => 'simple',
+                'processes'    => 3,
+                'tries'        => 3,
+                'timeout'      => 120,
+            ],
             // Low-priority background ingestion (GitHub, bulk imports) — isolated
             'supervisor-low' => [
                 'connection'   => 'redis',
@@ -148,7 +157,7 @@ return [
         'local' => [
             'supervisor-1' => [
                 'connection'   => 'redis',
-                'queue'        => ['agents', 'default', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge'],
+                'queue'        => ['agents', 'default', 'marketing', 'media', 'hiring', 'content', 'growth', 'knowledge', 'social'],
                 'balance'      => 'auto',
                 'minProcesses' => 2,
                 'maxProcesses' => 8,
