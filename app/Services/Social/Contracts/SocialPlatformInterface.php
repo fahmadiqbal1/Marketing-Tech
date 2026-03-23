@@ -30,4 +30,10 @@ interface SocialPlatformInterface
      * Returns false for stub implementations.
      */
     public function isConfigured(): bool;
+
+    /**
+     * Validate credentials by making a real API call.
+     * Returns ['ok' => bool, 'error' => ?string, 'warning' => ?string].
+     */
+    public function validateCredentials(string $clientId, string $clientSecret): array;
 }

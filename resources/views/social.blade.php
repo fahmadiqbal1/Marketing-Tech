@@ -35,7 +35,7 @@
     {{-- Tab navigation --}}
     <div x-data="{ activeTab: 'calendar' }" class="space-y-6">
         <div class="flex gap-2 border-b border-slate-700/60 pb-0">
-            @foreach([['calendar','Calendar'],['accounts','Accounts'],['hashtags','Hashtags'],['trends','Trends']] as [$tab,$label])
+            @foreach([['calendar','Calendar'],['accounts','Accounts'],['hashtags','Hashtags'],['trends','Trends'],['settings','Settings']] as [$tab,$label])
             <button @click="activeTab = '{{ $tab }}'"
                 :class="activeTab === '{{ $tab }}' ? 'border-b-2 border-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'"
                 class="px-4 py-2 text-sm font-medium transition-colors -mb-px">{{ $label }}</button>
@@ -176,7 +176,7 @@
                 {{-- Info banner: all platforms use real OAuth --}}
                 <div class="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-xs text-sky-300">
                     <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <span>All platforms use real OAuth 2.0. Click <strong>Connect</strong> to authorise via the official platform login. Credentials must be set in <code class="bg-slate-800 px-1 rounded">.env</code> first.</span>
+                    <span>All platforms use real OAuth 2.0. Click <strong>Connect</strong> to authorise via the official platform login. Configure app credentials in the <strong>Settings</strong> tab first.</span>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -387,6 +387,110 @@
                     <div x-show="insights.length === 0" class="text-center py-8 text-slate-500 text-sm">
                         No insights yet. Import knowledge base content to generate trend analysis.
                     </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- Settings Tab — Platform Credentials --}}
+        <div x-show="activeTab === 'settings'" x-cloak>
+            <div x-data="credentialsComponent()" x-init="init()" class="space-y-4">
+
+                <div class="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-xs text-amber-300">
+                    <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span>Enter your OAuth app credentials from each platform's developer portal. Credentials are encrypted at rest and validated via real API calls before saving.</span>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    @foreach([
+                        ['instagram', 'Instagram', '#E1306C', 'https://developers.facebook.com/apps', 'Meta for Developers'],
+                        ['facebook',  'Facebook',  '#1877F2', 'https://developers.facebook.com/apps', 'Meta for Developers'],
+                        ['twitter',   'Twitter/X', '#1DA1F2', 'https://developer.twitter.com/en/portal/dashboard', 'Twitter Developer Portal'],
+                        ['linkedin',  'LinkedIn',  '#0077B5', 'https://www.linkedin.com/developers/apps', 'LinkedIn Developers'],
+                        ['tiktok',    'TikTok',    '#EE1D52', 'https://developers.tiktok.com/', 'TikTok for Developers'],
+                        ['youtube',   'YouTube',   '#FF0000', 'https://console.cloud.google.com/apis/credentials', 'Google Cloud Console'],
+                    ] as [$platform, $label, $color, $helpUrl, $helpLabel])
+                    <div class="stat-card relative overflow-hidden">
+                        <div class="absolute top-0 left-0 right-0 h-0.5" style="background: {{ $color }}"></div>
+
+                        <div class="flex items-start justify-between mb-3 mt-1">
+                            <div>
+                                <p class="text-sm font-semibold text-white">{{ $label }}</p>
+                                <a href="{{ $helpUrl }}" target="_blank" class="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                                    Get credentials from {{ $helpLabel }} &rarr;
+                                </a>
+                            </div>
+                            {{-- Health badge --}}
+                            <template x-if="credFor('{{ $platform }}')?.is_active">
+                                <span class="badge bg-emerald-500/20 text-emerald-400">Verified</span>
+                            </template>
+                            <template x-if="credFor('{{ $platform }}') && credFor('{{ $platform }}').is_configured && !credFor('{{ $platform }}').is_active">
+                                <span class="badge bg-amber-500/20 text-amber-400">Needs attention</span>
+                            </template>
+                            <template x-if="!credFor('{{ $platform }}')?.is_configured">
+                                <span class="badge bg-red-500/20 text-red-400">Not configured</span>
+                            </template>
+                        </div>
+
+                        {{-- Callback URL --}}
+                        <div class="mb-3">
+                            <label class="block text-xs text-slate-500 mb-1">Authorized Redirect URI</label>
+                            <div class="flex gap-1">
+                                <input type="text" readonly
+                                    :value="credFor('{{ $platform }}')?.callback_url || ''"
+                                    class="flex-1 bg-slate-900/60 border border-slate-700/50 rounded-lg px-3 py-1.5 text-xs text-slate-300 font-mono">
+                                <button @click="copyUrl('{{ $platform }}')"
+                                    class="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300 transition-colors shrink-0">Copy</button>
+                            </div>
+                            <div class="mt-1.5 flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/8 px-2.5 py-1.5">
+                                <svg class="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span class="text-[11px] text-amber-300/80">This exact URL must be added to your app's Authorized Redirect URIs or OAuth will fail.</span>
+                            </div>
+                        </div>
+
+                        {{-- Credential inputs --}}
+                        <div class="space-y-2 mb-3">
+                            <input type="text"
+                                x-model="forms['{{ $platform }}'].client_id"
+                                placeholder="{{ $platform === 'tiktok' ? 'Client Key' : 'App ID / Client ID' }}"
+                                class="w-full bg-slate-900/60 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-violet-500/50 focus:outline-none">
+                            <input type="password"
+                                x-model="forms['{{ $platform }}'].client_secret"
+                                placeholder="App Secret / Client Secret"
+                                class="w-full bg-slate-900/60 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-violet-500/50 focus:outline-none">
+                        </div>
+
+                        {{-- Error / warning display --}}
+                        <div x-show="errors['{{ $platform }}']" class="mb-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2" x-text="errors['{{ $platform }}']"></div>
+                        <div x-show="warnings['{{ $platform }}']" class="mb-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg px-3 py-2" x-text="warnings['{{ $platform }}']"></div>
+
+                        {{-- Last tested info --}}
+                        <template x-if="credFor('{{ $platform }}')?.last_tested_at">
+                            <p class="text-[11px] text-slate-500 mb-2">Last verified: <span x-text="new Date(credFor('{{ $platform }}').last_tested_at).toLocaleDateString()"></span></p>
+                        </template>
+                        <template x-if="credFor('{{ $platform }}')?.last_test_error">
+                            <p class="text-[11px] text-red-400 mb-2" x-text="'Error: ' + credFor('{{ $platform }}').last_test_error"></p>
+                        </template>
+
+                        {{-- Actions --}}
+                        <div class="flex gap-2">
+                            <button @click="saveCredential('{{ $platform }}')"
+                                :disabled="saving['{{ $platform }}']"
+                                class="flex-1 px-3 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-600/50 disabled:cursor-wait text-white text-xs font-medium rounded-lg transition-colors">
+                                <span x-show="!saving['{{ $platform }}']">Save & Verify</span>
+                                <span x-show="saving['{{ $platform }}']">Verifying...</span>
+                            </button>
+                            <template x-if="credFor('{{ $platform }}')?.is_active">
+                                <a href="/dashboard/social/auth/{{ $platform }}/redirect"
+                                   class="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors">
+                                    Connect
+                                </a>
+                            </template>
+                            <template x-if="!credFor('{{ $platform }}')?.is_active">
+                                <span class="px-3 py-2 bg-slate-700/50 text-slate-500 text-xs rounded-lg cursor-not-allowed" title="Save & verify credentials first">Connect</span>
+                            </template>
+                        </div>
+                    </div>
+                    @endforeach
                 </div>
             </div>
         </div>
@@ -648,6 +752,75 @@ async function apiDelete(url) {
         method: 'DELETE',
         headers: { 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
     }).then(r => r.json());
+}
+
+function credentialsComponent() {
+    const platforms = ['instagram','facebook','twitter','linkedin','tiktok','youtube'];
+    const formDefaults = {};
+    const savingDefaults = {};
+    const errorDefaults = {};
+    const warningDefaults = {};
+    platforms.forEach(p => {
+        formDefaults[p] = { client_id: '', client_secret: '' };
+        savingDefaults[p] = false;
+        errorDefaults[p] = '';
+        warningDefaults[p] = '';
+    });
+
+    return {
+        credentials: [],
+        forms: JSON.parse(JSON.stringify(formDefaults)),
+        saving: { ...savingDefaults },
+        errors: { ...errorDefaults },
+        warnings: { ...warningDefaults },
+
+        async init() { await this.load(); },
+
+        async load() {
+            const r = await apiGet('/dashboard/api/social-credentials');
+            this.credentials = r.credentials ?? [];
+        },
+
+        credFor(platform) {
+            return this.credentials.find(c => c.platform === platform);
+        },
+
+        copyUrl(platform) {
+            const cred = this.credFor(platform);
+            if (cred?.callback_url) {
+                navigator.clipboard.writeText(cred.callback_url);
+            }
+        },
+
+        async saveCredential(platform) {
+            const form = this.forms[platform];
+            if (!form.client_id || !form.client_secret) {
+                this.errors[platform] = 'Both Client ID and Client Secret are required.';
+                return;
+            }
+            this.errors[platform] = '';
+            this.warnings[platform] = '';
+            this.saving[platform] = true;
+            try {
+                const r = await fetch('/dashboard/api/social-credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
+                    body: JSON.stringify({ platform, client_id: form.client_id, client_secret: form.client_secret }),
+                });
+                const data = await r.json();
+                if (!r.ok || data.ok === false) {
+                    this.errors[platform] = data.error || data.message || 'Validation failed';
+                } else {
+                    if (data.warning) this.warnings[platform] = data.warning;
+                    this.forms[platform] = { client_id: '', client_secret: '' };
+                    await this.load();
+                }
+            } catch (e) {
+                this.errors[platform] = 'Network error: ' + e.message;
+            }
+            this.saving[platform] = false;
+        },
+    };
 }
 </script>
 @endpush

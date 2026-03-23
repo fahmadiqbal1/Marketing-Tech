@@ -11,6 +11,8 @@ use App\Models\ContentItem;
 use App\Models\CustomAiPlatform;
 use App\Models\HashtagSet;
 use App\Models\SocialAccount;
+use App\Models\SocialCredential;
+use App\Services\Social\CredentialResolver;
 use App\Services\IterationEngineService;
 use App\Services\Social\SocialPlatformService;
 use App\Services\Social\Platforms\InstagramService;
@@ -1437,6 +1439,86 @@ class DashboardController extends Controller
             'tokens_expiring_soon' => $tokensExpiringSoon,
             'auto_post_enabled'    => config('services.social.auto_post_enabled', false),
             'timestamp'            => now()->toIso8601String(),
+        ]);
+    }
+
+    // ── Social Credential Management ─────────────────────────────────────────
+
+    private const PLATFORM_HELP_URLS = [
+        'instagram' => 'https://developers.facebook.com/apps',
+        'facebook'  => 'https://developers.facebook.com/apps',
+        'twitter'   => 'https://developer.twitter.com/en/portal/dashboard',
+        'linkedin'  => 'https://www.linkedin.com/developers/apps',
+        'tiktok'    => 'https://developers.tiktok.com/',
+        'youtube'   => 'https://console.cloud.google.com/apis/credentials',
+    ];
+
+    public function apiGetSocialCredentials(): JsonResponse
+    {
+        $platforms = SocialPlatformService::platforms();
+
+        $credentials = collect($platforms)->map(function (string $platform) {
+            $cred = SocialCredential::forPlatform($platform);
+            $callbackUrl = config('app.url') . "/dashboard/social/auth/{$platform}/callback";
+
+            return [
+                'platform'        => $platform,
+                'is_configured'   => $cred && ! empty($cred->client_id),
+                'is_active'       => (bool) ($cred->is_active ?? false),
+                'callback_url'    => $callbackUrl,
+                'help_url'        => self::PLATFORM_HELP_URLS[$platform] ?? null,
+                'last_tested_at'  => $cred?->last_tested_at?->toIso8601String(),
+                'last_test_error' => $cred?->last_test_error,
+            ];
+        });
+
+        return response()->json(['credentials' => $credentials]);
+    }
+
+    /**
+     * Atomic save + validate: only writes credentials if real API validation passes.
+     * If validation fails, existing credentials are NOT overwritten (rollback protection).
+     */
+    public function apiSaveSocialCredential(Request $request, SocialPlatformService $social): JsonResponse
+    {
+        $validated = $request->validate([
+            'platform'      => 'required|in:instagram,twitter,linkedin,facebook,tiktok,youtube',
+            'client_id'     => 'required|string|min:3',
+            'client_secret' => 'required|string|min:3',
+        ]);
+
+        $platform     = $validated['platform'];
+        $clientId     = trim($validated['client_id']);
+        $clientSecret = trim($validated['client_secret']);
+
+        // Step 1: Validate credentials via real API call BEFORE writing
+        $driver = $social->driver($platform);
+        $result = $driver->validateCredentials($clientId, $clientSecret);
+
+        if (! $result['ok']) {
+            // Do NOT overwrite existing credentials
+            return response()->json([
+                'ok'    => false,
+                'error' => $result['error'] ?? 'Credential validation failed',
+            ], 422);
+        }
+
+        // Step 2: Validation passed — safe to write
+        SocialCredential::updateOrCreate(
+            ['platform' => $platform],
+            [
+                'client_id'       => $clientId,
+                'client_secret'   => $clientSecret,
+                'is_active'       => true,
+                'last_tested_at'  => now(),
+                'last_test_error' => null,
+            ]
+        );
+
+        return response()->json([
+            'ok'      => true,
+            'warning' => $result['warning'] ?? null,
+            'message' => ucfirst($platform) . ' credentials verified and saved.',
         ]);
     }
 }

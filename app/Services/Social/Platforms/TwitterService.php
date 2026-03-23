@@ -5,16 +5,13 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\CredentialResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Twitter / X API v2 integration.
- *
  * OAuth 2.0 Authorization Code with PKCE (user context).
- * Posting: POST /2/tweets
- * Metrics: GET /2/tweets/{id}?tweet.fields=public_metrics
- * Token refresh: POST /2/oauth2/token (refresh_token grant)
  */
 class TwitterService implements SocialPlatformInterface
 {
@@ -22,10 +19,36 @@ class TwitterService implements SocialPlatformInterface
     private const OAUTH_URL = 'https://twitter.com/i/oauth2/authorize';
     private const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
 
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     public function isConfigured(): bool
     {
-        return ! empty(config('services.twitter.client_id'))
-            && ! empty(config('services.twitter.client_secret'));
+        return ! empty($this->resolver->clientId('twitter'))
+            && ! empty($this->resolver->clientSecret('twitter'));
+    }
+
+    public function validateCredentials(string $clientId, string $clientSecret): array
+    {
+        try {
+            // Twitter app-only OAuth 2.0: client_credentials grant with Basic auth
+            $response = Http::withBasicAuth($clientId, $clientSecret)
+                ->asForm()
+                ->post(self::TOKEN_URL, ['grant_type' => 'client_credentials']);
+
+            if ($response->successful() && $response->json('access_token')) {
+                return ['ok' => true, 'error' => null, 'warning' => null];
+            }
+
+            $error = $response->json('error_description', $response->json('error', 'Invalid credentials'));
+            return ['ok' => false, 'error' => $error, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Connection failed: ' . $e->getMessage(), 'warning' => null];
+        }
     }
 
     public function getAuthorizationUrl(string $codeVerifier): array
@@ -35,8 +58,8 @@ class TwitterService implements SocialPlatformInterface
 
         $url = self::OAUTH_URL . '?' . http_build_query([
             'response_type'         => 'code',
-            'client_id'             => config('services.twitter.client_id'),
-            'redirect_uri'          => config('services.twitter.redirect_uri'),
+            'client_id'             => $this->resolver->clientId('twitter'),
+            'redirect_uri'          => $this->resolver->redirectUri('twitter'),
             'scope'                 => 'tweet.read tweet.write users.read offline.access',
             'state'                 => $state,
             'code_challenge'        => $codeChallenge,
@@ -49,22 +72,18 @@ class TwitterService implements SocialPlatformInterface
     public function exchangeCode(string $code, string $codeVerifier): array
     {
         $response = Http::withBasicAuth(
-            config('services.twitter.client_id'),
-            config('services.twitter.client_secret')
+            $this->resolver->clientId('twitter'),
+            $this->resolver->clientSecret('twitter')
         )->asForm()->post(self::TOKEN_URL, [
             'grant_type'    => 'authorization_code',
             'code'          => $code,
-            'redirect_uri'  => config('services.twitter.redirect_uri'),
+            'redirect_uri'  => $this->resolver->redirectUri('twitter'),
             'code_verifier' => $codeVerifier,
         ])->throw()->json();
 
-        // expires_in is typically 7200s for user access tokens
-        return $response; // access_token, refresh_token, expires_in, scope
+        return $response;
     }
 
-    /**
-     * Post a tweet. Handles thread (content_type='thread') by splitting on \n\n.
-     */
     public function publish(SocialAccount $account, ContentCalendar $entry): array
     {
         if ($account->isTokenExpired()) {
@@ -73,12 +92,10 @@ class TwitterService implements SocialPlatformInterface
 
         $body = $entry->draft_content ?? '';
 
-        // For threads: split on double newline, post as reply chain
         if ($entry->content_type === 'thread') {
             return $this->publishThread($account, $body, $entry->hashtags ?? []);
         }
 
-        // Single tweet: truncate to 280 chars, append hashtags
         $hashtags = collect($entry->hashtags ?? [])->take(3)->implode(' ');
         $text     = $this->truncateTweet($body, $hashtags);
 
@@ -88,7 +105,6 @@ class TwitterService implements SocialPlatformInterface
             ->json();
 
         $postId = $response['data']['id'];
-        $authorId = $account->platform_user_id;
 
         Log::info("[Twitter] Published tweet id={$postId} for calendar entry {$entry->id}");
 
@@ -114,7 +130,6 @@ class TwitterService implements SocialPlatformInterface
             return ['impressions' => 0, 'reach' => 0, 'clicks' => 0, 'engagement' => 0, 'conversions' => 0];
         }
 
-        // public_metrics always available; non_public_metrics requires OAuth user context
         $pub = $response->json('data.public_metrics', []);
         $non = $response->json('data.non_public_metrics', []);
         $org = $response->json('data.organic_metrics', []);
@@ -136,8 +151,8 @@ class TwitterService implements SocialPlatformInterface
         }
 
         $response = Http::withBasicAuth(
-            config('services.twitter.client_id'),
-            config('services.twitter.client_secret')
+            $this->resolver->clientId('twitter'),
+            $this->resolver->clientSecret('twitter')
         )->asForm()->post(self::TOKEN_URL, [
             'grant_type'    => 'refresh_token',
             'refresh_token' => $account->refresh_token,
@@ -162,13 +177,11 @@ class TwitterService implements SocialPlatformInterface
         return $account->fresh();
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
     private function truncateTweet(string $body, string $hashtags): string
     {
         $suffix   = $hashtags ? "\n\n{$hashtags}" : '';
-        $maxBody  = 280 - strlen($suffix);
-        $text     = strlen($body) > $maxBody ? substr($body, 0, $maxBody - 1) . '…' : $body;
+        $maxBody  = 280 - mb_strlen($suffix, 'UTF-8');
+        $text     = mb_strlen($body, 'UTF-8') > $maxBody ? mb_substr($body, 0, $maxBody - 1, 'UTF-8') . '…' : $body;
         return $text . $suffix;
     }
 
@@ -183,10 +196,9 @@ class TwitterService implements SocialPlatformInterface
         $firstId   = null;
 
         foreach ($parts as $i => $part) {
-            // Only append hashtags to the last tweet in the thread
             $text = (array_key_last($parts) === $i && $hashtags)
                 ? $this->truncateTweet($part, collect($hashtags)->take(3)->implode(' '))
-                : substr($part, 0, 280);
+                : mb_substr($part, 0, 280, 'UTF-8');
 
             $payload = ['text' => $text];
             if ($replyToId) {

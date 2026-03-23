@@ -5,19 +5,13 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\CredentialResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
  * LinkedIn Marketing API v2 integration.
- *
  * OAuth 2.0 Authorization Code flow.
- * Posting: POST /v2/ugcPosts (text + optional image)
- * Metrics: GET /v2/organizationalEntityShareStatistics or socialActions
- * Token refresh: POST /v2/accessToken (refresh_token grant — requires r_liteprofile + offline_access)
- *
- * Note: LinkedIn access tokens last 60 days. Refresh tokens last 365 days.
- * Organization (Company Page) tokens require w_organization_social scope.
  */
 class LinkedInService implements SocialPlatformInterface
 {
@@ -25,10 +19,44 @@ class LinkedInService implements SocialPlatformInterface
     private const OAUTH_URL = 'https://www.linkedin.com/oauth/v2/authorization';
     private const TOKEN_URL = 'https://www.linkedin.com/oauth/v2/accessToken';
 
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     public function isConfigured(): bool
     {
-        return ! empty(config('services.linkedin.client_id'))
-            && ! empty(config('services.linkedin.client_secret'));
+        return ! empty($this->resolver->clientId('linkedin'))
+            && ! empty($this->resolver->clientSecret('linkedin'));
+    }
+
+    public function validateCredentials(string $clientId, string $clientSecret): array
+    {
+        try {
+            // Attempt client_credentials grant. LinkedIn returns invalid_client for bad creds.
+            $response = Http::asForm()->post(self::TOKEN_URL, [
+                'grant_type'    => 'client_credentials',
+                'client_id'     => $clientId,
+                'client_secret' => $clientSecret,
+            ]);
+
+            if ($response->successful() && $response->json('access_token')) {
+                return ['ok' => true, 'error' => null, 'warning' => null];
+            }
+
+            $error = $response->json('error', '');
+            // unauthorized_client means creds are valid but app doesn't have this grant type
+            if ($error === 'unauthorized_client') {
+                return ['ok' => true, 'error' => null, 'warning' => 'Credentials accepted. Client Credentials grant not enabled — OAuth flow will still work.'];
+            }
+
+            $desc = $response->json('error_description', 'Invalid credentials');
+            return ['ok' => false, 'error' => $desc, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Connection failed: ' . $e->getMessage(), 'warning' => null];
+        }
     }
 
     public function getAuthorizationUrl(): array
@@ -36,8 +64,8 @@ class LinkedInService implements SocialPlatformInterface
         $state = bin2hex(random_bytes(16));
         $url   = self::OAUTH_URL . '?' . http_build_query([
             'response_type' => 'code',
-            'client_id'     => config('services.linkedin.client_id'),
-            'redirect_uri'  => config('services.linkedin.redirect_uri'),
+            'client_id'     => $this->resolver->clientId('linkedin'),
+            'redirect_uri'  => $this->resolver->redirectUri('linkedin'),
             'scope'         => 'r_liteprofile r_emailaddress w_member_social w_organization_social rw_organization_admin offline_access',
             'state'         => $state,
         ]);
@@ -49,23 +77,18 @@ class LinkedInService implements SocialPlatformInterface
         return Http::asForm()->post(self::TOKEN_URL, [
             'grant_type'    => 'authorization_code',
             'code'          => $code,
-            'redirect_uri'  => config('services.linkedin.redirect_uri'),
-            'client_id'     => config('services.linkedin.client_id'),
-            'client_secret' => config('services.linkedin.client_secret'),
-        ])->throw()->json(); // access_token, refresh_token, expires_in, refresh_token_expires_in
+            'redirect_uri'  => $this->resolver->redirectUri('linkedin'),
+            'client_id'     => $this->resolver->clientId('linkedin'),
+            'client_secret' => $this->resolver->clientSecret('linkedin'),
+        ])->throw()->json();
     }
 
-    /**
-     * Publish a post via ugcPosts endpoint.
-     * Supports: post (text), article (with URL), carousel (image list in metadata).
-     */
     public function publish(SocialAccount $account, ContentCalendar $entry): array
     {
         if ($account->isTokenExpired()) {
             $account = $this->refreshToken($account);
         }
 
-        // Resolve author URN — person or organization
         $authorUrn = $account->metadata['organization_urn']
             ?? "urn:li:person:{$account->platform_user_id}";
 
@@ -76,7 +99,6 @@ class LinkedInService implements SocialPlatformInterface
 
         $text = trim(($entry->draft_content ?? '') . ($hashtags ? "\n\n{$hashtags}" : ''));
 
-        // Build ugcPost payload
         $payload = [
             'author'          => $authorUrn,
             'lifecycleState'  => 'PUBLISHED',
@@ -91,7 +113,6 @@ class LinkedInService implements SocialPlatformInterface
             ],
         ];
 
-        // If media URL provided, attach as image
         if (! empty($entry->metadata['media_url'])) {
             $payload['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'IMAGE';
             $payload['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
@@ -102,7 +123,6 @@ class LinkedInService implements SocialPlatformInterface
             ]];
         }
 
-        // Article / link post
         if (! empty($entry->metadata['article_url'])) {
             $payload['specificContent']['com.linkedin.ugc.ShareContent']['shareMediaCategory'] = 'ARTICLE';
             $payload['specificContent']['com.linkedin.ugc.ShareContent']['media'] = [[
@@ -118,9 +138,7 @@ class LinkedInService implements SocialPlatformInterface
             ->throw()
             ->json();
 
-        // LinkedIn returns the post URN in 'id' field: urn:li:ugcPost:123456
         $postId = $response['id'] ?? '';
-        $numericId = last(explode(':', $postId));
 
         Log::info("[LinkedIn] Published post id={$postId} for calendar entry {$entry->id}");
 
@@ -134,18 +152,13 @@ class LinkedInService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Fetch share statistics for a published post.
-     */
     public function fetchMetrics(SocialAccount $account, string $externalPostId): array
     {
-        // externalPostId is the full URN e.g. urn:li:ugcPost:7123456789
         $response = Http::withToken($account->access_token)
             ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
             ->get(self::BASE_URL . '/socialActions/' . urlencode($externalPostId));
 
         if ($response->failed()) {
-            // Fall back to ugcPost statistics endpoint
             $stats = Http::withToken($account->access_token)
                 ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
                 ->get(self::BASE_URL . '/organizationalEntityShareStatistics', [
@@ -170,7 +183,7 @@ class LinkedInService implements SocialPlatformInterface
 
         $data = $response->json();
         return [
-            'impressions' => 0, // socialActions doesn't return impression count directly
+            'impressions' => 0,
             'reach'       => 0,
             'clicks'      => (int) ($data['socialActivityCounts']['numLikes'] ?? 0),
             'engagement'  => (int) ($data['socialActivityCounts']['numComments'] ?? 0)
@@ -189,8 +202,8 @@ class LinkedInService implements SocialPlatformInterface
         $response = Http::asForm()->post(self::TOKEN_URL, [
             'grant_type'    => 'refresh_token',
             'refresh_token' => $account->refresh_token,
-            'client_id'     => config('services.linkedin.client_id'),
-            'client_secret' => config('services.linkedin.client_secret'),
+            'client_id'     => $this->resolver->clientId('linkedin'),
+            'client_secret' => $this->resolver->clientSecret('linkedin'),
         ]);
 
         if ($response->failed()) {
@@ -203,7 +216,7 @@ class LinkedInService implements SocialPlatformInterface
         $account->update([
             'access_token'     => $data['access_token'],
             'refresh_token'    => $data['refresh_token'] ?? $account->refresh_token,
-            'token_expires_at' => now()->addSeconds($data['expires_in'] ?? 5184000), // 60 days default
+            'token_expires_at' => now()->addSeconds($data['expires_in'] ?? 5184000),
             'is_connected'     => true,
             'last_error'       => null,
         ]);

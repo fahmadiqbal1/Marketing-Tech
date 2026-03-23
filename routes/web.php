@@ -110,6 +110,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::get('/social-accounts',             [DashboardController::class, 'apiSocialAccounts']);
             Route::get('/trend-insights',              [DashboardController::class, 'apiTrendInsights']);
             Route::get('/social/health',               [DashboardController::class, 'apiSocialHealth']);
+            Route::get('/social-credentials',          [DashboardController::class, 'apiGetSocialCredentials']);
         });
 
         // ── Write / action endpoints — 10 req/min ────────────────────────────────
@@ -146,6 +147,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/social-accounts',                     [DashboardController::class, 'apiUpsertSocialAccount']);
             Route::patch('/social-accounts/{id}',               [DashboardController::class, 'apiPatchSocialAccount']);
             Route::delete('/social-accounts/{id}',              [DashboardController::class, 'apiDeleteSocialAccount']);
+            Route::post('/social-credentials',                  [DashboardController::class, 'apiSaveSocialCredential']);
         });
 
         // ── Heavy / expensive operations — 5 req/min ────────────────────────────

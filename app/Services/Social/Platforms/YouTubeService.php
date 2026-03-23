@@ -5,21 +5,13 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\CredentialResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
  * YouTube Data API v3 integration.
- *
  * OAuth 2.0 Authorization Code flow (Google OAuth2).
- * Posting: Resumable upload to /upload/youtube/v3/videos (multipart or resumable)
- *          For URL-based videos: initiate resumable session, stream from source URL.
- * Metrics: GET /youtube/v3/videos?part=statistics — views, likes, comments, favorites
- * Token refresh: POST /token (refresh_token grant) — Google tokens expire in 1h
- *
- * Note: YouTube requires video file uploads — direct URL-to-YouTube ingestion is
- *       done via resumable upload URI. metadata.media_url must be a public video URL.
- *       For Shorts: video must be ≤60s and vertical (9:16). We set #Shorts in description.
  */
 class YouTubeService implements SocialPlatformInterface
 {
@@ -28,22 +20,56 @@ class YouTubeService implements SocialPlatformInterface
     private const OAUTH_URL    = 'https://accounts.google.com/o/oauth2/v2/auth';
     private const TOKEN_URL    = 'https://oauth2.googleapis.com/token';
 
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     public function isConfigured(): bool
     {
-        return ! empty(config('services.youtube.client_id'))
-            && ! empty(config('services.youtube.client_secret'));
+        return ! empty($this->resolver->clientId('youtube'))
+            && ! empty($this->resolver->clientSecret('youtube'));
+    }
+
+    public function validateCredentials(string $clientId, string $clientSecret): array
+    {
+        try {
+            // Dummy code exchange: Google returns invalid_client for bad creds,
+            // invalid_grant for bad code (meaning creds are OK).
+            $response = Http::asForm()->post(self::TOKEN_URL, [
+                'grant_type'    => 'authorization_code',
+                'code'          => 'credential_validation_probe',
+                'client_id'     => $clientId,
+                'client_secret' => $clientSecret,
+                'redirect_uri'  => $this->resolver->redirectUri('youtube'),
+            ]);
+
+            $error = $response->json('error', '');
+
+            if ($error === 'invalid_client') {
+                $desc = $response->json('error_description', 'Invalid client credentials');
+                return ['ok' => false, 'error' => $desc, 'warning' => null];
+            }
+
+            // invalid_grant or redirect_uri_mismatch means creds are valid
+            return ['ok' => true, 'error' => null, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Connection failed: ' . $e->getMessage(), 'warning' => null];
+        }
     }
 
     public function getAuthorizationUrl(): array
     {
         $state = bin2hex(random_bytes(16));
         $url   = self::OAUTH_URL . '?' . http_build_query([
-            'client_id'    => config('services.youtube.client_id'),
-            'redirect_uri' => config('services.youtube.redirect_uri'),
+            'client_id'    => $this->resolver->clientId('youtube'),
+            'redirect_uri' => $this->resolver->redirectUri('youtube'),
             'response_type'=> 'code',
             'scope'        => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
             'access_type'  => 'offline',
-            'prompt'       => 'consent', // always prompt to get refresh_token
+            'prompt'       => 'consent',
             'state'        => $state,
         ]);
         return ['url' => $url, 'state' => $state];
@@ -53,24 +79,13 @@ class YouTubeService implements SocialPlatformInterface
     {
         return Http::asForm()->post(self::TOKEN_URL, [
             'code'          => $code,
-            'client_id'     => config('services.youtube.client_id'),
-            'client_secret' => config('services.youtube.client_secret'),
-            'redirect_uri'  => config('services.youtube.redirect_uri'),
+            'client_id'     => $this->resolver->clientId('youtube'),
+            'client_secret' => $this->resolver->clientSecret('youtube'),
+            'redirect_uri'  => $this->resolver->redirectUri('youtube'),
             'grant_type'    => 'authorization_code',
-        ])->throw()->json(); // access_token, refresh_token, expires_in, token_type
+        ])->throw()->json();
     }
 
-    /**
-     * Upload a video to YouTube.
-     *
-     * Supports two modes:
-     *  1. metadata.media_url is a public URL → stream-copy via resumable upload
-     *  2. content_type = 'short' → adds #Shorts to title/description
-     *
-     * The resumable upload flow:
-     *  a) POST to /upload/youtube/v3/videos?uploadType=resumable → get upload URI
-     *  b) PUT video bytes to the upload URI
-     */
     public function publish(SocialAccount $account, ContentCalendar $entry): array
     {
         if ($account->isTokenExpired()) {
@@ -84,13 +99,12 @@ class YouTubeService implements SocialPlatformInterface
 
         $mediaUrl = \App\Services\Social\SocialPlatformService::ensurePublicUrl($mediaUrl);
 
-        $isShort      = $entry->content_type === 'short' || ($entry->metadata['is_short'] ?? false);
+        $isShort = $entry->content_type === 'short' || ($entry->metadata['is_short'] ?? false);
 
-        // Shorts validation: warn if duration metadata suggests video exceeds 60s
         if ($isShort) {
             $duration = (int) ($entry->metadata['duration_seconds'] ?? 0);
             if ($duration > 60) {
-                Log::warning("[YouTube] Shorts duration {$duration}s exceeds 60s limit for entry {$entry->id} — YouTube may not treat this as a Short.");
+                Log::warning("[YouTube] Shorts duration {$duration}s exceeds 60s limit for entry {$entry->id}");
                 \App\Models\SystemEvent::create([
                     'level'   => 'warning',
                     'message' => "[YouTube] Shorts post \"{$entry->title}\" has duration {$duration}s (>60s) — may not qualify as a Short.",
@@ -101,12 +115,12 @@ class YouTubeService implements SocialPlatformInterface
         $title        = $this->buildTitle($entry, $isShort);
         $description  = $this->buildDescription($entry, $isShort);
         $tags         = array_map(fn ($t) => ltrim($t, '#'), $entry->hashtags ?? []);
-        $categoryId   = $entry->metadata['youtube_category_id'] ?? '22'; // 22 = People & Blogs
+        $categoryId   = $entry->metadata['youtube_category_id'] ?? '22';
 
         $videoMeta = [
             'snippet' => [
-                'title'       => substr($title, 0, 100),
-                'description' => substr($description, 0, 5000),
+                'title'       => mb_substr($title, 0, 100, 'UTF-8'),
+                'description' => mb_substr($description, 0, 5000, 'UTF-8'),
                 'tags'        => array_slice($tags, 0, 500),
                 'categoryId'  => $categoryId,
             ],
@@ -116,14 +130,13 @@ class YouTubeService implements SocialPlatformInterface
             ],
         ];
 
-        // Step 1: Initiate resumable upload session (skip if we have a stored URI from a failed retry)
         $uploadUri = $entry->metadata['youtube_upload_uri'] ?? null;
 
         if (! $uploadUri) {
             $initResponse = Http::withToken($account->access_token)
                 ->withHeaders([
                     'X-Upload-Content-Type'   => 'video/*',
-                    'X-Upload-Content-Length' => '0', // unknown size for URL source
+                    'X-Upload-Content-Length' => '0',
                     'Content-Type'            => 'application/json; charset=UTF-8',
                 ])
                 ->post(self::UPLOAD_URL . '?uploadType=resumable&part=snippet,status', $videoMeta)
@@ -134,7 +147,6 @@ class YouTubeService implements SocialPlatformInterface
                 throw new \RuntimeException('[YouTube] No upload URI returned from resumable upload init.');
             }
 
-            // Persist upload URI immediately so a retry can resume without re-initing
             $meta = $entry->metadata ?? [];
             $meta['youtube_upload_uri'] = $uploadUri;
             $entry->update(['metadata' => $meta]);
@@ -142,7 +154,6 @@ class YouTubeService implements SocialPlatformInterface
             Log::info("[YouTube] Resuming upload from stored URI for entry {$entry->id}");
         }
 
-        // Step 2: Fetch video from source URL and stream to YouTube resumable URI
         $videoStream = Http::get($mediaUrl)->throw();
         $videoBytes  = $videoStream->body();
         $videoSize   = strlen($videoBytes);
@@ -159,7 +170,6 @@ class YouTubeService implements SocialPlatformInterface
 
         $videoId = $uploadResponse['id'];
 
-        // Clear stored upload URI on success
         $meta = $entry->metadata ?? [];
         unset($meta['youtube_upload_uri']);
         $entry->update(['metadata' => $meta]);
@@ -176,9 +186,6 @@ class YouTubeService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Fetch video statistics via YouTube Data API v3.
-     */
     public function fetchMetrics(SocialAccount $account, string $externalPostId): array
     {
         $response = Http::withToken($account->access_token)
@@ -195,7 +202,6 @@ class YouTubeService implements SocialPlatformInterface
         $stats   = $response->json('items.0.statistics', []);
         $details = $response->json('items.0.contentDetails', []);
 
-        // Parse ISO 8601 duration (e.g. PT1M3S) into seconds
         $durationSec = 0;
         if (! empty($details['duration'])) {
             preg_match('/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/', $details['duration'], $m);
@@ -213,10 +219,6 @@ class YouTubeService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Refresh a Google OAuth2 access token using the stored refresh token.
-     * Google access tokens expire every 3600 seconds (1 hour).
-     */
     public function refreshToken(SocialAccount $account): SocialAccount
     {
         if (empty($account->refresh_token)) {
@@ -225,8 +227,8 @@ class YouTubeService implements SocialPlatformInterface
         }
 
         $response = Http::asForm()->post(self::TOKEN_URL, [
-            'client_id'     => config('services.youtube.client_id'),
-            'client_secret' => config('services.youtube.client_secret'),
+            'client_id'     => $this->resolver->clientId('youtube'),
+            'client_secret' => $this->resolver->clientSecret('youtube'),
             'refresh_token' => $account->refresh_token,
             'grant_type'    => 'refresh_token',
         ]);
@@ -241,7 +243,6 @@ class YouTubeService implements SocialPlatformInterface
 
         $account->update([
             'access_token'     => $data['access_token'],
-            // Google does not rotate refresh_token unless revoked — keep existing
             'token_expires_at' => now()->addSeconds($data['expires_in'] ?? 3600),
             'is_connected'     => true,
             'last_error'       => null,
@@ -250,11 +251,9 @@ class YouTubeService implements SocialPlatformInterface
         return $account->fresh();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
     private function buildTitle(ContentCalendar $entry, bool $isShort): string
     {
-        $base = $entry->title ?? substr($entry->draft_content ?? '', 0, 80);
+        $base = $entry->title ?? mb_substr($entry->draft_content ?? '', 0, 80, 'UTF-8');
         return $isShort ? trim($base . ' #Shorts') : $base;
     }
 

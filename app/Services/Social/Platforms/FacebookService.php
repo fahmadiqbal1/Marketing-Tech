@@ -5,20 +5,13 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\CredentialResolver;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Facebook Graph API v19.0 integration.
- *
  * OAuth 2.0 Authorization Code flow → long-lived Page access token.
- * Posting: POST /{page-id}/feed (text/link) or /{page-id}/photos (image)
- * Metrics: GET /{post-id}/insights — impressions, reach, clicks, reactions
- * Token refresh: GET /oauth/access_token?grant_type=fb_exchange_token (long-lived, 60d)
- *
- * Note: We store the Page access token (not user token) in access_token column.
- *       platform_user_id holds the Page ID.
- *       metadata['page_name'] and metadata['page_id'] can be stored at connect time.
  */
 class FacebookService implements SocialPlatformInterface
 {
@@ -26,18 +19,46 @@ class FacebookService implements SocialPlatformInterface
     private const OAUTH_URL = 'https://www.facebook.com/v19.0/dialog/oauth';
     private const TOKEN_URL = 'https://graph.facebook.com/v19.0/oauth/access_token';
 
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     public function isConfigured(): bool
     {
-        return ! empty(config('services.facebook.client_id'))
-            && ! empty(config('services.facebook.client_secret'));
+        return ! empty($this->resolver->clientId('facebook'))
+            && ! empty($this->resolver->clientSecret('facebook'));
+    }
+
+    public function validateCredentials(string $clientId, string $clientSecret): array
+    {
+        try {
+            // App access token request validates client_id + client_secret
+            $response = Http::get('https://graph.facebook.com/oauth/access_token', [
+                'client_id'     => $clientId,
+                'client_secret' => $clientSecret,
+                'grant_type'    => 'client_credentials',
+            ]);
+
+            if ($response->failed()) {
+                $error = $response->json('error.message', 'Invalid credentials');
+                return ['ok' => false, 'error' => $error, 'warning' => null];
+            }
+
+            return ['ok' => true, 'error' => null, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Connection failed: ' . $e->getMessage(), 'warning' => null];
+        }
     }
 
     public function getAuthorizationUrl(): array
     {
         $state = bin2hex(random_bytes(16));
         $url   = self::OAUTH_URL . '?' . http_build_query([
-            'client_id'     => config('services.facebook.client_id'),
-            'redirect_uri'  => config('services.facebook.redirect_uri'),
+            'client_id'     => $this->resolver->clientId('facebook'),
+            'redirect_uri'  => $this->resolver->redirectUri('facebook'),
             'scope'         => 'pages_manage_posts,pages_read_engagement,pages_show_list,read_insights,public_profile',
             'response_type' => 'code',
             'state'         => $state,
@@ -45,29 +66,22 @@ class FacebookService implements SocialPlatformInterface
         return ['url' => $url, 'state' => $state];
     }
 
-    /**
-     * Exchange code → short-lived user token → long-lived user token → page token.
-     * Returns the page access token for the first managed page.
-     */
     public function exchangeCode(string $code): array
     {
-        // Step 1: short-lived user token
         $short = Http::get(self::TOKEN_URL, [
-            'client_id'     => config('services.facebook.client_id'),
-            'client_secret' => config('services.facebook.client_secret'),
-            'redirect_uri'  => config('services.facebook.redirect_uri'),
+            'client_id'     => $this->resolver->clientId('facebook'),
+            'client_secret' => $this->resolver->clientSecret('facebook'),
+            'redirect_uri'  => $this->resolver->redirectUri('facebook'),
             'code'          => $code,
         ])->throw()->json();
 
-        // Step 2: exchange for long-lived user token (60 days)
         $long = Http::get(self::TOKEN_URL, [
             'grant_type'        => 'fb_exchange_token',
-            'client_id'         => config('services.facebook.client_id'),
-            'client_secret'     => config('services.facebook.client_secret'),
+            'client_id'         => $this->resolver->clientId('facebook'),
+            'client_secret'     => $this->resolver->clientSecret('facebook'),
             'fb_exchange_token' => $short['access_token'],
         ])->throw()->json();
 
-        // Step 3: fetch managed pages and return first page token
         $pages = Http::get(self::GRAPH_URL . '/me/accounts', [
             'access_token' => $long['access_token'],
         ])->throw()->json();
@@ -80,15 +94,10 @@ class FacebookService implements SocialPlatformInterface
             'page_access_token'  => $pageData['access_token'] ?? $long['access_token'],
             'page_id'            => $pageData['id'] ?? null,
             'page_name'          => $pageData['name'] ?? null,
-            // Page tokens are long-lived (never expire if re-authorized)
             'expires_in'         => 0,
         ];
     }
 
-    /**
-     * Publish to a Facebook Page.
-     * Routes to /{page-id}/photos for image posts, /{page-id}/feed for text/link.
-     */
     public function publish(SocialAccount $account, ContentCalendar $entry): array
     {
         if ($account->isTokenExpired() && $account->token_expires_at !== null) {
@@ -101,7 +110,6 @@ class FacebookService implements SocialPlatformInterface
         $hashtags = collect($entry->hashtags ?? [])->take(5)->implode(' ');
         $message  = trim(($entry->draft_content ?? '') . ($hashtags ? "\n\n{$hashtags}" : ''));
 
-        // Photo post
         if (! empty($entry->metadata['media_url'])) {
             $response = Http::post(self::GRAPH_URL . "/{$pageId}/photos", [
                 'url'          => $entry->metadata['media_url'],
@@ -122,7 +130,6 @@ class FacebookService implements SocialPlatformInterface
             ];
         }
 
-        // Text / link post
         $payload = [
             'message'      => $message,
             'access_token' => $token,
@@ -149,10 +156,6 @@ class FacebookService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Fetch post-level insights.
-     * post_impressions, post_reach, post_clicks, post_reactions_by_type_total
-     */
     public function fetchMetrics(SocialAccount $account, string $externalPostId): array
     {
         $response = Http::get(self::GRAPH_URL . "/{$externalPostId}/insights", [
@@ -176,19 +179,14 @@ class FacebookService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Refresh a long-lived user token via fb_exchange_token.
-     * Page access tokens linked to a long-lived user token do not expire —
-     * only the user token itself needs refreshing.
-     */
     public function refreshToken(SocialAccount $account): SocialAccount
     {
         $userToken = $account->metadata['user_access_token'] ?? $account->access_token;
 
         $response = Http::get(self::TOKEN_URL, [
             'grant_type'        => 'fb_exchange_token',
-            'client_id'         => config('services.facebook.client_id'),
-            'client_secret'     => config('services.facebook.client_secret'),
+            'client_id'         => $this->resolver->clientId('facebook'),
+            'client_secret'     => $this->resolver->clientSecret('facebook'),
             'fb_exchange_token' => $userToken,
         ]);
 
@@ -201,7 +199,6 @@ class FacebookService implements SocialPlatformInterface
         $data     = $response->json();
         $newToken = $data['access_token'];
 
-        // Re-fetch the page token with the refreshed user token
         $pages = Http::get(self::GRAPH_URL . '/me/accounts', ['access_token' => $newToken]);
         $pageToken = $pages->ok() ? ($pages->json('data.0.access_token') ?? $newToken) : $newToken;
 
@@ -212,7 +209,7 @@ class FacebookService implements SocialPlatformInterface
             'access_token'     => $pageToken,
             'token_expires_at' => isset($data['expires_in']) && $data['expires_in'] > 0
                                     ? now()->addSeconds($data['expires_in'])
-                                    : null, // page tokens don't expire
+                                    : null,
             'metadata'         => $metadata,
             'is_connected'     => true,
             'last_error'       => null,

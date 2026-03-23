@@ -5,6 +5,7 @@ namespace App\Services\Social\Platforms;
 use App\Models\ContentCalendar;
 use App\Models\SocialAccount;
 use App\Services\Social\Contracts\SocialPlatformInterface;
+use App\Services\Social\CredentialResolver;
 use App\Jobs\PollTikTokPublishStatus;
 use App\Services\Social\SocialPlatformService;
 use Illuminate\Support\Facades\Http;
@@ -12,17 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * TikTok for Developers — Content Posting API v2.
- *
- * OAuth 2.0 Authorization Code flow (PKCE optional but recommended).
- * Posting: POST /v2/post/publish/video/init/ → upload → confirm
- *          POST /v2/post/publish/content/init/ for photo/text posts
- * Metrics: GET /v2/video/list/ (creator's own videos) — basic stats
- *          GET /v2/research/video/query/ requires Research API access
- * Token refresh: POST /v2/oauth/token/ (refresh_token grant)
- *
- * Note: TikTok's Content Posting API requires video uploads via file URL or
- *       direct_post. For text/photo we use PHOTO_STORY. Video upload is a
- *       two-phase flow: init → upload chunks → confirm.
+ * OAuth 2.0 Authorization Code flow (PKCE).
  */
 class TikTokService implements SocialPlatformInterface
 {
@@ -30,10 +21,44 @@ class TikTokService implements SocialPlatformInterface
     private const OAUTH_URL = 'https://www.tiktok.com/v2/auth/authorize/';
     private const TOKEN_URL = 'https://open.tiktok.com/v2/oauth/token/';
 
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     public function isConfigured(): bool
     {
-        return ! empty(config('services.tiktok.client_key'))
-            && ! empty(config('services.tiktok.client_secret'));
+        return ! empty($this->resolver->clientId('tiktok'))
+            && ! empty($this->resolver->clientSecret('tiktok'));
+    }
+
+    public function validateCredentials(string $clientId, string $clientSecret): array
+    {
+        try {
+            // Attempt token exchange with dummy code. TikTok returns invalid_client
+            // for bad credentials vs invalid_grant for bad code (meaning creds are OK).
+            $response = Http::asForm()->post(self::TOKEN_URL, [
+                'client_key'    => $clientId,
+                'client_secret' => $clientSecret,
+                'code'          => 'credential_validation_probe',
+                'grant_type'    => 'authorization_code',
+                'redirect_uri'  => $this->resolver->redirectUri('tiktok'),
+            ]);
+
+            $error = $response->json('error', $response->json('data.error', ''));
+
+            if ($error === 'invalid_client') {
+                $desc = $response->json('error_description', $response->json('data.description', 'Invalid client credentials'));
+                return ['ok' => false, 'error' => $desc, 'warning' => null];
+            }
+
+            // Any other error (invalid_grant, invalid_request) means creds are accepted
+            return ['ok' => true, 'error' => null, 'warning' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Connection failed: ' . $e->getMessage(), 'warning' => null];
+        }
     }
 
     public function getAuthorizationUrl(string $codeVerifier): array
@@ -42,10 +67,10 @@ class TikTokService implements SocialPlatformInterface
         $csrfState     = bin2hex(random_bytes(16));
 
         $url = self::OAUTH_URL . '?' . http_build_query([
-            'client_key'            => config('services.tiktok.client_key'),
+            'client_key'            => $this->resolver->clientId('tiktok'),
             'response_type'         => 'code',
             'scope'                 => 'user.info.basic,video.upload,video.publish,video.list',
-            'redirect_uri'          => config('services.tiktok.redirect_uri'),
+            'redirect_uri'          => $this->resolver->redirectUri('tiktok'),
             'state'                 => $csrfState,
             'code_challenge'        => $codeChallenge,
             'code_challenge_method' => 'S256',
@@ -57,22 +82,15 @@ class TikTokService implements SocialPlatformInterface
     public function exchangeCode(string $code, string $codeVerifier): array
     {
         return Http::asForm()->post(self::TOKEN_URL, [
-            'client_key'    => config('services.tiktok.client_key'),
-            'client_secret' => config('services.tiktok.client_secret'),
+            'client_key'    => $this->resolver->clientId('tiktok'),
+            'client_secret' => $this->resolver->clientSecret('tiktok'),
             'code'          => $code,
             'grant_type'    => 'authorization_code',
-            'redirect_uri'  => config('services.tiktok.redirect_uri'),
+            'redirect_uri'  => $this->resolver->redirectUri('tiktok'),
             'code_verifier' => $codeVerifier,
-        ])->throw()->json('data'); // TikTok wraps response in data.{}
+        ])->throw()->json('data');
     }
 
-    /**
-     * Publish content to TikTok.
-     *
-     * VIDEO (reel/video): two-phase flow — init + upload URL → confirm.
-     * PHOTO/TEXT: single /v2/post/publish/content/init/ call (PHOTO_STORY).
-     * All posts go into INBOX for creator review by default unless direct_post=true.
-     */
     public function publish(SocialAccount $account, ContentCalendar $entry): array
     {
         if ($account->isTokenExpired()) {
@@ -88,7 +106,6 @@ class TikTokService implements SocialPlatformInterface
 
     public function fetchMetrics(SocialAccount $account, string $externalPostId): array
     {
-        // List creator videos and find by id — requires video.list scope
         $response = Http::withToken($account->access_token)
             ->post(self::BASE_URL . '/v2/video/list/', [
                 'fields' => 'id,view_count,like_count,comment_count,share_count,play_url',
@@ -126,8 +143,8 @@ class TikTokService implements SocialPlatformInterface
         }
 
         $response = Http::asForm()->post(self::TOKEN_URL, [
-            'client_key'    => config('services.tiktok.client_key'),
-            'client_secret' => config('services.tiktok.client_secret'),
+            'client_key'    => $this->resolver->clientId('tiktok'),
+            'client_secret' => $this->resolver->clientSecret('tiktok'),
             'grant_type'    => 'refresh_token',
             'refresh_token' => $account->refresh_token,
         ]);
@@ -151,12 +168,6 @@ class TikTokService implements SocialPlatformInterface
         return $account->fresh();
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
-    /**
-     * Two-phase video publish: init (get upload URL) → creator reviews in inbox.
-     * If metadata.media_url is a public URL, use PULL_FROM_URL upload source.
-     */
     private function publishVideo(SocialAccount $account, ContentCalendar $entry): array
     {
         $caption   = $this->buildCaption($entry);
@@ -171,7 +182,7 @@ class TikTokService implements SocialPlatformInterface
         $payload = [
             'post_info' => [
                 'title'         => $caption,
-                'privacy_level' => 'SELF_ONLY', // safer default; user can change after
+                'privacy_level' => 'SELF_ONLY',
                 'disable_duet'  => false,
                 'disable_stitch' => false,
                 'disable_comment' => false,
@@ -191,7 +202,6 @@ class TikTokService implements SocialPlatformInterface
 
         Log::info("[TikTok] Video publish initiated. publish_id={$publishId} for calendar entry {$entry->id}");
 
-        // Dispatch async status poller — TikTok confirms video_id once processing is complete
         if ($publishId) {
             PollTikTokPublishStatus::dispatch($publishId, $entry->id)
                 ->delay(now()->addSeconds(30))
@@ -208,10 +218,6 @@ class TikTokService implements SocialPlatformInterface
         ];
     }
 
-    /**
-     * Photo / text post via content/init (PHOTO_STORY type).
-     * Requires at least one image URL in metadata.media_urls[].
-     */
     private function publishPhoto(SocialAccount $account, ContentCalendar $entry): array
     {
         $caption    = $this->buildCaption($entry);

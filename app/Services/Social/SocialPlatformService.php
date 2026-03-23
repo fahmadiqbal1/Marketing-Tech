@@ -16,6 +16,13 @@ use Illuminate\Support\Facades\Log;
 
 class SocialPlatformService
 {
+    private CredentialResolver $resolver;
+
+    public function __construct(?CredentialResolver $resolver = null)
+    {
+        $this->resolver = $resolver ?? app(CredentialResolver::class);
+    }
+
     /**
      * Return the real platform driver for a given platform slug.
      * All platforms have full API implementations — no stubs.
@@ -23,12 +30,12 @@ class SocialPlatformService
     public function driver(string $platform): SocialPlatformInterface
     {
         return match ($platform) {
-            'instagram' => new InstagramService(),
-            'twitter'   => new TwitterService(),
-            'linkedin'  => new LinkedInService(),
-            'facebook'  => new FacebookService(),
-            'tiktok'    => new TikTokService(),
-            'youtube'   => new YouTubeService(),
+            'instagram' => new InstagramService($this->resolver),
+            'twitter'   => new TwitterService($this->resolver),
+            'linkedin'  => new LinkedInService($this->resolver),
+            'facebook'  => new FacebookService($this->resolver),
+            'tiktok'    => new TikTokService($this->resolver),
+            'youtube'   => new YouTubeService($this->resolver),
             default     => throw new \InvalidArgumentException("Unsupported social platform: {$platform}"),
         };
     }
