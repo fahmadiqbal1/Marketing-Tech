@@ -3,13 +3,18 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
-return new class extends Migration {
+return new class extends Migration
+{
     public function up(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         // Only create indexes if pgvector extension is available
         try {
             DB::statement("SELECT 'vector'::regtype");
-        } catch (\Throwable) {
+        } catch (Throwable) {
             // pgvector not installed — skip silently
             return;
         }
@@ -24,10 +29,10 @@ return new class extends Migration {
 
         if (! empty($hasKbEmbedding)) {
             DB::statement(
-                "CREATE INDEX IF NOT EXISTS knowledge_base_embedding_ivfflat_idx
+                'CREATE INDEX IF NOT EXISTS knowledge_base_embedding_ivfflat_idx
                  ON knowledge_base
                  USING ivfflat (embedding vector_cosine_ops)
-                 WITH (lists = 100)"
+                 WITH (lists = 100)'
             );
         }
 
@@ -40,20 +45,24 @@ return new class extends Migration {
 
         if (! empty($hasWorkflowEmbedding)) {
             DB::statement(
-                "CREATE INDEX IF NOT EXISTS workflows_embedding_hnsw_idx
+                'CREATE INDEX IF NOT EXISTS workflows_embedding_hnsw_idx
                  ON workflows
                  USING hnsw (embedding vector_cosine_ops)
-                 WITH (m = 16, ef_construction = 64)"
+                 WITH (m = 16, ef_construction = 64)'
             );
         }
     }
 
     public function down(): void
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return;
+        }
+
         try {
-            DB::statement("DROP INDEX IF EXISTS knowledge_base_embedding_hnsw_idx");
-            DB::statement("DROP INDEX IF EXISTS workflows_embedding_hnsw_idx");
-        } catch (\Throwable) {
+            DB::statement('DROP INDEX IF EXISTS knowledge_base_embedding_ivfflat_idx');
+            DB::statement('DROP INDEX IF EXISTS workflows_embedding_hnsw_idx');
+        } catch (Throwable) {
             // Ignore — pgvector may not be installed
         }
     }

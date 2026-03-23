@@ -16,9 +16,14 @@ class RefreshSocialTokens implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int    $tries   = 2;
-    public int    $timeout = 60;
-    public string $queue   = 'low';
+    public int $tries = 2;
+
+    public int $timeout = 60;
+
+    public function __construct()
+    {
+        $this->onQueue('low');
+    }
 
     public function handle(SocialPlatformService $social): void
     {
@@ -37,6 +42,7 @@ class RefreshSocialTokens implements ShouldQueue
 
                 if (! $driver->isConfigured()) {
                     Log::info("RefreshSocialTokens: {$account->platform} is not configured for real refresh (missing API credentials in .env)");
+
                     continue;
                 }
 
@@ -44,13 +50,13 @@ class RefreshSocialTokens implements ShouldQueue
 
                 if ($refreshed->is_connected) {
                     SystemEvent::create([
-                        'level'   => 'info',
+                        'level' => 'info',
                         'message' => "Token refreshed: {$account->platform} @{$account->handle}. Expires: {$refreshed->token_expires_at?->toDateTimeString()}",
                     ]);
                 } else {
                     // Token refresh failed — account marked disconnected in refreshToken()
                     SystemEvent::create([
-                        'level'   => 'error',
+                        'level' => 'error',
                         'message' => "Token refresh FAILED: {$account->platform} @{$account->handle}. Account disconnected. Error: {$refreshed->last_error}",
                     ]);
 
@@ -63,11 +69,11 @@ class RefreshSocialTokens implements ShouldQueue
                 // Mark account as disconnected on unexpected failure
                 $account->update([
                     'is_connected' => false,
-                    'last_error'   => $e->getMessage(),
+                    'last_error' => $e->getMessage(),
                 ]);
 
                 SystemEvent::create([
-                    'level'   => 'error',
+                    'level' => 'error',
                     'message' => "Token refresh exception: {$account->platform} @{$account->handle} — {$e->getMessage()}",
                 ]);
 

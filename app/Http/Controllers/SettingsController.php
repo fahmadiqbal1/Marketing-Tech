@@ -21,10 +21,10 @@ class SettingsController extends Controller
 
     /** Provider mapping for secrets */
     private const PROVIDER_MAP = [
-        'OPENAI_API_KEY'          => 'openai',
-        'ANTHROPIC_API_KEY'       => 'anthropic',
-        'GEMINI_API_KEY'          => 'gemini',
-        'TELEGRAM_BOT_TOKEN'      => 'telegram',
+        'OPENAI_API_KEY' => 'openai',
+        'ANTHROPIC_API_KEY' => 'anthropic',
+        'GEMINI_API_KEY' => 'gemini',
+        'TELEGRAM_BOT_TOKEN' => 'telegram',
         'TELEGRAM_WEBHOOK_SECRET' => 'telegram',
     ];
 
@@ -43,23 +43,23 @@ class SettingsController extends Controller
     public function show(): JsonResponse
     {
         return response()->json([
-            'APP_URL'                 => env('APP_URL', ''),
-            'APP_DEBUG'               => env('APP_DEBUG', false),
-            'APP_ENV'                 => env('APP_ENV', 'local'),
-            'OPENAI_API_KEY'          => $this->maskOrEmpty('OPENAI_API_KEY'),
-            'ANTHROPIC_API_KEY'       => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
-            'GEMINI_API_KEY'          => $this->maskOrEmpty('GEMINI_API_KEY'),
-            'TELEGRAM_BOT_TOKEN'      => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
+            'APP_URL' => env('APP_URL', ''),
+            'APP_DEBUG' => env('APP_DEBUG', false),
+            'APP_ENV' => env('APP_ENV', 'local'),
+            'OPENAI_API_KEY' => $this->maskOrEmpty('OPENAI_API_KEY'),
+            'ANTHROPIC_API_KEY' => $this->maskOrEmpty('ANTHROPIC_API_KEY'),
+            'GEMINI_API_KEY' => $this->maskOrEmpty('GEMINI_API_KEY'),
+            'TELEGRAM_BOT_TOKEN' => $this->maskOrEmpty('TELEGRAM_BOT_TOKEN'),
             'TELEGRAM_WEBHOOK_SECRET' => $this->maskOrEmpty('TELEGRAM_WEBHOOK_SECRET'),
-            'TELEGRAM_ALLOWED_USERS'  => env('TELEGRAM_ALLOWED_USERS', ''),
-            'TELEGRAM_ADMIN_CHAT_ID'  => env('TELEGRAM_ADMIN_CHAT_ID', ''),
-            'DB_CONNECTION'           => env('DB_CONNECTION', 'pgsql'),
-            'DB_HOST'                 => env('DB_HOST', ''),
-            'DB_PORT'                 => env('DB_PORT', '5432'),
-            'DB_DATABASE'             => env('DB_DATABASE', ''),
-            'DB_USERNAME'             => env('DB_USERNAME', ''),
-            'QUEUE_CONNECTION'        => env('QUEUE_CONNECTION', 'redis'),
-            'CACHE_STORE'             => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
+            'TELEGRAM_ALLOWED_USERS' => env('TELEGRAM_ALLOWED_USERS', ''),
+            'TELEGRAM_ADMIN_CHAT_ID' => env('TELEGRAM_ADMIN_CHAT_ID', ''),
+            'DB_CONNECTION' => env('DB_CONNECTION', 'mysql'),
+            'DB_HOST' => env('DB_HOST', ''),
+            'DB_PORT' => env('DB_PORT', '3306'),
+            'DB_DATABASE' => env('DB_DATABASE', ''),
+            'DB_USERNAME' => env('DB_USERNAME', ''),
+            'QUEUE_CONNECTION' => env('QUEUE_CONNECTION', 'database'),
+            'CACHE_STORE' => env('CACHE_STORE', env('CACHE_DRIVER', 'file')),
         ]);
     }
 
@@ -83,6 +83,7 @@ class SettingsController extends Controller
         foreach ($secretFields as $field) {
             if (! isset($data[$field]) || str_contains((string) $data[$field], '****')) {
                 unset($data[$field]);
+
                 continue;
             }
 
@@ -125,7 +126,7 @@ class SettingsController extends Controller
         }
 
         return response()->json([
-            'saved'    => true,
+            'saved' => true,
             'warnings' => $warnings,
         ]);
     }
@@ -137,7 +138,7 @@ class SettingsController extends Controller
         if (empty($botToken)) {
             return response()->json([
                 'success' => false,
-                'output'  => 'Telegram bot token is not configured. Add TELEGRAM_BOT_TOKEN in Settings first.',
+                'output' => 'Telegram bot token is not configured. Add TELEGRAM_BOT_TOKEN in Settings first.',
             ], 422);
         }
 
@@ -145,31 +146,32 @@ class SettingsController extends Controller
         if (empty($appUrl) || $appUrl === 'http://localhost') {
             return response()->json([
                 'success' => false,
-                'output'  => 'APP_URL is not set to a public URL. Update APP_URL in Application Settings first.',
+                'output' => 'APP_URL is not set to a public URL. Update APP_URL in Application Settings first.',
             ], 422);
         }
 
         try {
-            $exit   = Artisan::call('telegram:webhook');
+            $exit = Artisan::call('telegram:webhook');
             $output = Artisan::output();
 
             if ($exit !== 0) {
                 Log::error('Webhook registration failed', [
                     'exit_code' => $exit,
-                    'output'    => trim($output),
-                    'app_url'   => $appUrl,
+                    'output' => trim($output),
+                    'app_url' => $appUrl,
                 ]);
             }
 
             return response()->json([
                 'success' => $exit === 0,
-                'output'  => trim($output),
+                'output' => trim($output),
             ]);
         } catch (\Throwable $e) {
             Log::error('Webhook registration exception', [
-                'error'   => $e->getMessage(),
+                'error' => $e->getMessage(),
                 'app_url' => $appUrl,
             ]);
+
             return response()->json(['success' => false, 'output' => $e->getMessage()], 422);
         }
     }
@@ -177,6 +179,7 @@ class SettingsController extends Controller
     private function maskOrEmpty(string $envKey): string
     {
         $value = $this->credentials->retrieve($envKey) ?? '';
+
         return $this->mask($value);
     }
 
@@ -189,14 +192,16 @@ class SettingsController extends Controller
         if ($len <= 8) {
             return str_repeat('*', $len);
         }
-        return substr($value, 0, 4) . str_repeat('*', $len - 8) . substr($value, -4);
+
+        return substr($value, 0, 4).str_repeat('*', $len - 8).substr($value, -4);
     }
 
     private function escapeEnvValue(string $value): string
     {
         if (preg_match('/\s/', $value) || str_contains($value, '"')) {
-            return '"' . addslashes($value) . '"';
+            return '"'.addslashes($value).'"';
         }
+
         return $value ?: 'null';
     }
 }

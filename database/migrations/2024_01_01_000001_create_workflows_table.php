@@ -2,8 +2,8 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -38,9 +38,13 @@ return new class extends Migration
             $table->index(['type', 'status']);
         });
 
-        // pgvector embedding column — now using 2000 dims for index compatibility
-        if (DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
+        if (DB::connection()->getDriverName() === 'pgsql'
+            && DB::select("SELECT 1 FROM pg_available_extensions WHERE name='vector' AND installed_version IS NOT NULL")) {
             DB::statement('ALTER TABLE workflows ADD COLUMN embedding vector(2000)');
+        } else {
+            Schema::table('workflows', function (Blueprint $table) {
+                $table->longText('embedding')->nullable();
+            });
         }
     }
 

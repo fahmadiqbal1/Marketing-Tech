@@ -24,14 +24,19 @@ return new class extends Migration
             }
         });
 
-        // Backfill existing rows so old entries are also deduplicated going forward
-        DB::statement("
-            UPDATE knowledge_base
-            SET content_hash = md5(
-                regexp_replace(lower(substr(content, 1, 1000)), '\s+', ' ', 'g')
-            )
-            WHERE content_hash IS NULL
-        ");
+        DB::table('knowledge_base')
+            ->select(['id', 'content'])
+            ->orderBy('id')
+            ->chunk(200, function ($rows): void {
+                foreach ($rows as $row) {
+                    $normalized = strtolower(preg_replace('/\s+/', ' ', trim($row->content)));
+                    $hash = md5(mb_substr($normalized, 0, 1000, 'UTF-8'));
+
+                    DB::table('knowledge_base')
+                        ->where('id', $row->id)
+                        ->update(['content_hash' => $hash]);
+                }
+            });
     }
 
     public function down(): void
