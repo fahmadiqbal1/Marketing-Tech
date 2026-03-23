@@ -1,6 +1,62 @@
-<?php
 
 namespace App\Http\Controllers;
+    /**
+     * Resume intake API: Accepts candidate application, parses CV, scores, updates pipeline, notifies via Telegram.
+     */
+    public function apiCandidateApply(Request $request): JsonResponse
+    {
+        $request->validate([
+            'cv_text' => 'required|string',
+            'candidate_name' => 'nullable|string',
+            'source' => 'nullable|string',
+            'job_id' => 'required|uuid|exists:job_postings,id',
+        ]);
+
+        $args = [
+            'cv_text' => $request->input('cv_text'),
+            'candidate_name' => $request->input('candidate_name'),
+            'source' => $request->input('source', 'direct'),
+            'job_id' => $request->input('job_id'),
+        ];
+
+        // 1. Parse CV and create candidate
+        $agent = app(\App\Agents\HiringAgent::class);
+        $parseResult = json_decode($agent->toolParseCV($args), true);
+        if (!($parseResult['success'] ?? false)) {
+            return response()->json(['error' => $parseResult['error'] ?? 'Failed to parse CV'], 422);
+        }
+        $candidateId = $parseResult['data']['candidate_id'] ?? null;
+        if (!$candidateId) {
+            return response()->json(['error' => 'Candidate creation failed'], 500);
+        }
+
+        // 2. Score candidate
+        $scoreResult = json_decode($agent->toolScoreCandidate([
+            'candidate_id' => $candidateId,
+            'job_id' => $args['job_id'],
+        ]), true);
+        if (!($scoreResult['success'] ?? false)) {
+            return response()->json(['error' => $scoreResult['error'] ?? 'Failed to score candidate'], 500);
+        }
+
+        // 3. Update pipeline stage to 'screening'
+        $agent->toolUpdatePipeline([
+            'candidate_id' => $candidateId,
+            'stage' => 'screening',
+            'notes' => 'Auto-screened on application',
+        ]);
+
+        // 4. Notify via Telegram (if enabled)
+        try {
+            $agent->telegram->sendMessage([
+                'text' => "New candidate applied: " . ($parseResult['data']['name'] ?? 'Unknown'),
+            ]);
+        } catch (\Throwable $e) {
+            // Ignore Telegram errors
+        }
+
+        return response()->json(['success' => true, 'candidate_id' => $candidateId]);
+    }
 
 use App\Jobs\IngestGitHubRepo;
 use App\Models\AgentJob;
@@ -317,6 +373,14 @@ class DashboardController extends Controller
         foreach ($agentDefs as $name => $def) {
             $promptKey = 'AGENT_'.strtoupper($name).'_PROMPT';
             $customPrompt = $this->credentials->retrieve($promptKey);
+            $currentJob = AgentJob::where('agent_type', $name)
+                ->where('status', 'running')
+                ->latest('started_at')
+                ->first(['id', 'instruction', 'steps_taken', 'max_steps', 'started_at']);
+            $lastCompletedJob = AgentJob::where('agent_type', $name)
+                ->where('status', 'completed')
+                ->latest('completed_at')
+                ->first(['id', 'instruction', 'completed_at']);
             $agents[] = [
                 'name' => $name,
                 'provider' => $def['provider'] ?? 'openai',
@@ -328,6 +392,8 @@ class DashboardController extends Controller
                 'knowledge_count' => (int) ($knowledgeCounts[$name] ?? 0) + (int) ($skillCounts[strtolower($name)] ?? 0),
                 'recent_steps' => $stepsByAgent->get($name, collect())->take(5)->values()->toArray(),
                 'active_jobs' => (int) ($runningPerAgent[$name] ?? 0),
+                'current_job' => $currentJob,
+                'last_completed_job' => $lastCompletedJob,
             ];
         }
 

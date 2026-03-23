@@ -28,3 +28,7 @@ Schedule::job(new ProcessTrends, 'low')->everyFourHours();
 
 // Social: refresh OAuth tokens expiring within 24h (queue: low)
 Schedule::job(new RefreshSocialTokens, 'low')->dailyAt('03:00');
+
+// Hiring: prune rejected candidates older than 30 days (queue: low)
+use App\Jobs\PruneRejectedCandidates;
+Schedule::job(new PruneRejectedCandidates, 'low')->dailyAt('02:30');

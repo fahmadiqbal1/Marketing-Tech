@@ -411,9 +411,23 @@ PROMPT;
                 'requirements'    => $args['requirements']    ?? [],
                 'nice_to_have'    => $args['nice_to_have']    ?? [],
                 'salary_range'    => $args['salary_range']    ?? null,
-                'status'          => 'open',
-                'agent_job_id'    => $job->id,
+                'status'          => 'active',
+                'agent_run_id'    => $job->id,
+                'metadata'        => [
+                    'platforms' => ['rozee.pk', 'indeed.pk', 'linkedin'],
+                    'auto_published' => true,
+                ],
             ]);
+
+            \App\Models\SystemEvent::emit(
+                'job_posting_created',
+                "Job posting '{$posting->title}' created and published to platforms",
+                'info',
+                'hiring_agent',
+                $posting->id,
+                'JobPosting',
+                ['platforms' => ['rozee.pk', 'indeed.pk', 'linkedin']]
+            );
 
             return $this->toolResult(true, [
                 'job_id'     => $posting->id,

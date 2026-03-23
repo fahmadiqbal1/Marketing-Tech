@@ -23,16 +23,16 @@
     <div class="flex flex-wrap items-center gap-3">
         <div class="flex bg-slate-800/60 border border-slate-700/50 rounded-lg p-1 gap-0.5">
             <button @click="levelFilter = ''; currentPage = 1; load()"
-                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all active:scale-95"
                 :class="levelFilter === '' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'">All</button>
             <button @click="levelFilter = 'info'; currentPage = 1; load()"
-                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all active:scale-95"
                 :class="levelFilter === 'info' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'">Info</button>
             <button @click="levelFilter = 'warning'; currentPage = 1; load()"
-                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all active:scale-95"
                 :class="levelFilter === 'warning' ? 'bg-amber-500 text-white' : 'text-slate-400 hover:text-white'">Warning</button>
             <button @click="levelFilter = 'error'; currentPage = 1; load()"
-                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all active:scale-95"
                 :class="levelFilter === 'error' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'">Error</button>
         </div>
 
@@ -57,20 +57,69 @@
                 </tr>
             </thead>
             <tbody>
+                {{-- Skeleton loading rows --}}
                 <template x-if="loading && !events.length">
-                    <tr><td colspan="5" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                    <template x-for="i in [1,2,3,4,5]" :key="i">
+                        <tr class="border-b border-slate-800/60">
+                            <td class="py-3"><div class="skeleton h-5 w-16 rounded-full"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-28"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-20"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-48"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-16"></div></td>
+                        </tr>
+                    </template>
                 </template>
                 <template x-if="!loading && !events.length">
                     <tr><td colspan="5" class="py-8 text-center text-slate-500">No system events found.</td></tr>
                 </template>
                 <template x-for="event in events" :key="event.id">
-                    <tr class="border-b border-slate-800/60 align-top hover:bg-slate-800/30 transition-colors">
-                        <td class="py-3"><span class="badge" :class="statusBadge(event.level)" x-text="event.level"></span></td>
-                        <td class="py-3 text-slate-300" x-text="event.event"></td>
-                        <td class="py-3 text-slate-400 text-xs" x-text="event.source || 'app'"></td>
-                        <td class="py-3 text-slate-400 max-w-sm truncate" x-text="event.message"></td>
-                        <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(event.created_at)"></td>
-                    </tr>
+                    <template x-if="true">
+                        <tbody>
+                            {{-- Main event row --}}
+                            <tr class="border-b border-slate-800/60 align-top hover:bg-slate-800/30 transition-colors cursor-pointer"
+                                @click="expanded = expanded === event.id ? null : event.id">
+                                <td class="py-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="badge" :class="statusBadge(event.level)" x-text="event.level"></span>
+                                        <svg class="w-3 h-3 text-slate-500 flex-shrink-0 transition-transform duration-200"
+                                             :class="expanded === event.id ? 'rotate-180' : ''"
+                                             fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </div>
+                                </td>
+                                <td class="py-3 text-slate-300" x-text="event.event"></td>
+                                <td class="py-3 text-slate-400 text-xs" x-text="event.source || 'app'"></td>
+                                <td class="py-3 text-slate-400 max-w-sm truncate" x-text="event.message"></td>
+                                <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(event.created_at)"></td>
+                            </tr>
+                            {{-- Expandable detail row --}}
+                            <tr x-show="expanded === event.id" class="bg-slate-900/60">
+                                <td colspan="5" class="px-4 pb-4 pt-2">
+                                    <div class="space-y-3">
+                                        {{-- Full message --}}
+                                        <div>
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Full Message</p>
+                                            <p class="text-sm text-slate-300 whitespace-pre-wrap" x-text="event.message"></p>
+                                        </div>
+                                        {{-- Payload / context --}}
+                                        <div x-show="event.payload && Object.keys(event.payload).length > 0">
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Payload</p>
+                                            <div class="border border-slate-700/50 bg-slate-800/60 rounded-lg p-3">
+                                                <pre class="text-xs text-slate-300 font-mono whitespace-pre-wrap overflow-x-auto" x-text="JSON.stringify(event.payload, null, 2)"></pre>
+                                            </div>
+                                        </div>
+                                        <div x-show="event.context && Object.keys(event.context).length > 0">
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Context</p>
+                                            <div class="border border-slate-700/50 bg-slate-800/60 rounded-lg p-3">
+                                                <pre class="text-xs text-slate-300 font-mono whitespace-pre-wrap overflow-x-auto" x-text="JSON.stringify(event.context, null, 2)"></pre>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
                 </template>
             </tbody>
         </table>
@@ -100,6 +149,7 @@ function systemApp() {
         totalPages: 1,
         totalEntries: 0,
         loading: false,
+        expanded: null,
         counts: {},
         severities: [
             { key: 'info',    label: 'Info',    color: 'text-sky-400' },
@@ -112,7 +162,20 @@ function systemApp() {
             const saved = JSON.parse(localStorage.getItem('filters_system') ?? '{}');
             const validLevels = ['', 'info', 'warning', 'error', 'debug'];
             this.levelFilter = validLevels.includes(saved.levelFilter ?? '') ? (saved.levelFilter ?? '') : '';
-            await this.load();
+            // Run load and counts in parallel
+            await Promise.all([this.load(), this.loadCounts()]);
+            // Auto-refresh every 20 seconds
+            setInterval(() => this.load(), 20000);
+        },
+
+        async loadCounts() {
+            for (const sev of this.severities) {
+                try {
+                    const r = await fetch(`/dashboard/api/system-events?level=${sev.key}&per_page=1`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    const d = await r.json();
+                    this.counts[sev.key] = d.total ?? 0;
+                } catch(_) {}
+            }
         },
 
         async load() {
@@ -133,14 +196,6 @@ function systemApp() {
                 this.totalEntries = d.total ?? 0;
                 this.totalPages   = d.last_page ?? 1;
                 this.currentPage  = d.current_page ?? 1;
-
-                // Tally counts from current page (approximate for filter cards)
-                if (!this.levelFilter) {
-                    const tally = {};
-                    this.events.forEach(e => { tally[e.level] = (tally[e.level] || 0) + 1; });
-                    // Merge without wiping counts from other pages
-                    Object.assign(this.counts, tally);
-                }
 
                 updateTimestamp();
             } catch (error) {

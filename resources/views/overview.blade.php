@@ -27,6 +27,19 @@
     </template>
 
     {{-- ── Stat cards ─────────────────────────────────────────── --}}
+    <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+            <span x-show="refreshing" class="flex items-center gap-1.5 text-xs text-slate-400">
+                <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Updating…
+            </span>
+        </div>
+        <button @click="manualRefresh()"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-700/50 hover:border-slate-600 transition-all">
+            <svg class="w-3.5 h-3.5" :class="refreshing ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Refresh
+        </button>
+    </div>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 
         {{-- Total Workflows --}}
@@ -37,7 +50,7 @@
                     <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
                 </div>
             </div>
-            <p class="text-3xl font-bold text-white" x-text="totalWorkflows">–</p>
+            <p class="text-3xl font-bold text-white" x-text="displayStats.totalWorkflows ?? '–'"></p>
             <p class="text-xs text-slate-500 mt-1">
                 <span class="text-emerald-400" x-text="(stats.workflows?.completed ?? 0) + ' completed'"></span>
                 &nbsp;·&nbsp;
@@ -54,7 +67,7 @@
                     <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 </div>
             </div>
-            <p class="text-3xl font-bold text-white" x-text="stats.active_jobs ?? 0">–</p>
+            <p class="text-3xl font-bold text-white" x-text="displayStats.activeJobs ?? '–'"></p>
             <p class="text-xs text-slate-500 mt-1">
                 <span x-text="(stats.queue_depth ?? 0) + ' queued'"></span>
                 <span class="ml-1 text-xs text-brand-400">→ view jobs</span>
@@ -70,7 +83,7 @@
                 </div>
             </div>
             <div class="flex items-end gap-2">
-                <p class="text-3xl font-bold text-white" x-text="'$' + (stats.ai_cost_today ?? 0).toFixed(4)">–</p>
+                <p class="text-3xl font-bold text-white" x-text="'$' + (displayStats.aiCost ?? 0).toFixed(4)"></p>
                 <span class="mb-1 text-xs font-medium flex items-center gap-0.5"
                       :class="costTrend > 0 ? 'text-red-400' : costTrend < 0 ? 'text-emerald-400' : 'text-slate-500'"
                       x-show="stats.ai_cost_yesterday != null && stats.ai_cost_today != null">
@@ -100,7 +113,7 @@
                     <svg class="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                 </div>
             </div>
-            <p class="text-3xl font-bold" :class="pendingApproval > 0 ? 'text-orange-400' : 'text-white'" x-text="pendingApproval">–</p>
+            <p class="text-3xl font-bold" :class="pendingApproval > 0 ? 'text-orange-400' : 'text-white'" x-text="displayStats.pendingApproval ?? '–'"></p>
             <p class="text-xs text-slate-500 mt-1">
                 <span>workflows awaiting sign-off</span>
                 <span class="ml-1 text-xs text-brand-400" x-show="pendingApproval > 0">→ review</span>
@@ -188,7 +201,12 @@
             </div>
             <div class="space-y-2">
                 <template x-if="stats.recent_workflows?.length === 0">
-                    <p class="text-sm text-slate-500 text-center py-6">No workflows yet. Send a command to your Telegram bot to get started.</p>
+                    <div class="flex flex-col items-center gap-2 py-8">
+                        <svg class="w-8 h-8 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                        <p class="text-sm text-slate-500 text-center">No workflows yet.</p>
+                        <p class="text-xs text-slate-600 text-center">Send a Telegram command to get started</p>
+                        <span class="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono text-violet-400">/help</span>
+                    </div>
                 </template>
                 <template x-for="wf in (stats.recent_workflows ?? [])" :key="wf.id">
                     <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-700/30 transition-colors cursor-pointer" @click="window.location='/dashboard/workflows'">
@@ -221,13 +239,30 @@
                     <p class="text-sm text-slate-500 text-center py-6">No events yet</p>
                 </template>
                 <template x-for="ev in (stats.recent_events ?? [])" :key="ev.id">
-                    <div class="p-2.5 rounded-lg border border-slate-700/40 hover:border-slate-600/60 transition-colors">
+                    <div class="relative p-2.5 rounded-lg border border-slate-700/40 hover:border-slate-600/60 transition-colors cursor-pointer"
+                         @click="selectedEvent = (selectedEvent === ev.id ? null : ev.id)">
                         <div class="flex items-start gap-2">
                             <span class="badge mt-0.5 flex-shrink-0" :class="statusBadge(ev.level)" x-text="ev.level"></span>
-                            <div class="min-w-0">
+                            <div class="min-w-0 flex-1">
                                 <p class="text-xs text-slate-300 truncate" x-text="ev.event"></p>
                                 <p class="text-xs text-slate-500 mt-0.5" x-text="relativeTime(ev.created_at)"></p>
                             </div>
+                            <svg class="w-3 h-3 text-slate-600 flex-shrink-0 mt-0.5 transition-transform"
+                                 :class="selectedEvent === ev.id ? 'rotate-180' : ''"
+                                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </div>
+                        {{-- Expanded detail --}}
+                        <div x-show="selectedEvent === ev.id"
+                             x-transition:enter="transition ease-out duration-150"
+                             x-transition:enter-start="opacity-0 -translate-y-1"
+                             x-transition:enter-end="opacity-100 translate-y-0"
+                             class="mt-2 pt-2 border-t border-slate-700/40">
+                            <p class="text-xs text-slate-300 break-words leading-relaxed" x-text="ev.event"></p>
+                            <template x-if="ev.context">
+                                <p class="mt-1 text-xs text-slate-500 font-mono break-all" x-text="typeof ev.context === 'string' ? ev.context : JSON.stringify(ev.context)"></p>
+                            </template>
                         </div>
                     </div>
                 </template>
@@ -358,6 +393,26 @@ function overviewApp() {
         costChartInstance: null,
         socialHealth: {},
         contentVelocity: {},
+        refreshing: false,
+        selectedEvent: null,
+        displayStats: { totalWorkflows: '–', activeJobs: '–', aiCost: 0, pendingApproval: '–' },
+
+        // Animates a numeric value from 0 to `target` over `duration` ms,
+        // writing into `this.displayStats[key]` at each frame.
+        animateCounter(key, target, duration = 600, isFloat = false) {
+            const start = performance.now();
+            const from  = 0;
+            const step  = (now) => {
+                const elapsed  = now - start;
+                const progress = Math.min(elapsed / duration, 1);
+                // ease-out quad
+                const eased = 1 - (1 - progress) * (1 - progress);
+                const current = from + (target - from) * eased;
+                this.displayStats[key] = isFloat ? current : Math.round(current);
+                if (progress < 1) requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+        },
 
         get totalWorkflows() {
             return Object.values(this.stats.workflows ?? {}).reduce((a, b) => a + Number(b), 0);
@@ -422,16 +477,27 @@ function overviewApp() {
             await Promise.all([this.load(), this.loadHealth(), this.loadSocialHealth(), this.loadContentVelocity()]);
             this.buildCharts();
             setInterval(() => this.load(), 12000);
-            setInterval(() => { this.loadSocialHealth(); this.loadContentVelocity(); }, 60000);
+            setInterval(() => { this.loadSocialHealth(); this.loadContentVelocity(); this.loadHealth(); }, 30000);
+        },
+
+        async manualRefresh() {
+            await Promise.all([this.load(), this.loadHealth(), this.loadSocialHealth(), this.loadContentVelocity()]);
         },
 
         async load() {
+            this.refreshing = true;
             try {
                 const data = this.applyMeta(await apiGet('/dashboard/api/stats'));
                 this.stats = data;
                 this.updateCharts();
                 updateTimestamp();
+                // Animate stat counters on each data load
+                this.animateCounter('totalWorkflows', this.totalWorkflows, 600, false);
+                this.animateCounter('activeJobs',     Number(data.active_jobs ?? 0), 600, false);
+                this.animateCounter('aiCost',         Number(data.ai_cost_today ?? 0), 600, true);
+                this.animateCounter('pendingApproval', this.pendingApproval, 600, false);
             } catch (error) { this.handleError(error); }
+            this.refreshing = false;
         },
 
         buildCharts() {

@@ -146,6 +146,9 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/social-accounts',                     [DashboardController::class, 'apiUpsertSocialAccount']);
             Route::patch('/social-accounts/{id}',               [DashboardController::class, 'apiPatchSocialAccount']);
             Route::delete('/social-accounts/{id}',              [DashboardController::class, 'apiDeleteSocialAccount']);
+
+            // Hiring: candidate resume intake
+            Route::post('/candidates/apply', [DashboardController::class, 'apiCandidateApply']);
         });
 
         // ── Heavy / expensive operations — 5 req/min ────────────────────────────

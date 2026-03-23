@@ -39,7 +39,7 @@
                     class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                     :class="filter === s.value ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'">
                     <span x-text="s.label"></span>
-                    <span class="ml-1 text-xs opacity-60" x-text="s.value && counts[s.value] ? '(' + counts[s.value] + ')' : ''"></span>
+                    <span class="ml-1 text-xs opacity-60" x-text="s.value && workflowCounts[s.value] ? '(' + workflowCounts[s.value] + ')' : ''"></span>
                 </button>
             </template>
         </div>
@@ -59,6 +59,7 @@
 
         <div class="ml-auto flex items-center gap-2">
             <span class="text-xs text-slate-500" x-text="total + ' workflows'"></span>
+            <span class="text-xs text-slate-600" x-show="lastRefresh" x-text="'Auto-refreshes every 15s'"></span>
             <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
                 <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             </button>
@@ -211,6 +212,7 @@ function workflowsApp() {
         loading: false, total: 0, page: 1, lastPage: 1,
         expanded: null, detail: null, detailLoading: false,
         counts: {},
+        lastRefresh: null,
         confirmApprovalId: null, confirmApprovalName: '',
         statuses: [
             { label: 'All', value: '' },
@@ -220,6 +222,13 @@ function workflowsApp() {
             { label: 'Failed', value: 'failed' },
             { label: 'Cancelled', value: 'cancelled' },
         ],
+
+        // Tallies status counts from the currently loaded workflows array
+        get workflowCounts() {
+            const c = {};
+            this.workflows.forEach(w => { c[w.status] = (c[w.status] || 0) + 1; });
+            return c;
+        },
 
         async init() {
             await this.load();
@@ -237,6 +246,7 @@ function workflowsApp() {
                 this.workflows = d.data ?? [];
                 this.total     = d.total ?? 0;
                 this.lastPage  = d.last_page ?? 1;
+                this.lastRefresh = new Date();
                 updateTimestamp();
             } catch (error) { this.handleError(error); }
             this.loading = false;
@@ -251,6 +261,11 @@ function workflowsApp() {
                 this.detail = this.applyMeta(await apiGet('/dashboard/api/workflows/' + id));
             } catch (error) { this.handleError(error); }
             this.detailLoading = false;
+            // Scroll log container to bottom after logs render
+            this.$nextTick(() => {
+                const el = document.querySelector('.max-h-48.overflow-y-auto');
+                if (el) el.scrollTop = el.scrollHeight;
+            });
         },
 
         async confirmApprove() {
@@ -258,15 +273,24 @@ function workflowsApp() {
             this.confirmApprovalId = null;
             this.confirmApprovalName = '';
             await apiPost('/dashboard/api/workflows/' + id + '/approve');
+            showToast('Workflow approved — continuing execution', 'success');
             this.load();
         },
         async cancel(id) {
-            if (!confirm('Cancel this workflow?')) return;
+            const ok = await confirmAction(
+                'Cancel workflow?',
+                'This will stop the workflow. This action cannot be undone.',
+                'Cancel Workflow',
+                'bg-red-600 hover:bg-red-500'
+            );
+            if (!ok) return;
             await apiPost('/dashboard/api/workflows/' + id + '/cancel');
+            showToast('Workflow cancelled', 'warning');
             this.load();
         },
         async retry(id) {
             await apiPost('/dashboard/api/workflows/' + id + '/retry');
+            showToast('Workflow queued for retry', 'info');
             this.load();
         },
 
