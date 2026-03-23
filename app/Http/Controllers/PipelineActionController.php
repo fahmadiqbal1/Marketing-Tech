@@ -11,6 +11,7 @@ use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**

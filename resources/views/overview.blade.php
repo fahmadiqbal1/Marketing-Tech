@@ -366,8 +366,8 @@ function overviewApp() {
             return Number(this.stats.workflows?.owner_approval ?? 0);
         },
         get costTrend() {
-            const today = this.stats.ai_cost_today ?? 0;
-            const yesterday = this.stats.ai_cost_yesterday ?? 0;
+            const today = Number(this.stats.ai_cost_today ?? 0);
+            const yesterday = Number(this.stats.ai_cost_yesterday ?? 0);
             if (yesterday === 0 && today === 0) return 0;
             if (yesterday === 0) return 100;
             return Math.round(((today - yesterday) / yesterday) * 100);

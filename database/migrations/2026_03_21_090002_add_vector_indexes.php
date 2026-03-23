@@ -15,13 +15,21 @@ return new class extends Migration {
         }
 
         // IVFFlat index on knowledge_base.embedding (up to 2000 dims — cosine similarity)
-        // Note: IVFFlat requires > 0 rows
-        DB::statement(
-            "CREATE INDEX IF NOT EXISTS knowledge_base_embedding_ivfflat_idx
-             ON knowledge_base
-             USING ivfflat (embedding vector_cosine_ops)
-             WITH (lists = 100)"
+        // Note: IVFFlat requires > 0 rows; guard against missing column
+        $hasKbEmbedding = DB::select(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'knowledge_base' AND column_name = 'embedding'
+             LIMIT 1"
         );
+
+        if (! empty($hasKbEmbedding)) {
+            DB::statement(
+                "CREATE INDEX IF NOT EXISTS knowledge_base_embedding_ivfflat_idx
+                 ON knowledge_base
+                 USING ivfflat (embedding vector_cosine_ops)
+                 WITH (lists = 100)"
+            );
+        }
 
         // HNSW index on workflows.embedding if column exists
         $hasWorkflowEmbedding = DB::select(

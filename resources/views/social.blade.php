@@ -624,31 +624,7 @@ function trendComponent() {
     };
 }
 
-// Helper: apiPut
-async function apiPut(url, data) {
-    const r = await fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return r.json();
-}
-
-async function apiPatch(url, data) {
-    const r = await fetch(url, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return r.json();
-}
-
-async function apiDelete(url) {
-    return fetch(url, {
-        method: 'DELETE',
-        headers: { 'X-CSRF-TOKEN': getCsrfToken(), 'Accept': 'application/json' },
-    }).then(r => r.json());
-}
+// apiPut/apiPatch/apiDelete defined globally in layouts/app.blade.php
 </script>
 @endpush
 @endsection

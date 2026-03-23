@@ -19,8 +19,9 @@ class ProcessTrends implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 1;
-    public int $timeout = 60;
+    public string $queue   = 'low';
+    public int    $tries   = 1;
+    public int    $timeout = 60;
 
     // Confidence threshold: pattern must appear in ≥3 knowledge base entries
     private const MIN_CONFIDENCE_COUNT = 3;

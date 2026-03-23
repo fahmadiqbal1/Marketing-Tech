@@ -185,8 +185,11 @@ function jobsApp() {
 
         jobDuration(job) {
             if (!job.started_at) return '—';
+            const start = new Date(job.started_at);
+            if (isNaN(start.getTime())) return '—';
             const end = job.completed_at ? new Date(job.completed_at) : new Date();
-            const secs = Math.round((end - new Date(job.started_at)) / 1000);
+            const secs = Math.round((end - start) / 1000);
+            if (isNaN(secs) || secs < 0) return '—';
             if (secs < 60) return secs + 's';
             return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
         },

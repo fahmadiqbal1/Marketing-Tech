@@ -540,11 +540,12 @@ PROMPT;
 
     private function toolAnalyseContent(array $args): string
     {
+        $platform = $args['platform'] ?? 'general';
         $prompt = <<<PROMPT
 Analyse this content for quality. Return ONLY JSON.
 
 Content: {$args['content']}
-Platform: {$args['platform'] ?? 'general'}
+Platform: {$platform}
 
 Return:
 {

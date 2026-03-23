@@ -383,6 +383,7 @@ class CandidateScoreSkill implements SkillInterface
         $requirements = implode("\n- ", $params['requirements']);
         $niceToHave   = ! empty($params['nice_to_have']) ? implode("\n- ", $params['nice_to_have']) : 'None specified';
 
+        $candidateSkills = implode(', ', $candidate['skills'] ?? []);
         $prompt = <<<PROMPT
 Score this candidate for the role. Return ONLY valid JSON.
 
@@ -398,7 +399,7 @@ CANDIDATE:
 Name: {$candidate['name']}
 Title: {$candidate['current_title']}
 Experience: {$candidate['years_experience']} years
-Skills: {implode(', ', $candidate['skills'] ?? [])}
+Skills: {$candidateSkills}
 Summary: {$candidate['summary']}
 
 Score 0-100 on each dimension. Return:

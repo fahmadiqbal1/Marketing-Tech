@@ -243,6 +243,58 @@
         return payload;
     }
 
+    async function apiPut(url, data = {}) {
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify(data),
+        });
+        const text = await response.text();
+        const payload = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+            throw new Error(payload.message || `Request failed with status ${response.status}`);
+        }
+        return payload;
+    }
+
+    async function apiPatch(url, data = {}) {
+        const response = await fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+            body: JSON.stringify(data),
+        });
+        const text = await response.text();
+        const payload = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+            throw new Error(payload.message || `Request failed with status ${response.status}`);
+        }
+        return payload;
+    }
+
+    async function apiDelete(url) {
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+            },
+        });
+        const text = await response.text();
+        const payload = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+            throw new Error(payload.message || `Request failed with status ${response.status}`);
+        }
+        return payload;
+    }
+
     function dashboardState() {
         return {
             warning: '',
