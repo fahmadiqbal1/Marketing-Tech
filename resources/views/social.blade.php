@@ -5,6 +5,33 @@
 @section('content')
 <div class="space-y-6">
 
+    {{-- OAuth flash messages --}}
+    @if(session('success') || session('error') || session('info'))
+    <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 6000)"
+         x-transition:leave="transition ease-in duration-300"
+         x-transition:leave-start="opacity-100 translate-y-0"
+         x-transition:leave-end="opacity-0 -translate-y-2"
+         class="rounded-xl border px-4 py-3 flex items-start gap-3 text-sm
+                @if(session('success')) bg-emerald-500/10 border-emerald-500/20 text-emerald-300
+                @elseif(session('error'))   bg-red-500/10   border-red-500/20   text-red-300
+                @else                       bg-sky-500/10   border-sky-500/20   text-sky-300
+                @endif">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            @if(session('success'))
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            @elseif(session('error'))
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            @else
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            @endif
+        </svg>
+        <span>{{ session('success') ?? session('error') ?? session('info') }}</span>
+        <button @click="show = false" class="ml-auto opacity-60 hover:opacity-100 transition-opacity">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+    </div>
+    @endif
+
     {{-- Tab navigation --}}
     <div x-data="{ activeTab: 'calendar' }" class="space-y-6">
         <div class="flex gap-2 border-b border-slate-700/60 pb-0">
