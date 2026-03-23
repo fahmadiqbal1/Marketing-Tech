@@ -144,7 +144,14 @@
                 <input x-model="newCampaign.subject" type="text" placeholder="Subject line" class="form-input w-full">
                 <input x-model="newCampaign.schedule_at" type="datetime-local" class="form-input w-full">
                 <div class="flex gap-2 pt-1">
-                    <button @click="createCampaign()" :disabled="saving" class="btn-primary flex-1 text-sm py-2" x-text="saving ? 'Creating…' : 'Create Campaign'"></button>
+                    <button @click="createCampaign()" :disabled="saving"
+                            class="btn-primary flex-1 text-sm py-2 flex items-center justify-center gap-2">
+                        <svg x-show="saving" class="animate-spin w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span x-text="saving ? 'Creating…' : 'Create Campaign'"></span>
+                    </button>
                     <button @click="showCreate = false" class="flex-1 text-sm py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors">Cancel</button>
                 </div>
                 <div x-show="createError" x-text="createError" class="text-red-400 text-sm"></div>

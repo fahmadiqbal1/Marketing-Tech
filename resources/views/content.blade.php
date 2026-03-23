@@ -258,8 +258,43 @@
                         </div>
                     </template>
 
+                    {{-- YouTube --}}
+                    <template x-if="detail?.platform === 'youtube'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl overflow-hidden max-w-xs">
+                            <div class="bg-slate-800/60 h-36 flex flex-col items-center justify-center relative">
+                                <svg class="w-8 h-8 text-red-500/70 mb-2" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                                <span class="text-xs text-slate-500">YouTube video / Short</span>
+                                <div class="absolute bottom-2 left-3 right-3">
+                                    <p class="text-xs text-white/80 leading-snug line-clamp-2" x-text="(detail?.body ?? '').substring(0, 100)"></p>
+                                </div>
+                            </div>
+                            <div class="p-3">
+                                <p class="text-xs text-slate-300 leading-relaxed line-clamp-2" x-text="(detail?.title ?? detail?.body ?? '').substring(0, 80)"></p>
+                                <p class="text-xs text-slate-500 mt-1">your_channel · 0 views</p>
+                            </div>
+                        </div>
+                    </template>
+
+                    {{-- Facebook --}}
+                    <template x-if="detail?.platform === 'facebook'">
+                        <div class="bg-slate-950 border border-slate-700/40 rounded-xl p-4 max-w-xs">
+                            <div class="flex gap-3 mb-3">
+                                <div class="w-9 h-9 rounded-full bg-blue-600/30 flex items-center justify-center text-blue-400 text-sm font-bold shrink-0">M</div>
+                                <div>
+                                    <p class="text-xs font-semibold text-slate-200">Your Brand Page</p>
+                                    <p class="text-xs text-slate-500">Now · 🌐</p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-300 leading-relaxed line-clamp-4" x-text="(detail?.body ?? '').substring(0, 200)"></p>
+                            <p class="text-xs text-sky-400 mt-1.5" x-text="hashtagSuggestions.slice(0, 3).join(' ')"></p>
+                            <div class="flex gap-4 mt-3 pt-2 border-t border-slate-800 text-xs text-slate-500">
+                                <span>👍 Like</span><span>💬 Comment</span><span>↗ Share</span>
+                            </div>
+                        </div>
+                    </template>
+
                     {{-- Generic fallback --}}
-                    <template x-if="!['instagram','twitter','linkedin','tiktok'].includes(detail?.platform ?? '')">
+                    <template x-if="!['instagram','twitter','linkedin','tiktok','youtube','facebook'].includes(detail?.platform ?? '')">
                         <div class="bg-slate-800/40 border border-slate-700/40 rounded-lg p-4 max-w-xs">
                             <p class="text-xs text-slate-400 capitalize" x-text="(detail?.platform ?? 'generic') + ' post'"></p>
                             <p class="text-xs text-slate-300 mt-1 line-clamp-4" x-text="(detail?.body ?? '').substring(0, 200)"></p>

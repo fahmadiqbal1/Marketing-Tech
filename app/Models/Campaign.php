@@ -22,4 +22,5 @@ class Campaign extends Model {
         return $this->send_count > 0 ? round($this->click_count / $this->send_count * 100, 2) : 0;
     }
     public function candidates() { return $this->hasMany(Candidate::class); }
+    public function agentJobs() { return $this->hasMany(AgentJob::class); }
 }
