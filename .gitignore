@@ -34,3 +34,13 @@ composer.phar
 
 # Accidental shell-script artefacts (never commit these)
 test_trait.php
+
+# SQLite — project uses PostgreSQL only
+database/database.sqlite
+*.sqlite
+*.sqlite3
+
+# Junk file patterns from shell accidents
+*.status
+spawn-*.log
+i.status

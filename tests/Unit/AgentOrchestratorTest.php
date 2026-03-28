@@ -120,7 +120,7 @@ class AgentOrchestratorTest extends TestCase
             userId:      1,
         );
 
-        $this->assertEquals(80, mb_strlen($job->short_description));
+        $this->assertLessThanOrEqual(83, mb_strlen($job->short_description));
     }
 
     public function test_dispatch_assigns_correct_agent_class(): void

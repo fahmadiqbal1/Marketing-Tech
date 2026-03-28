@@ -21,20 +21,25 @@
     </source>
 
     <php>
-        <!-- Use in-memory SQLite for all tests — fast, no external DB needed -->
+        <!-- PostgreSQL test database — mirrors production stack exactly -->
         <env name="APP_ENV"              value="testing"/>
         <env name="APP_KEY"              value="base64:U29tZVZlcnlTZWNyZXRLZXlGb3JUZXN0aW5nT25seSE="/>
         <env name="APP_DEBUG"            value="true"/>
         <env name="LOG_CHANNEL"          value="null"/>
-        <env name="DB_CONNECTION"        value="sqlite"/>
-        <env name="DB_DATABASE"          value=":memory:"/>
+        <env name="DB_CONNECTION"        value="pgsql"/>
+        <env name="DB_HOST"              value="postgres"/>
+        <env name="DB_PORT"              value="5432"/>
+        <env name="DB_DATABASE"          value="marketing_tech_test"/>
+        <env name="DB_USERNAME"          value="postgres"/>
+        <env name="DB_PASSWORD"          value="admin"/>
+        <env name="REDIS_HOST"           value="redis"/>
         <env name="CACHE_DRIVER"         value="array"/>
         <env name="SESSION_DRIVER"       value="array"/>
         <env name="QUEUE_CONNECTION"     value="sync"/>
         <env name="MAIL_MAILER"          value="array"/>
         <env name="BROADCAST_DRIVER"     value="log"/>
         <env name="FILESYSTEM_DISK"      value="local"/>
-        <!-- Dashboard Basic Auth — set credentials so auth tests can pass them -->
+        <!-- Dashboard Basic Auth credentials for tests -->
         <env name="DASHBOARD_USERNAME"   value="testuser"/>
         <env name="DASHBOARD_PASSWORD"   value="testpass"/>
         <!-- Telegram webhook secret used by WebhookAuthService -->

@@ -33,12 +33,11 @@ services:
     volumes:
       - ./:/var/www/html
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   # ── PostgreSQL 15 + pgvector ─────────────────────────────────────────────
   postgres:
-    image: ankane/pgvector:v0.7.0
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: marketing_tech
       POSTGRES_USER: postgres

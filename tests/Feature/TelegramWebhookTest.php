@@ -29,7 +29,7 @@ class TelegramWebhookTest extends TestCase
     use RefreshDatabase;
 
     private string $secret;
-    private string $webhookUri = '/webhook/telegram';
+    private string $webhookUri = '/api/webhook/telegram';
 
     protected function setUp(): void
     {
@@ -38,6 +38,12 @@ class TelegramWebhookTest extends TestCase
         // Read the secret that phpunit.xml injects via TELEGRAM_WEBHOOK_SECRET
         // and that the config('agents.telegram.webhook_secret') path resolves to.
         $this->secret = config('agents.telegram.webhook_secret', 'test-webhook-secret-token');
+
+        // Always stub TelegramBotService to prevent the container from resolving
+        // the full AgentOrchestrator + all 6 agents dependency tree in every test.
+        $this->mock(TelegramBotService::class, function ($mock) {
+            $mock->shouldReceive('handleUpdate')->zeroOrMoreTimes();
+        });
     }
 
     /**

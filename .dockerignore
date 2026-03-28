@@ -1,0 +1,44 @@
+# Dependencies — reinstalled inside the image
+vendor/
+node_modules/
+
+# Git history — not needed in image
+.git/
+.github/
+.gitignore
+
+# Local environment & secrets
+.env
+.env.*
+
+# Laravel runtime cache — regenerated inside container
+storage/logs/
+storage/framework/cache/
+storage/framework/sessions/
+storage/framework/views/
+bootstrap/cache/
+
+# Test suite — not needed in production image
+tests/
+phpunit.xml
+
+# IDE / tool state
+.claude/
+.claude-flow/
+.continue/
+.idea/
+.vscode/
+
+# Documentation
+*.md
+!README.md
+
+# SQLite artifacts
+database/database.sqlite
+*.sqlite
+*.sqlite3
+
+# Misc artifacts
+*.log
+*.status
+spawn-*.log

@@ -16,8 +16,8 @@ class DashboardBasicAuth
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $username = env('DASHBOARD_USERNAME');
-        $password = env('DASHBOARD_PASSWORD');
+        $username = config('dashboard.username');
+        $password = config('dashboard.password');
 
         // No credentials configured → allow through
         if (empty($username) || empty($password)) {

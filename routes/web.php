@@ -55,7 +55,8 @@ Route::get('/health', function () {
     // ── Redis ─────────────────────────────────────────────────────────────
     try {
         $pong = Redis::ping();
-        $checks['redis'] = ['ok' => ($pong === '+PONG' || $pong === true || $pong === 1)];
+        $pongStr = is_object($pong) ? (string) $pong : (string) $pong;
+        $checks['redis'] = ['ok' => str_contains(strtoupper($pongStr), 'PONG')];
     } catch (\Throwable $e) {
         $checks['redis'] = ['ok' => false, 'error' => $e->getMessage()];
         $healthy = false;

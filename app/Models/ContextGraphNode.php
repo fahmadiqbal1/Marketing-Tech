@@ -34,11 +34,12 @@ class ContextGraphNode extends Model
             return collect();
         }
 
-        $vec = '['.implode(',', $embedding).']';
+        $safeFloats = array_map('floatval', $embedding);
+        $vec = '['.implode(',', $safeFloats).']';
         $query = DB::table('context_graph_nodes')
-            ->selectRaw("*, 1 - (embedding <=> '{$vec}'::vector) as similarity")
-            ->where(DB::raw("1 - (embedding <=> '{$vec}'::vector)"), '>=', 0.6)
-            ->orderByRaw("embedding <=> '{$vec}'::vector")
+            ->selectRaw('*, 1 - (embedding <=> ?::vector) as similarity', [$vec])
+            ->whereRaw('1 - (embedding <=> ?::vector) >= 0.6', [$vec])
+            ->orderByRaw('embedding <=> ?::vector', [$vec])
             ->limit($topK);
         if ($type) {
             $query->where('type', $type);
