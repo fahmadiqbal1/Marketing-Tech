@@ -5,51 +5,93 @@ use App\Http\Controllers\PipelineActionController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Middleware\DashboardBasicAuth;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 Route::get('/', fn() => redirect('/dashboard'));
 
 Route::get('/health', function () {
+    $checks  = [];
+    $healthy = true;
+
+    // ── Database ──────────────────────────────────────────────────────────
     try {
         DB::connection()->getPdo();
-
-        $pendingJobs = DB::table('jobs')->count();
-        $failedJobs = DB::table('failed_jobs')->count();
+        $pendingJobs      = DB::table('jobs')->count();
+        $failedJobs       = DB::table('failed_jobs')->count();
+        $oldestPending    = DB::table('jobs')->orderBy('created_at')->value('created_at');
+        $oldestAt         = $oldestPending ? Carbon::createFromTimestamp((int) $oldestPending) : null;
+        $queueLagSeconds  = $oldestAt ? now()->diffInSeconds($oldestAt) : 0;
 
         $lastActivity = \App\Models\AgentTask::whereIn('status', ['completed', 'failed'])
-            ->latest('updated_at')
-            ->value('updated_at');
+            ->latest('updated_at')->value('updated_at');
 
-        $oldestPending = DB::table('jobs')->orderBy('created_at')->value('created_at');
-        $oldestPendingAt = $oldestPending ? Carbon::createFromTimestamp((int) $oldestPending) : null;
-        $queueLagSeconds = $oldestPendingAt ? now()->diffInSeconds($oldestPendingAt) : 0;
-
-        return response()->json([
-            'status'             => 'healthy',
-            'timestamp'          => now()->toIso8601String(),
-            'database'           => 'reachable',
-            'queue_pending_jobs' => $pendingJobs,
-            'queue_failed_jobs'  => $failedJobs,
+        $checks['database'] = [
+            'ok'                 => true,
+            'pending_jobs'       => $pendingJobs,
+            'failed_jobs'        => $failedJobs,
             'queue_lag_seconds'  => $queueLagSeconds,
-            'last_task_activity' => optional($lastActivity)?->toIso8601String(),
             'worker_healthy'     => $queueLagSeconds < 300,
-        ]);
-    } catch (\Throwable $e) {
-        Log::warning('Health endpoint degraded', ['error' => $e->getMessage()]);
+            'last_task_activity' => optional($lastActivity)?->toIso8601String(),
+        ];
 
-        return response()->json([
-            'status'    => 'degraded',
-            'timestamp' => now()->toIso8601String(),
-            'database'  => 'unavailable',
-            'message'   => 'The application booted, but the configured database is not ready.',
-            'details'   => str_contains($e->getMessage(), 'could not find driver')
-                ? 'Install the configured database driver or switch DB_CONNECTION to a supported driver for local development.'
-                : 'Check database connectivity, migrations, and runtime configuration.',
-            'worker_healthy' => false,
-        ], 503);
+        // Check pgvector extension (PostgreSQL only)
+        if (config('database.default') === 'pgsql') {
+            $hasVector = DB::selectOne("SELECT COUNT(*) as cnt FROM pg_extension WHERE extname = 'vector'")?->cnt > 0;
+            $checks['database']['pgvector'] = $hasVector ? 'enabled' : 'missing';
+            if (! $hasVector) {
+                $healthy = false;
+            }
+        }
+    } catch (\Throwable $e) {
+        $checks['database'] = ['ok' => false, 'error' => $e->getMessage()];
+        $healthy = false;
     }
+
+    // ── Redis ─────────────────────────────────────────────────────────────
+    try {
+        $pong = Redis::ping();
+        $checks['redis'] = ['ok' => ($pong === '+PONG' || $pong === true || $pong === 1)];
+    } catch (\Throwable $e) {
+        $checks['redis'] = ['ok' => false, 'error' => $e->getMessage()];
+        $healthy = false;
+    }
+
+    // ── Storage (local write test) ────────────────────────────────────────
+    try {
+        $testPath = 'health-check-' . time() . '.tmp';
+        Storage::put($testPath, 'ok');
+        Storage::delete($testPath);
+        $checks['storage'] = ['ok' => true, 'disk' => config('filesystems.default')];
+    } catch (\Throwable $e) {
+        $checks['storage'] = ['ok' => false, 'error' => $e->getMessage()];
+        $healthy = false;
+    }
+
+    // ── Cache ─────────────────────────────────────────────────────────────
+    try {
+        Cache::put('health-check', 'ok', 5);
+        $val = Cache::get('health-check');
+        $checks['cache'] = ['ok' => $val === 'ok', 'driver' => config('cache.default')];
+    } catch (\Throwable $e) {
+        $checks['cache'] = ['ok' => false, 'error' => $e->getMessage()];
+        $healthy = false;
+    }
+
+    if (! $healthy) {
+        Log::warning('Health check degraded', ['checks' => $checks]);
+    }
+
+    return response()->json([
+        'status'    => $healthy ? 'healthy' : 'degraded',
+        'timestamp' => now()->toIso8601String(),
+        'ok'        => $healthy,
+        'checks'    => $checks,
+    ], $healthy ? 200 : 503);
 });
 
 Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(function () {
@@ -110,6 +152,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::get('/social-accounts',             [DashboardController::class, 'apiSocialAccounts']);
             Route::get('/trend-insights',              [DashboardController::class, 'apiTrendInsights']);
             Route::get('/social/health',               [DashboardController::class, 'apiSocialHealth']);
+            Route::get('/social-credentials',         [DashboardController::class, 'apiSocialCredentials']);
         });
 
         // ── Write / action endpoints — 10 req/min ────────────────────────────────
@@ -147,8 +190,12 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::patch('/social-accounts/{id}',               [DashboardController::class, 'apiPatchSocialAccount']);
             Route::delete('/social-accounts/{id}',              [DashboardController::class, 'apiDeleteSocialAccount']);
 
-            // Hiring: candidate resume intake
+            // Hiring: candidate resume intake + stage updates
             Route::post('/candidates/apply', [DashboardController::class, 'apiCandidateApply']);
+            Route::patch('/candidates/{id}', [DashboardController::class, 'apiPatchCandidate']);
+
+            // Social platform OAuth app credentials
+            Route::post('/social-credentials', [DashboardController::class, 'apiStoreSocialCredentials']);
         });
 
         // ── Heavy / expensive operations — 5 req/min ────────────────────────────

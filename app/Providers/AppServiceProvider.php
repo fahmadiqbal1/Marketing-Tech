@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -72,6 +73,23 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Warn on missing/placeholder required environment variables
+        if (app()->environment('production', 'staging')) {
+            $required = [
+                'APP_KEY', 'DB_PASSWORD',
+                'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+                'TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET',
+                'TELEGRAM_ALLOWED_USERS', 'TELEGRAM_ADMIN_CHAT_ID',
+                'DASHBOARD_PASSWORD',
+            ];
+            foreach ($required as $key) {
+                $val = env($key, '');
+                if (empty($val) || str_contains($val, 'CHANGE_ME')) {
+                    Log::critical("Required env var {$key} is missing or placeholder. Platform will not function correctly.");
+                }
+            }
+        }
+
         foreach ([
             storage_path('app/temp'),
             storage_path('framework/cache/data'),

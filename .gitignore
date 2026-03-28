@@ -21,3 +21,16 @@ yarn-error.log
 /.idea
 /.vscode
 docker-compose.override.yml
+
+# Laravel cache / compiled files
+/bootstrap/cache/*.php
+
+# Composer binary
+composer.phar
+
+# Claude Code / MCP runtime state
+/.claude-flow/
+/.continue/
+
+# Accidental shell-script artefacts (never commit these)
+test_trait.php

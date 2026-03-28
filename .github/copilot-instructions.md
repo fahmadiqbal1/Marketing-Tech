@@ -1,0 +1,32 @@
+<!-- Use this file to provide workspace-specific custom instructions to Copilot. For more details, visit https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubcopilotinstructionsmd-file -->
+- [x] Verify that the copilot-instructions.md file in the .github directory is created.
+- [x] Clarify Project Requirements
+  - This workspace is configured for persistent, reusable MCP server integration. The following MCP servers are globally available: browser MCP, magic MCP, git MCP, Stitch MCP, nano banana 2 MCP, ui/ux pro design skill, and 21st.dev. These will be accessible in any project using Claude, Copilot, or compatible agents.
+- [x] Scaffold the Project
+  - Created .vscode/mcp.json with all required MCP server entries. Each server is configured to launch via npx and the appropriate package name.
+- [ ] Customize the Project
+- [x] Install Required Extensions
+  - Installed recommended extensions for TypeScript, Python, C#, Java, Kotlin, Go, PHP, Ruby, and Rust. Swift extension installation failed (may require manual setup or alternative extension).
+- [x] Compile the Project
+  - MCP server configuration finalized. Ruflo (formerly claudeflow) is now integrated and available alongside all other MCP servers. All settings are persistent and reusable for any project.
+- [x] Create and Run Task
+  - Remotion skill has been added to `.claude/skills/` for Claude Code. Follow the instructions in `remotion.md` to use programmatic video creation in your workflows. All MCP and agent skills are now globally available.
+- [x] Launch the Project
+  - Superpowers and Frontend Design skills have been added to `.claude/skills/` for Claude Code. These enable advanced debugging, development, and UI/UX refinement workflows. All skills are globally available for any project.
+- [x] Ensure documentation is complete
+  - All requested skills (Remotion, Superpowers, Frontend Design) are now integrated in `.claude/skills/` and globally available. The setup is finalized and ready for use in the Marketing-Tech project or any future project. See each skill's `.md` file for usage and references.
+
+## References
+- [MCP Documentation](https://modelcontextprotocol.io/)
+- [TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+- [Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [Java SDK](https://github.com/modelcontextprotocol/java-sdk)
+- [Kotlin SDK](https://github.com/modelcontextprotocol/kotlin-sdk)
+- [C# SDK](https://github.com/modelcontextprotocol/csharp-sdk)
+- [Go SDK](https://github.com/modelcontextprotocol/go-sdk)
+- [PHP SDK](https://github.com/modelcontextprotocol/php-sdk)
+- [Ruby SDK](https://github.com/modelcontextprotocol/ruby-sdk)
+- [Rust SDK](https://github.com/modelcontextprotocol/rust-sdk)
+- [Swift SDK](https://github.com/modelcontextprotocol/swift-sdk)
+- [Servers List](https://github.com/modelcontextprotocol/servers)
+- [Inspector Tool](https://github.com/modelcontextprotocol/inspector)

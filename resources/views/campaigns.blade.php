@@ -8,34 +8,34 @@
     <div x-show="error"   class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"    x-text="error"></div>
 
     {{-- Stats row --}}
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div class="stat-card text-center">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3" id="campaigns-stats">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Total</p>
             <p class="text-2xl font-bold text-white" x-text="summary.total ?? 0"></p>
         </div>
-        <div class="stat-card text-center">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Active</p>
             <p class="text-2xl font-bold text-emerald-400" x-text="summary.active ?? 0"></p>
         </div>
-        <div class="stat-card text-center">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Scheduled</p>
             <p class="text-2xl font-bold text-violet-400" x-text="summary.scheduled ?? 0"></p>
         </div>
-        <div class="stat-card text-center">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Completed</p>
             <p class="text-2xl font-bold text-blue-400" x-text="summary.sent ?? 0"></p>
         </div>
-        <div class="stat-card text-center">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Total Sent</p>
             <p class="text-2xl font-bold text-white" x-text="(summary.total_sent ?? 0).toLocaleString()"></p>
         </div>
-        <div class="stat-card text-center">
+        <div class="stat-card glow-border text-center">
             <p class="text-xs text-slate-400 uppercase mb-1">Avg Open Rate</p>
             <p class="text-2xl font-bold text-amber-400" x-text="(summary.avg_open_rate ?? 0).toFixed(1) + '%'"></p>
         </div>
     </div>
 
-    {{-- Filter bar + Create button --}}
+    {{-- Filter bar + Sort + Create button --}}
     <div class="flex flex-wrap items-center gap-3">
         <div class="flex gap-1 bg-slate-900 rounded-xl p-1 border border-slate-700/50">
             @foreach(['','draft','active','scheduled','sent','paused'] as $s)
@@ -44,7 +44,7 @@
                 class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors capitalize">{{ $s ?: 'All' }}</button>
             @endforeach
         </div>
-        <select x-model="typeFilter" @change="load()" class="text-sm bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300 ml-auto">
+        <select x-model="typeFilter" @change="load()" class="text-sm bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300">
             <option value="">All types</option>
             <option value="email">Email</option>
             <option value="social">Social</option>
@@ -53,7 +53,13 @@
         </select>
         <input x-model="search" @input.debounce.300ms="load()" type="text"
                placeholder="Search campaigns…" class="text-sm bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300 w-48">
-        <button @click="openCreate()" class="btn-primary text-sm px-4 py-1.5">+ New Campaign</button>
+        {{-- Sort control --}}
+        <select x-model="sortBy" @change="sortCampaigns()" class="text-sm bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300">
+            <option value="created_at">Sort: Created Date</option>
+            <option value="open_rate">Sort: Open Rate</option>
+            <option value="send_count">Sort: Send Count</option>
+        </select>
+        <button @click="openCreate()" class="btn-primary text-sm px-4 py-1.5 ml-auto">+ New Campaign</button>
     </div>
 
     {{-- Campaign cards grid --}}
@@ -65,8 +71,8 @@
             </div>
         </template>
 
-        <template x-for="c in campaigns" :key="c.id">
-            <div class="stat-card flex flex-col gap-3">
+        <template x-for="c in sortedCampaigns" :key="c.id">
+            <div class="stat-card flex flex-col gap-3 group">
                 <div class="flex items-start justify-between">
                     <div class="flex-1 min-w-0">
                         <p class="font-semibold text-white truncate" x-text="c.name"></p>
@@ -75,10 +81,20 @@
                             <span class="badge text-xs" :class="statusBadge(c.status)" x-text="c.status"></span>
                         </div>
                     </div>
-                    <div class="flex gap-1.5 ml-2">
-                        <button @click="viewDetail(c)" class="text-xs text-violet-400 hover:text-violet-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">View</button>
-                        <button x-show="c.status === 'active'" @click="pauseCampaign(c.id)" class="text-xs text-amber-400 hover:text-amber-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">Pause</button>
-                        <button x-show="c.status === 'paused'" @click="resumeCampaign(c.id)" class="text-xs text-emerald-400 hover:text-emerald-300 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800">Resume</button>
+                    {{-- Hover-revealed action buttons --}}
+                    <div class="flex gap-1.5 ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                        <button @click="viewDetail(c)"
+                                class="text-xs font-medium text-violet-400 hover:text-white bg-violet-600/20 hover:bg-violet-600 border border-violet-500/30 hover:border-violet-500 transition-all px-2.5 py-1 rounded-lg">
+                            View
+                        </button>
+                        <button x-show="c.status === 'active'" @click="pauseCampaign(c.id)"
+                                class="text-xs font-medium text-amber-400 hover:text-white bg-amber-500/20 hover:bg-amber-500 border border-amber-500/30 hover:border-amber-500 transition-all px-2.5 py-1 rounded-lg">
+                            Pause
+                        </button>
+                        <button x-show="c.status === 'paused'" @click="resumeCampaign(c.id)"
+                                class="text-xs font-medium text-emerald-400 hover:text-white bg-emerald-500/20 hover:bg-emerald-500 border border-emerald-500/30 hover:border-emerald-500 transition-all px-2.5 py-1 rounded-lg">
+                            Resume
+                        </button>
                     </div>
                 </div>
 
@@ -170,9 +186,37 @@
                     <p class="text-xs text-slate-400 mt-1">
                         <span class="capitalize" x-text="detail.type ?? 'email'"></span>
                         · <span class="capitalize" x-text="detail.status"></span>
+                        <span x-show="detail.schedule_at"> · Scheduled <span x-text="relativeTime(detail.schedule_at)"></span></span>
                     </p>
                 </div>
-                <button @click="showDetail = false" class="text-slate-400 hover:text-white p-1">✕</button>
+                <div class="flex items-center gap-2">
+                    {{-- Pause / Resume in slide-over header --}}
+                    <button x-show="detail.status === 'active'" @click="pauseCampaign(detail.id)"
+                            class="text-xs font-medium text-amber-400 hover:text-white bg-amber-500/20 hover:bg-amber-500 border border-amber-500/30 hover:border-amber-500 transition-all px-3 py-1.5 rounded-lg">
+                        Pause
+                    </button>
+                    <button x-show="detail.status === 'paused'" @click="resumeCampaign(detail.id)"
+                            class="text-xs font-medium text-emerald-400 hover:text-white bg-emerald-500/20 hover:bg-emerald-500 border border-emerald-500/30 hover:border-emerald-500 transition-all px-3 py-1.5 rounded-lg">
+                        Resume
+                    </button>
+                    <button @click="showDetail = false" class="text-slate-400 hover:text-white p-1">✕</button>
+                </div>
+            </div>
+
+            {{-- Metrics summary strip --}}
+            <div class="grid grid-cols-3 gap-3 mb-5">
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-3 text-center">
+                    <p class="text-2xl font-bold text-white" x-text="(detail.send_count ?? 0).toLocaleString()"></p>
+                    <p class="text-xs text-slate-400 mt-0.5">Sent</p>
+                </div>
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-3 text-center">
+                    <p class="text-2xl font-bold text-violet-400" x-text="(detail.open_rate ?? 0).toFixed(1) + '%'"></p>
+                    <p class="text-xs text-slate-400 mt-0.5">Open Rate</p>
+                </div>
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-3 text-center">
+                    <p class="text-2xl font-bold text-emerald-400" x-text="(detail.click_rate ?? 0).toFixed(1) + '%'"></p>
+                    <p class="text-xs text-slate-400 mt-0.5">Click Rate</p>
+                </div>
             </div>
 
             {{-- A/B variants --}}
@@ -227,6 +271,7 @@ function campaignsApp() {
         statusFilter: '',
         typeFilter: '',
         search: '',
+        sortBy: 'created_at',
         loading: false,
         showCreate: false,
         showDetail: false,
@@ -236,17 +281,42 @@ function campaignsApp() {
         createError: '',
         newCampaign: { name: '', type: 'email', audience: '', subject: '', schedule_at: '' },
 
+        get sortedCampaigns() {
+            const arr = [...this.campaigns];
+            if (this.sortBy === 'open_rate') {
+                arr.sort((a, b) => (b.open_rate ?? 0) - (a.open_rate ?? 0));
+            } else if (this.sortBy === 'send_count') {
+                arr.sort((a, b) => (b.send_count ?? 0) - (a.send_count ?? 0));
+            } else {
+                // created_at: newest first
+                arr.sort((a, b) => new Date(b.created_at ?? 0) - new Date(a.created_at ?? 0));
+            }
+            return arr;
+        },
+
+        sortCampaigns() {
+            // Getter is reactive — no explicit action needed, just trigger re-render
+        },
+
         async init() {
             const saved = JSON.parse(localStorage.getItem('filters_campaigns') ?? '{}');
             this.statusFilter = saved.statusFilter ?? '';
             this.typeFilter   = saved.typeFilter   ?? '';
             this.search       = saved.search       ?? '';
+            this.sortBy       = saved.sortBy       ?? 'created_at';
             await this.load();
+            // Auto-refresh every 30 seconds
+            setInterval(() => this.load(), 30000);
         },
 
         async load() {
             this.loading = true;
-            localStorage.setItem('filters_campaigns', JSON.stringify({ statusFilter: this.statusFilter, typeFilter: this.typeFilter, search: this.search }));
+            localStorage.setItem('filters_campaigns', JSON.stringify({
+                statusFilter: this.statusFilter,
+                typeFilter: this.typeFilter,
+                search: this.search,
+                sortBy: this.sortBy,
+            }));
             this.clearMessages();
             try {
                 const params = new URLSearchParams();
@@ -273,6 +343,7 @@ function campaignsApp() {
                 const r = await apiPost('/dashboard/api/campaigns', this.newCampaign);
                 if (r.error) { this.createError = r.error; return; }
                 this.showCreate = false;
+                showToast('Campaign created successfully', 'success');
                 await this.load();
             } catch (e) { this.createError = e.message; }
             finally { this.saving = false; }
@@ -340,17 +411,30 @@ function campaignsApp() {
         },
 
         async pauseCampaign(id) {
+            const ok = await confirmAction('Pause campaign?', 'The campaign will stop sending until resumed.', 'Pause', 'bg-amber-600 hover:bg-amber-500');
+            if (!ok) return;
             await apiPost(`/dashboard/api/campaigns/${id}/pause`, {});
+            showToast('Campaign paused', 'warning');
             await this.load();
         },
 
         async resumeCampaign(id) {
             await apiPost(`/dashboard/api/campaigns/${id}/resume`, {});
+            showToast('Campaign resumed', 'success');
             await this.load();
         },
 
-        statusBadge,
+        statusBadge, relativeTime,
     };
 }
+</script>
+@endpush
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('#campaigns-stats > div', { opacity: 0, y: 16, duration: 0.45, stagger: 0.06, ease: 'power2.out', delay: 0.15 });
+});
 </script>
 @endpush

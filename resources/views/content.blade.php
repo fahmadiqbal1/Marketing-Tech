@@ -35,18 +35,30 @@
 
     {{-- ── Filters ─────────────────────────────────────────────────── --}}
     <div class="flex flex-wrap items-center gap-3">
+        {{-- Search --}}
         <div class="relative flex-1 max-w-xs">
             <input x-model="search" @input.debounce.400ms="currentPage = 1; load()" type="text" placeholder="Search content…"
                 class="w-full bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg pl-8 pr-3 py-2 focus:ring-brand-500 focus:border-brand-500 outline-none" />
             <svg class="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         </div>
 
+        {{-- Type filter --}}
         <select x-model="typeFilter" @change="currentPage = 1; load()"
             class="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
             <option value="">All types</option>
             <option>blog</option><option>social</option><option>email</option>
             <option>ad</option><option>landing_page</option><option>video_script</option>
         </select>
+
+        {{-- Status filter pills --}}
+        <div class="flex bg-slate-800/60 border border-slate-700/50 rounded-lg p-1 gap-0.5">
+            <template x-for="s in [{v:'',l:'All'},{v:'draft',l:'Draft'},{v:'scheduled',l:'Scheduled'},{v:'published',l:'Published'},{v:'failed',l:'Failed'}]" :key="s.v">
+                <button @click="statusFilter = s.v; currentPage = 1; load()"
+                    class="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                    :class="statusFilter === s.v ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'"
+                    x-text="s.l"></button>
+            </template>
+        </div>
 
         <div class="ml-auto flex items-center gap-2">
             <span class="text-xs text-slate-500" x-text="totalEntries + ' items'"></span>
@@ -70,12 +82,35 @@
                 </tr>
             </thead>
             <tbody>
+                {{-- Skeleton loading rows --}}
                 <template x-if="loading && !items.length">
-                    <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                    <template x-for="i in [1,2,3,4,5,6,7,8]" :key="i">
+                        <tr class="border-b border-slate-800/60">
+                            <td class="py-3 pr-4">
+                                <div class="skeleton h-4 w-48 mb-1.5"></div>
+                                <div class="skeleton h-3 w-24"></div>
+                            </td>
+                            <td class="py-3"><div class="skeleton h-3 w-16"></div></td>
+                            <td class="py-3"><div class="skeleton h-5 w-20 rounded-full"></div></td>
+                            <td class="py-3"><div class="skeleton h-3 w-12"></div></td>
+                            <td class="py-3"><div class="skeleton h-3 w-8"></div></td>
+                            <td class="py-3"><div class="skeleton h-3 w-20"></div></td>
+                        </tr>
+                    </template>
                 </template>
+
+                {{-- Empty state --}}
                 <template x-if="!loading && !items.length">
-                    <tr><td colspan="6" class="py-8 text-center text-slate-500">No content items found.</td></tr>
+                    <tr>
+                        <td colspan="6" class="py-16 text-center">
+                            <div class="text-slate-600 text-4xl mb-3">📝</div>
+                            <p class="text-slate-400 font-medium mb-1">No content found</p>
+                            <p class="text-slate-600 text-sm" x-text="search || statusFilter || typeFilter ? 'Try adjusting your filters.' : 'Content will appear here when agents generate it.'"></p>
+                        </td>
+                    </tr>
                 </template>
+
+                {{-- Data rows --}}
                 <template x-for="item in items" :key="item.id">
                     <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors cursor-pointer"
                         @click="openDetail(item.id)">
@@ -127,8 +162,15 @@
                 </button>
             </div>
 
-            {{-- Loading --}}
-            <div x-show="detailLoading" class="flex-1 flex items-center justify-center text-slate-500 text-sm">Loading…</div>
+            {{-- Detail loading skeleton --}}
+            <div x-show="detailLoading" class="p-6 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="skeleton h-16 rounded-lg"></div>
+                    <div class="skeleton h-16 rounded-lg"></div>
+                </div>
+                <div class="skeleton h-4 w-32 mt-2"></div>
+                <div class="skeleton h-40 rounded-lg"></div>
+            </div>
 
             {{-- Content --}}
             <div x-show="!detailLoading && detail" class="p-6 space-y-5 flex-1">
@@ -137,6 +179,18 @@
                     <div class="bg-slate-800/60 rounded-lg p-3">
                         <p class="text-slate-500 mb-1">Word count</p>
                         <p class="text-slate-200 font-medium" x-text="detail?.word_count ?? 0"></p>
+                        {{-- Word count progress bar (target: 1000 words) --}}
+                        <div class="mt-2">
+                            <div class="flex justify-between text-xs text-slate-600 mb-1">
+                                <span x-text="(detail?.word_count ?? 0) + ' words'"></span>
+                                <span>target 1000</span>
+                            </div>
+                            <div class="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                <div class="h-full rounded-full transition-all duration-500"
+                                     :class="(detail?.word_count ?? 0) >= 1000 ? 'bg-emerald-500' : (detail?.word_count ?? 0) >= 500 ? 'bg-amber-500' : 'bg-brand-500'"
+                                     :style="'width:' + Math.min(Math.round(((detail?.word_count ?? 0) / 1000) * 100), 100) + '%'"></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="bg-slate-800/60 rounded-lg p-3">
                         <p class="text-slate-500 mb-1">Created</p>
@@ -158,11 +212,30 @@
 
                 {{-- Body --}}
                 <div>
-                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Content</p>
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Content</p>
+                        <button @click="copyBody()"
+                                class="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            <span x-text="bodyCopied ? 'Copied!' : 'Copy'"></span>
+                        </button>
+                    </div>
                     <div class="bg-slate-950/60 border border-slate-700/40 rounded-lg p-4 max-h-64 overflow-y-auto">
                         <pre class="text-xs text-slate-300 whitespace-pre-wrap font-mono leading-relaxed" x-text="detail?.body || 'No body content.'"></pre>
                     </div>
                 </div>
+
+                {{-- Approve & Schedule action (draft only) --}}
+                <template x-if="detail?.status === 'draft'">
+                    <div class="flex items-center gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                        <svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <p class="text-xs text-amber-300 flex-1">This draft is ready to schedule.</p>
+                        <button @click="calendarModalOpen = true"
+                                class="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap">
+                            Approve &amp; Schedule
+                        </button>
+                    </div>
+                </template>
 
                 {{-- Hashtag Suggestions --}}
                 <div x-show="hashtagSuggestions.length > 0 || hashtagLoading">
@@ -356,7 +429,6 @@
                                    class="w-full bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-2 outline-none focus:border-brand-500" />
                         </div>
                         <div x-show="calendarError" class="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2" x-text="calendarError"></div>
-                        <div x-show="calendarSuccess" class="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">Added to calendar successfully.</div>
                     </div>
                     <div class="flex gap-2 mt-5">
                         <button @click="calendarModalOpen = false"
@@ -393,14 +465,15 @@ function contentApp() {
         detailOpen: false,
         detailLoading: false,
         detail: null,
+        bodyCopied: false,
         hashtagSuggestions: [],
         hashtagLoading: false,
         hashtagCopied: false,
         calendarModalOpen: false,
         calendarSaving: false,
         calendarError: '',
-        calendarSuccess: false,
         calendarForm: { platform: '', content_type: '', scheduled_at: '' },
+        _refreshTimer: null,
 
         async init() {
             const saved = JSON.parse(localStorage.getItem('filters_content') ?? '{}');
@@ -410,6 +483,8 @@ function contentApp() {
             this.statusFilter = validStatuses.includes(saved.statusFilter ?? '') ? (saved.statusFilter ?? '') : '';
             this.search       = saved.search ?? '';
             await this.load();
+            // Auto-refresh every 30 seconds
+            this._refreshTimer = setInterval(() => this.load(), 30000);
         },
 
         async load() {
@@ -460,9 +535,9 @@ function contentApp() {
             this.detailOpen = true;
             this.detailLoading = true;
             this.detail = null;
+            this.bodyCopied = false;
             this.hashtagSuggestions = [];
             this.calendarModalOpen = false;
-            this.calendarSuccess = false;
             this.calendarError = '';
             try {
                 const r = await fetch('/dashboard/api/content/' + id, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
@@ -479,6 +554,16 @@ function contentApp() {
             } finally {
                 this.detailLoading = false;
             }
+        },
+
+        copyBody() {
+            const text = this.detail?.body ?? '';
+            if (!text) return;
+            navigator.clipboard?.writeText(text).then(() => {
+                this.bodyCopied = true;
+                showToast('Content copied to clipboard.');
+                setTimeout(() => { this.bodyCopied = false; }, 2000);
+            });
         },
 
         async fetchHashtagSuggestions(platform) {
@@ -505,6 +590,7 @@ function contentApp() {
             const text = this.hashtagSuggestions.join(' ');
             navigator.clipboard?.writeText(text).then(() => {
                 this.hashtagCopied = true;
+                showToast('Hashtags copied to clipboard.');
                 setTimeout(() => { this.hashtagCopied = false; }, 2000);
             });
         },
@@ -515,7 +601,6 @@ function contentApp() {
 
         async addToCalendar() {
             this.calendarError = '';
-            this.calendarSuccess = false;
             if (!this.calendarForm.platform || !this.calendarForm.content_type) {
                 this.calendarError = 'Platform and content type are required.';
                 return;
@@ -544,9 +629,9 @@ function contentApp() {
                     this.calendarError = d.message ?? ('Error ' + r.status);
                     return;
                 }
-                this.calendarSuccess = true;
                 this.calendarForm = { platform: this.detail?.platform ?? '', content_type: '', scheduled_at: '' };
-                setTimeout(() => { this.calendarModalOpen = false; this.calendarSuccess = false; }, 1800);
+                showToast('Added to content calendar successfully.');
+                setTimeout(() => { this.calendarModalOpen = false; }, 1200);
             } catch (e) {
                 this.calendarError = e.message;
             } finally {

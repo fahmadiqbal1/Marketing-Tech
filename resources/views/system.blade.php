@@ -215,4 +215,13 @@ function systemApp() {
     }
 }
 </script>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('.stat-card', { opacity: 0, y: 18, duration: 0.45, stagger: 0.07, ease: 'power2.out', delay: 0.1, clearProps: 'all' });
+});
+</script>
+@endpush
 @endsection

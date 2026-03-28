@@ -12,7 +12,7 @@
         <div class="space-y-2">
             <template x-for="ins in insights" :key="ins.msg">
                 <a :href="ins.action ?? '#'"
-                   class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm transition-opacity hover:opacity-80"
+                   class="insight-row flex items-center gap-3 rounded-xl px-4 py-3 text-sm transition-opacity hover:opacity-80"
                    :class="{
                        'bg-amber-500/10 text-amber-300 border border-amber-500/20': ins.type === 'warning',
                        'bg-red-500/10 text-red-300 border border-red-500/20':       ins.type === 'error',
@@ -27,7 +27,7 @@
     </template>
 
     {{-- ── Stat cards ─────────────────────────────────────────── --}}
-    <div class="flex items-center justify-between mb-2">
+    <div class="flex items-center justify-between mb-2" id="stat-cards-header">
         <div class="flex items-center gap-2">
             <span x-show="refreshing" class="flex items-center gap-1.5 text-xs text-slate-400">
                 <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -40,13 +40,14 @@
             Refresh
         </button>
     </div>
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="stat-cards">
 
         {{-- Total Workflows --}}
-        <div class="stat-card">
+        <div class="stat-card glow-border">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Total Workflows</p>
-                <div class="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
+                <div class="icon-3d w-9 h-9 rounded-xl flex items-center justify-center"
+                     style="background:linear-gradient(135deg,rgba(124,58,237,0.2),rgba(124,58,237,0.05));border:1px solid rgba(124,58,237,0.2);">
                     <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
                 </div>
             </div>
@@ -59,11 +60,12 @@
         </div>
 
         {{-- Active Jobs (clickable) --}}
-        <div class="stat-card cursor-pointer hover:ring-1 hover:ring-slate-600 transition-all"
+        <div class="stat-card glow-border cursor-pointer transition-all"
              @click="window.location='/dashboard/jobs?status=running'">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Active Jobs</p>
-                <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <div class="icon-3d w-9 h-9 rounded-xl flex items-center justify-center"
+                     style="background:linear-gradient(135deg,rgba(59,130,246,0.2),rgba(59,130,246,0.05));border:1px solid rgba(59,130,246,0.2);">
                     <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 </div>
             </div>
@@ -75,10 +77,11 @@
         </div>
 
         {{-- AI Cost Today (with trend) --}}
-        <div class="stat-card">
+        <div class="stat-card glow-border">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">AI Cost Today</p>
-                <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <div class="icon-3d w-9 h-9 rounded-xl flex items-center justify-center"
+                     style="background:linear-gradient(135deg,rgba(245,158,11,0.2),rgba(245,158,11,0.05));border:1px solid rgba(245,158,11,0.2);">
                     <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 </div>
             </div>
@@ -104,12 +107,13 @@
         </div>
 
         {{-- Pending Approval (clickable) --}}
-        <div class="stat-card cursor-pointer transition-all"
-             :class="pendingApproval > 0 ? 'border-orange-500/40 hover:ring-1 hover:ring-orange-500/50' : 'hover:ring-1 hover:ring-slate-600'"
+        <div class="stat-card glow-border cursor-pointer transition-all"
+             :class="pendingApproval > 0 ? 'border-orange-500/40' : ''"
              @click="window.location='/dashboard/workflows?status=owner_approval'">
             <div class="flex items-center justify-between mb-3">
                 <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">Needs Approval</p>
-                <div class="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <div class="icon-3d w-9 h-9 rounded-xl flex items-center justify-center"
+                     style="background:linear-gradient(135deg,rgba(249,115,22,0.2),rgba(249,115,22,0.05));border:1px solid rgba(249,115,22,0.2);">
                     <svg class="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                 </div>
             </div>
@@ -122,7 +126,7 @@
     </div>
 
     {{-- ── Middle row: charts ──────────────────────────────────── --}}
-    <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
 
         {{-- Workflow status breakdown --}}
         <div class="stat-card col-span-1">
@@ -148,7 +152,7 @@
     </div>
 
     {{-- ── AI Cost Breakdown + Agent Performance ───────────────── --}}
-    <div class="grid grid-cols-2 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
 
         {{-- Cost breakdown by model --}}
         <div class="stat-card">
@@ -179,8 +183,9 @@
                 <template x-for="[type, count] in Object.entries(agentTypes)" :key="type">
                     <div class="flex items-center gap-2">
                         <span class="text-xs text-slate-300 w-32 truncate" x-text="type"></span>
-                        <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                            <div class="h-full bg-brand-500 rounded-full transition-all"
+                        <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background:rgba(30,41,59,0.8);">
+                            <div class="h-full rounded-full transition-all duration-700"
+                                 style="background:linear-gradient(90deg,#7c3aed,#a78bfa);"
                                  :style="'width:' + Math.round(count / maxAgentCount * 100) + '%'"></div>
                         </div>
                         <span class="text-xs text-slate-400 w-6 text-right" x-text="count"></span>
@@ -191,7 +196,7 @@
     </div>
 
     {{-- ── Bottom row ──────────────────────────────────────────── --}}
-    <div class="grid grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
         {{-- Recent Workflows --}}
         <div class="stat-card col-span-2">
@@ -271,7 +276,7 @@
     </div>
 
     {{-- ── Social Intelligence + Content Velocity ──────────────── --}}
-    <div class="grid grid-cols-2 gap-4 mt-2">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
 
         {{-- Social Intelligence Panel --}}
         <div class="stat-card">
@@ -524,13 +529,24 @@ function overviewApp() {
                     });
                 }
 
-                // Cost bar chart
+                // Cost bar chart with gradient fill
                 const cCtx = document.getElementById('costChart')?.getContext('2d');
                 if (cCtx) {
                     if (this.costChartInstance) { this.costChartInstance.destroy(); this.costChartInstance = null; }
+                    const gradient = cCtx.createLinearGradient(0, 0, 0, 200);
+                    gradient.addColorStop(0,   'rgba(139, 92, 246, 0.8)');
+                    gradient.addColorStop(0.5, 'rgba(124, 58, 237, 0.5)');
+                    gradient.addColorStop(1,   'rgba(109, 40, 217, 0.1)');
                     this.costChartInstance = new Chart(cCtx, {
                         type: 'bar',
-                        data: { labels: [], datasets: [{ label: 'USD', data: [], backgroundColor: 'rgba(139,92,246,0.6)', borderRadius: 4 }] },
+                        data: { labels: [], datasets: [{
+                            label: 'USD',
+                            data: [],
+                            backgroundColor: gradient,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                            hoverBackgroundColor: 'rgba(167, 139, 250, 0.9)',
+                        }]},
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
@@ -538,10 +554,18 @@ function overviewApp() {
                                 title:    { display: false },
                                 subtitle: { display: false },
                                 legend:   { display: false },
+                                tooltip:  {
+                                    backgroundColor: 'rgba(15,23,42,0.9)',
+                                    borderColor: 'rgba(124,58,237,0.4)',
+                                    borderWidth: 1,
+                                    titleColor: '#e2e8f0',
+                                    bodyColor: '#a78bfa',
+                                    callbacks: { label: ctx => ' $' + ctx.parsed.y.toFixed(4) },
+                                },
                             },
                             scales: {
-                                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } },
-                                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 }, callback: v => '$' + v } },
+                                x: { grid: { color: 'rgba(255,255,255,0.03)' }, border: { dash: [4,4] }, ticks: { color: '#475569', font: { size: 10 } } },
+                                y: { grid: { color: 'rgba(255,255,255,0.03)' }, border: { dash: [4,4] }, ticks: { color: '#475569', font: { size: 10 }, callback: v => '$' + v } },
                             }
                         }
                     });
@@ -673,4 +697,23 @@ function overviewApp() {
     }
 }
 </script>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    // Stagger entrance for stat cards
+    gsap.from('#stat-cards > div', {
+        opacity: 0, y: 20, duration: 0.5, stagger: 0.08, ease: 'power2.out',
+        delay: 0.2,
+    });
+    // Stagger for insight rows (after they render)
+    setTimeout(() => {
+        gsap.from('.insight-row', {
+            opacity: 0, x: -12, duration: 0.4, stagger: 0.06, ease: 'power2.out',
+        });
+    }, 600);
+});
+</script>
+@endpush
 @endsection

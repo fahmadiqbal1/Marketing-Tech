@@ -5,14 +5,6 @@
 @section('content')
 <div x-data="knowledgeApp()" x-init="init()" x-cloak>
 
-    {{-- ── Toast ──────────────────────────────────────────────────────── --}}
-    <template x-if="toast.show">
-        <div class="fixed top-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl text-sm font-medium"
-             :class="toast.error ? 'bg-red-500/20 border border-red-500/40 text-red-300' : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'">
-            <span x-text="toast.message"></span>
-        </div>
-    </template>
-
     {{-- ── Add Knowledge Slide Panel ────────────────────────────────── --}}
     <div x-show="addPanel" class="fixed inset-0 z-40 flex">
         <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="addPanel = false"></div>
@@ -86,13 +78,28 @@
                 {{-- Import progress --}}
                 <div x-show="importProgress" class="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-3 space-y-2">
                     <div class="flex items-center justify-between text-xs">
-                        <span class="text-slate-300 font-medium" x-text="importProgress?.status === 'completed' ? 'Import complete' : importProgress?.status === 'failed' ? 'Import failed' : 'Importing\u2026'"></span>
+                        <div class="flex items-center gap-2">
+                            <template x-if="importProgress?.status === 'running'">
+                                <svg class="w-3.5 h-3.5 text-brand-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            </template>
+                            <span class="text-slate-300 font-medium"
+                                  x-text="importProgress?.status === 'completed' ? 'Import complete' : importProgress?.status === 'failed' ? 'Import failed' : 'Importing\u2026'"></span>
+                        </div>
                         <span class="text-slate-400" x-text="(importProgress?.ingested ?? 0) + ' / ' + (importProgress?.total ?? '?') + ' files'"></span>
                     </div>
-                    <div class="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                        <div class="h-full rounded-full transition-all duration-500"
-                             :class="importProgress?.status === 'failed' ? 'bg-red-500' : importProgress?.status === 'completed' ? 'bg-emerald-500' : 'bg-brand-500'"
-                             :style="'width:' + (importProgress?.total ? Math.round((importProgress.ingested / importProgress.total) * 100) : 5) + '%'"></div>
+                    {{-- Animated progress bar --}}
+                    <div class="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-700 ease-out"
+                             :class="{
+                                 'bg-red-500': importProgress?.status === 'failed',
+                                 'bg-emerald-500': importProgress?.status === 'completed',
+                                 'bg-brand-500': importProgress?.status === 'running'
+                             }"
+                             :style="'width:' + (importProgress?.status === 'running' && !importProgress?.total ? '8' : importProgress?.total ? Math.max(4, Math.round((importProgress.ingested / importProgress.total) * 100)) : 0) + '%'">
+                            {{-- Shimmer stripe for running state --}}
+                            <div x-show="importProgress?.status === 'running'"
+                                 class="h-full w-full bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse rounded-full"></div>
+                        </div>
                     </div>
                     <p x-show="importProgress?.error" class="text-xs text-red-400" x-text="importProgress?.error"></p>
                     {{-- Failed files expandable panel --}}
@@ -210,18 +217,24 @@
         <div class="flex items-center gap-3">
             <div class="relative flex-1">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                <input type="text" x-model="search" @input.debounce.400ms="load()"
+                <input type="text" x-model="search" @input.debounce.400ms="currentPage = 1; load()"
                        placeholder="Search by title or content..."
                        class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition">
+                {{-- Searching indicator --}}
+                <div x-show="searching" class="absolute right-3 top-1/2 -translate-y-1/2">
+                    <svg class="w-4 h-4 text-brand-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                </div>
             </div>
-            <select x-model="categoryFilter" @change="load()"
+            <select x-model="categoryFilter" @change="currentPage = 1; load()"
                     class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
                 <option value="">All Categories</option>
                 <template x-for="cat in (stats.categories || [])" :key="cat">
                     <option :value="cat" x-text="cat"></option>
                 </template>
             </select>
-            <button @click="load()" class="px-3 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 rounded-lg text-sm transition">
+            <button @click="load()" :class="loading ? 'opacity-50 cursor-not-allowed' : ''"
+                    class="px-3 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 rounded-lg text-sm transition flex items-center gap-1.5">
+                <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                 Refresh
             </button>
             <button @click="addPanel = true"
@@ -248,52 +261,130 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <template x-for="entry in entries" :key="entry.id">
-                        <tr class="border-b border-slate-800/40 hover:bg-slate-800/20 transition group">
-                            <td class="py-2.5 pr-4">
-                                <p class="text-slate-200 font-medium truncate max-w-xs" x-text="entry.title"></p>
-                                <p class="text-xs text-slate-600 font-mono" x-text="entry.id.substring(0,8) + '...'"></p>
-                            </td>
-                            <td class="py-2.5 pr-4">
-                                <span class="badge text-xs bg-slate-700/60 text-slate-300 border border-slate-700" x-text="entry.category || 'general'"></span>
-                            </td>
-                            <td class="py-2.5 pr-4">
-                                <div class="flex flex-wrap gap-1 max-w-[160px]">
-                                    <template x-if="!entry.tags || entry.tags.length === 0">
-                                        <span class="text-xs text-slate-600">—</span>
-                                    </template>
-                                    <template x-for="tag in (entry.tags || []).slice(0,3)" :key="tag">
-                                        <span class="badge text-xs bg-brand-500/10 text-brand-400 border border-brand-500/20" x-text="tag"></span>
-                                    </template>
-                                    <span x-show="(entry.tags || []).length > 3"
-                                          class="text-xs text-slate-500" x-text="'+' + ((entry.tags || []).length - 3) + ' more'"></span>
-                                </div>
-                            </td>
-                            <td class="py-2.5 pr-4 text-slate-400 text-xs" x-text="entry.chunk_index === 0 ? '1+' : entry.chunk_index + 1"></td>
-                            <td class="py-2.5 pr-4 text-slate-400 text-xs" x-text="entry.access_count ?? 0"></td>
-                            <td class="py-2.5 pr-4 text-slate-500 text-xs" x-text="relativeTime(entry.created_at)"></td>
-                            <td class="py-2.5">
-                                <button @click="deleteEntry(entry.id)"
-                                        class="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition">
-                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                </button>
-                            </td>
-                        </tr>
+                    {{-- Skeleton loading rows --}}
+                    <template x-if="loading && !entries.length">
+                        <template x-for="i in [1,2,3,4,5,6]" :key="i">
+                            <tr class="border-b border-slate-800/40">
+                                <td class="py-3 pr-4">
+                                    <div class="skeleton h-4 w-44 mb-1.5"></div>
+                                    <div class="skeleton h-3 w-20"></div>
+                                </td>
+                                <td class="py-3 pr-4"><div class="skeleton h-5 w-20 rounded-full"></div></td>
+                                <td class="py-3 pr-4"><div class="skeleton h-3 w-24"></div></td>
+                                <td class="py-3 pr-4"><div class="skeleton h-3 w-8"></div></td>
+                                <td class="py-3 pr-4"><div class="skeleton h-3 w-8"></div></td>
+                                <td class="py-3 pr-4"><div class="skeleton h-3 w-20"></div></td>
+                                <td class="py-3"><div class="skeleton h-6 w-6 rounded"></div></td>
+                            </tr>
+                        </template>
                     </template>
+
+                    {{-- Data rows --}}
+                    <template x-for="entry in entries" :key="entry.id">
+                        <tbody>
+                            {{-- Main row --}}
+                            <tr class="border-b border-slate-800/40 hover:bg-slate-800/20 transition group cursor-pointer"
+                                @click="toggleExpand(entry.id)">
+                                <td class="py-2.5 pr-4">
+                                    <div class="flex items-center gap-1.5">
+                                        <svg class="w-3.5 h-3.5 text-slate-600 transition-transform flex-shrink-0"
+                                             :class="expandedId === entry.id ? 'rotate-90' : ''"
+                                             fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                        </svg>
+                                        <p class="text-slate-200 font-medium truncate max-w-xs" x-text="entry.title"></p>
+                                    </div>
+                                    <p class="text-xs text-slate-600 font-mono ml-5" x-text="entry.id.substring(0,8) + '...'"></p>
+                                </td>
+                                <td class="py-2.5 pr-4">
+                                    <span class="badge text-xs bg-slate-700/60 text-slate-300 border border-slate-700" x-text="entry.category || 'general'"></span>
+                                </td>
+                                <td class="py-2.5 pr-4">
+                                    <div class="flex flex-wrap gap-1 max-w-[160px]">
+                                        <template x-if="!entry.tags || entry.tags.length === 0">
+                                            <span class="text-xs text-slate-600">—</span>
+                                        </template>
+                                        <template x-for="tag in (entry.tags || []).slice(0,3)" :key="tag">
+                                            <span class="badge text-xs bg-brand-500/10 text-brand-400 border border-brand-500/20" x-text="tag"></span>
+                                        </template>
+                                        <span x-show="(entry.tags || []).length > 3"
+                                              class="text-xs text-slate-500" x-text="'+' + ((entry.tags || []).length - 3) + ' more'"></span>
+                                    </div>
+                                </td>
+                                <td class="py-2.5 pr-4 text-slate-400 text-xs" x-text="entry.chunk_index === 0 ? '1+' : entry.chunk_index + 1"></td>
+                                <td class="py-2.5 pr-4 text-slate-400 text-xs" x-text="entry.access_count ?? 0"></td>
+                                <td class="py-2.5 pr-4 text-slate-500 text-xs" x-text="relativeTime(entry.created_at)"></td>
+                                <td class="py-2.5">
+                                    <button @click.stop="deleteEntry(entry.id)"
+                                            class="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                    </button>
+                                </td>
+                            </tr>
+
+                            {{-- Expandable detail row --}}
+                            <tr x-show="expandedId === entry.id" class="border-b border-slate-800/40 bg-slate-900/60">
+                                <td colspan="7" class="px-6 py-4">
+                                    <div class="grid grid-cols-3 gap-4 text-xs">
+                                        {{-- Embedding status --}}
+                                        <div class="bg-slate-800/60 rounded-lg p-3">
+                                            <p class="text-slate-500 mb-1.5 uppercase tracking-wide">Embedding Status</p>
+                                            <div class="flex items-center gap-2">
+                                                <span class="w-2 h-2 rounded-full flex-shrink-0"
+                                                      :class="entry.embedding ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'"></span>
+                                                <span class="text-slate-300" x-text="entry.embedding ? 'Embedded' : 'Pending embedding'"></span>
+                                            </div>
+                                        </div>
+                                        {{-- Chunk count --}}
+                                        <div class="bg-slate-800/60 rounded-lg p-3">
+                                            <p class="text-slate-500 mb-1.5 uppercase tracking-wide">Vector Chunks</p>
+                                            <p class="text-slate-200 font-semibold text-base" x-text="entry.chunk_index === 0 ? '1' : entry.chunk_index + 1"></p>
+                                            <p class="text-slate-600 mt-0.5">segments in pgvector</p>
+                                        </div>
+                                        {{-- Created date --}}
+                                        <div class="bg-slate-800/60 rounded-lg p-3">
+                                            <p class="text-slate-500 mb-1.5 uppercase tracking-wide">Created</p>
+                                            <p class="text-slate-300" x-text="entry.created_at ? new Date(entry.created_at).toLocaleString() : '–'"></p>
+                                            <p class="text-slate-600 mt-0.5" x-text="relativeTime(entry.created_at)"></p>
+                                        </div>
+                                    </div>
+                                    {{-- Access count bar --}}
+                                    <div class="mt-3" x-show="(entry.access_count ?? 0) > 0">
+                                        <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
+                                            <span>Agent retrieval count</span>
+                                            <span x-text="(entry.access_count ?? 0) + ' accesses'"></span>
+                                        </div>
+                                        <div class="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                            <div class="h-full bg-brand-500/70 rounded-full transition-all duration-500"
+                                                 :style="'width:' + Math.min(Math.round(((entry.access_count ?? 0) / 50) * 100), 100) + '%'"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+
+                    {{-- Empty state --}}
                     <tr x-show="entries.length === 0 && !loading">
-                        <td colspan="7" class="py-12 text-center">
-                            <div class="flex flex-col items-center gap-2">
-                                <svg class="w-10 h-10 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
-                                <p class="text-slate-500 text-sm">No knowledge entries yet.</p>
-                                <p class="text-slate-600 text-xs">Add documents, guidelines, or data to help agents make better decisions.</p>
-                                <button @click="addPanel = true" class="mt-2 px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm rounded-lg transition">
+                        <td colspan="7" class="py-16 text-center">
+                            <div class="flex flex-col items-center gap-3">
+                                <div class="w-16 h-16 rounded-2xl bg-slate-800/60 border border-slate-700/50 flex items-center justify-center">
+                                    <svg class="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+                                </div>
+                                <div>
+                                    <p class="text-slate-400 font-medium mb-1"
+                                       x-text="search || categoryFilter ? 'No entries match your filters.' : 'No knowledge entries yet.'"></p>
+                                    <p class="text-slate-600 text-xs"
+                                       x-text="search || categoryFilter ? 'Try clearing your search or category filter.' : 'Add documents, guidelines, or data to help agents make better decisions.'"></p>
+                                </div>
+                                <button x-show="!search && !categoryFilter"
+                                        @click="addPanel = true"
+                                        class="mt-1 px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm rounded-lg transition flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                                     Add First Entry
                                 </button>
                             </div>
                         </td>
-                    </tr>
-                    <tr x-show="loading">
-                        <td colspan="7" class="py-8 text-center text-slate-500 text-sm">Loading...</td>
                     </tr>
                 </tbody>
             </table>
@@ -321,6 +412,7 @@ function knowledgeApp() {
         entries: [],
         stats: {},
         loading: false,
+        searching: false,
         search: '',
         categoryFilter: '',
         currentPage: 1,
@@ -335,7 +427,8 @@ function knowledgeApp() {
         importProgress: null,
         importPollTimer: null,
         showFailedFiles: false,
-        toast: { show: false, message: '', error: false },
+        expandedId: null,
+        _refreshTimer: null,
         newEntry: { title: '', content: '', category: 'general', tagsRaw: '' },
 
         async init() {
@@ -347,6 +440,8 @@ function knowledgeApp() {
             if (this.categoryFilter && !(this.stats.categories ?? []).includes(this.categoryFilter)) {
                 this.categoryFilter = '';
             }
+            // Auto-refresh every 60 seconds (knowledge store changes infrequently)
+            this._refreshTimer = setInterval(() => this.load(), 60000);
         },
 
         async load() {
@@ -355,6 +450,7 @@ function knowledgeApp() {
                 search:         this.search,
             }));
             this.loading = true;
+            if (this.search) this.searching = true;
             try {
                 const params = new URLSearchParams({
                     page: this.currentPage,
@@ -365,22 +461,29 @@ function knowledgeApp() {
                 const r = await fetch('/dashboard/api/knowledge?' + params.toString());
                 const d = await r.json();
 
-                this.entries     = d.data || [];
+                this.entries      = d.data || [];
                 this.totalEntries = d.total || 0;
-                this.totalPages  = d.last_page || 1;
-                this.currentPage = d.current_page || 1;
-                this.stats       = d.stats || {};
+                this.totalPages   = d.last_page || 1;
+                this.currentPage  = d.current_page || 1;
+                this.stats        = d.stats || {};
 
                 updateTimestamp();
             } catch(e) {
+                showToast('Failed to load knowledge entries.', 'error');
                 console.error('Knowledge load error:', e);
+            } finally {
+                this.loading   = false;
+                this.searching = false;
             }
-            this.loading = false;
+        },
+
+        toggleExpand(id) {
+            this.expandedId = this.expandedId === id ? null : id;
         },
 
         async createEntry() {
             if (!this.newEntry.title.trim() || !this.newEntry.content.trim()) {
-                this.showToast('Title and content are required.', true);
+                showToast('Title and content are required.', 'error');
                 return;
             }
             this.adding = true;
@@ -399,19 +502,26 @@ function knowledgeApp() {
                 if (r.id) {
                     this.newEntry = { title: '', content: '', category: 'general', tagsRaw: '' };
                     this.addPanel = false;
-                    this.showToast('Knowledge stored and embedded successfully.');
+                    showToast('Knowledge stored and embedded successfully.');
                     await this.load();
                 } else {
-                    this.showToast(r.error || 'Failed to store knowledge.', true);
+                    showToast(r.error || 'Failed to store knowledge.', 'error');
                 }
             } catch(e) {
-                this.showToast('Error: ' + e.message, true);
+                showToast('Error: ' + e.message, 'error');
+            } finally {
+                this.adding = false;
             }
-            this.adding = false;
         },
 
         async deleteEntry(id) {
-            if (!confirm('Delete this knowledge entry and all its chunks?')) return;
+            const confirmed = await confirmAction(
+                'Delete knowledge entry',
+                'This will permanently delete the entry and all its vector chunks. This cannot be undone.',
+                'Delete',
+                'bg-red-600 hover:bg-red-500'
+            );
+            if (!confirmed) return;
             try {
                 const r = await fetch('/dashboard/api/knowledge/' + id, {
                     method: 'DELETE',
@@ -419,11 +529,14 @@ function knowledgeApp() {
                 });
                 const d = await r.json();
                 if (d.deleted) {
-                    this.showToast('Entry deleted.');
+                    showToast('Entry deleted.');
+                    if (this.expandedId === id) this.expandedId = null;
                     await this.load();
+                } else {
+                    showToast(d.error || 'Delete failed.', 'error');
                 }
             } catch(e) {
-                this.showToast('Delete failed: ' + e.message, true);
+                showToast('Delete failed: ' + e.message, 'error');
             }
         },
 
@@ -433,11 +546,6 @@ function knowledgeApp() {
             this.load();
         },
 
-        showToast(message, error = false) {
-            this.toast = { show: true, message, error };
-            setTimeout(() => this.toast.show = false, 3500);
-        },
-
         async importGitHub() {
             // Normalize before dispatch — must match PHP normalizeRepoUrl() in IngestGitHubRepo
             const repoUrl = this.githubImport.repoUrl.trim()
@@ -445,7 +553,7 @@ function knowledgeApp() {
                 .replace(/\.git$/, '')
                 .replace(/\/$/, '');
             if (!repoUrl) {
-                this.showToast('Repository URL is required.', true);
+                showToast('Repository URL is required.', 'error');
                 return;
             }
             this.importing = true;
@@ -465,15 +573,18 @@ function knowledgeApp() {
                 if (r.dispatched ?? r.queued) {
                     this.githubResult = { message: r.message || 'Import queued. Tracking progress…' };
                     this.githubImport = { repoUrl: '', category: 'general', branch: 'main', token: '' };
-                    this.showToast('GitHub import queued successfully.');
+                    showToast('GitHub import queued successfully.');
                     this.pollImportProgress(repoUrl);
                 } else {
                     this.githubResult = { error: r.error || 'Failed to queue import.' };
+                    showToast(r.error || 'Failed to queue import.', 'error');
                 }
             } catch(e) {
                 this.githubResult = { error: 'Error: ' + e.message };
+                showToast('Import error: ' + e.message, 'error');
+            } finally {
+                this.importing = false;
             }
-            this.importing = false;
         },
 
         pollImportProgress(repoUrl) {
@@ -489,11 +600,12 @@ function knowledgeApp() {
                     if (d.status === 'completed') {
                         clearInterval(this.importPollTimer);
                         this.importPollTimer = null;
-                        this.showToast('Import complete! ' + (d.ingested ?? 0) + ' files ingested.');
+                        showToast('Import complete! ' + (d.ingested ?? 0) + ' files ingested.');
                         this.load(); // Refresh the knowledge table
                     } else if (d.status === 'failed') {
                         clearInterval(this.importPollTimer);
                         this.importPollTimer = null;
+                        showToast('Import failed. Check the error details above.', 'error');
                     }
                 } catch (_) {}
             }, 3000);
@@ -503,4 +615,13 @@ function knowledgeApp() {
     };
 }
 </script>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('.stat-card', { opacity: 0, y: 18, duration: 0.45, stagger: 0.07, ease: 'power2.out', delay: 0.1, clearProps: 'all' });
+});
+</script>
+@endpush
 @endsection

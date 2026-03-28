@@ -7,18 +7,22 @@
     <div x-show="warning" class="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200" x-text="warning"></div>
     <div x-show="error" class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" x-text="error"></div>
 
-    {{-- ── Pipeline Stage Cards ────────────────────────────────────── --}}
+    {{-- ── Pipeline Stage Pills ─────────────────────────────────────── --}}
     <div class="flex flex-wrap gap-2" x-show="Object.keys(byStage).length > 0">
         <template x-for="[stage, count] in Object.entries(byStage)" :key="stage">
             <button @click="stageFilter = (stageFilter === stage ? '' : stage); currentPage = 1; load()"
-                class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all"
+                class="px-3 py-1.5 rounded-full text-xs font-medium border transition-all"
                 :class="stageFilter === stage
-                    ? 'bg-brand-600 border-brand-500 text-white'
-                    : 'bg-slate-800/60 border-slate-700/50 text-slate-300 hover:border-slate-500'">
+                    ? 'bg-brand-600 border-brand-500 text-white shadow-lg shadow-brand-600/20'
+                    : 'bg-slate-800/60 border-slate-700/50 text-slate-300 hover:border-slate-500 hover:text-white'">
                 <span x-text="stage"></span>
-                <span class="ml-1.5 opacity-60" x-text="count"></span>
+                <span class="ml-1.5 opacity-70 font-bold" x-text="'(' + count + ')'"></span>
             </button>
         </template>
+        <button x-show="stageFilter" @click="stageFilter = ''; currentPage = 1; load()"
+                class="px-3 py-1.5 rounded-full text-xs font-medium border border-slate-700 text-slate-500 hover:text-white hover:border-slate-500 transition-all">
+            × Clear filter
+        </button>
     </div>
 
     {{-- ── Filters ─────────────────────────────────────────────────── --}}
@@ -31,7 +35,7 @@
 
         <div class="ml-auto flex items-center gap-2">
             <span class="text-xs text-slate-500" x-text="totalEntries + ' candidates'"></span>
-            <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+            <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" title="Refresh">
                 <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             </button>
         </div>
@@ -51,12 +55,46 @@
                 </tr>
             </thead>
             <tbody>
+                {{-- Skeleton rows while loading --}}
                 <template x-if="loading && !candidates.length">
-                    <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                    <template x-for="i in [1,2,3,4,5,6]" :key="i">
+                        <tr class="border-b border-slate-800/60 animate-pulse">
+                            <td class="py-3">
+                                <div class="h-4 bg-slate-700 rounded w-36 mb-1.5"></div>
+                                <div class="h-3 bg-slate-700/60 rounded w-48"></div>
+                            </td>
+                            <td class="py-3"><div class="h-5 bg-slate-700 rounded w-20"></div></td>
+                            <td class="py-3"><div class="h-4 bg-slate-700 rounded w-12"></div></td>
+                            <td class="py-3"><div class="h-3 bg-slate-700/60 rounded w-32"></div></td>
+                            <td class="py-3"><div class="h-4 bg-slate-700 rounded w-10"></div></td>
+                            <td class="py-3"><div class="h-3 bg-slate-700/60 rounded w-20"></div></td>
+                        </tr>
+                    </template>
                 </template>
+
+                {{-- Empty state --}}
                 <template x-if="!loading && !candidates.length">
-                    <tr><td colspan="6" class="py-8 text-center text-slate-500">No candidates found.</td></tr>
+                    <tr>
+                        <td colspan="6" class="py-16 text-center">
+                            <div class="flex flex-col items-center gap-3">
+                                <span class="text-4xl">🔍</span>
+                                <p class="text-slate-300 font-medium text-sm">No candidates found</p>
+                                <p class="text-slate-500 text-xs max-w-xs">
+                                    <template x-if="search || stageFilter">
+                                        <span>No candidates match your current filters. Try clearing the search or stage filter.</span>
+                                    </template>
+                                    <template x-if="!search && !stageFilter">
+                                        <span>No candidates have been imported yet. Use the hiring agent to discover and score candidates.</span>
+                                    </template>
+                                </p>
+                                <button x-show="search || stageFilter"
+                                        @click="search=''; stageFilter=''; currentPage=1; load()"
+                                        class="mt-1 text-xs text-brand-400 hover:text-brand-300 underline">Clear all filters</button>
+                            </div>
+                        </td>
+                    </tr>
                 </template>
+
                 <template x-for="c in candidates" :key="c.id">
                     <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors cursor-pointer"
                         @click="openDetail(c.id)">
@@ -116,7 +154,7 @@
                 <div class="flex-1 min-w-0 pr-4">
                     <h2 class="text-base font-semibold text-white" x-text="detail?.name ?? 'Loading…'"></h2>
                     <p class="text-xs text-slate-400 mt-0.5" x-text="[detail?.current_title, detail?.current_company].filter(Boolean).join(' @ ') || ''"></p>
-                    <div class="flex items-center gap-2 mt-1.5">
+                    <div class="flex items-center gap-2 mt-1.5 flex-wrap">
                         <span class="badge text-xs" :class="statusBadge(detail?.pipeline_stage)" x-text="detail?.pipeline_stage ?? ''"></span>
                         <span class="text-xs text-slate-500" x-show="detail?.score != null" x-text="'Score: ' + detail?.score"></span>
                     </div>
@@ -126,9 +164,45 @@
                 </button>
             </div>
 
-            <div x-show="detailLoading" class="flex-1 flex items-center justify-center text-slate-500 text-sm">Loading…</div>
+            {{-- Skeleton detail loader --}}
+            <div x-show="detailLoading" class="p-6 space-y-4 animate-pulse">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-slate-800/60 rounded-lg p-3 h-16"></div>
+                    <div class="bg-slate-800/60 rounded-lg p-3 h-16"></div>
+                </div>
+                <div class="h-3 bg-slate-700 rounded w-24 mt-4"></div>
+                <div class="flex gap-2">
+                    <div class="h-6 bg-slate-700 rounded w-16"></div>
+                    <div class="h-6 bg-slate-700 rounded w-20"></div>
+                    <div class="h-6 bg-slate-700 rounded w-14"></div>
+                </div>
+                <div class="h-3 bg-slate-700 rounded w-32 mt-2"></div>
+                <div class="h-3 bg-slate-700/60 rounded w-full"></div>
+                <div class="h-3 bg-slate-700/60 rounded w-5/6"></div>
+                <div class="h-3 bg-slate-700/60 rounded w-4/6"></div>
+            </div>
 
             <div x-show="!detailLoading && detail" class="p-6 space-y-5 flex-1">
+
+                {{-- Stage changer --}}
+                <div class="flex items-center gap-3">
+                    <label class="text-xs text-slate-400 flex-shrink-0">Move to stage:</label>
+                    <select x-model="newStage" class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-brand-500 outline-none">
+                        <option value="">— select —</option>
+                        <option value="sourced">Sourced</option>
+                        <option value="screening">Screening</option>
+                        <option value="interview">Interview</option>
+                        <option value="offer">Offer</option>
+                        <option value="hired">Hired</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                    <button @click="changeStage()"
+                            :disabled="!newStage || stageSaving"
+                            class="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-xs rounded-lg font-medium transition disabled:opacity-40 flex items-center gap-1.5">
+                        <span x-show="stageSaving" class="inline-block animate-spin text-xs">↻</span>
+                        <span x-text="stageSaving ? 'Moving…' : 'Move'"></span>
+                    </button>
+                </div>
 
                 {{-- Contact + Links --}}
                 <div class="grid grid-cols-2 gap-3 text-xs">
@@ -162,25 +236,44 @@
                     </a>
                 </div>
 
-                {{-- Skills --}}
-                <div x-show="detail?.skills?.length">
-                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Skills</p>
-                    <div class="flex flex-wrap gap-1.5">
-                        <template x-for="skill in detail?.skills ?? []" :key="skill">
-                            <span class="px-2 py-0.5 bg-brand-600/20 text-brand-400 border border-brand-500/20 rounded text-xs" x-text="skill"></span>
+                {{-- AI Score Breakdown --}}
+                <div x-show="detail?.score != null">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">AI Score Breakdown</p>
+                    <div class="bg-slate-800/60 rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs text-slate-400">Overall Score</span>
+                            <span class="text-2xl font-bold"
+                                  :class="detail?.score >= 80 ? 'text-emerald-400' : detail?.score >= 60 ? 'text-amber-400' : 'text-red-400'"
+                                  x-text="detail?.score + '/100'"></span>
+                        </div>
+                        <div class="w-full h-2 bg-slate-700 rounded-full overflow-hidden mb-3">
+                            <div class="h-full rounded-full transition-all duration-700"
+                                 :class="detail?.score >= 80 ? 'bg-emerald-500' : detail?.score >= 60 ? 'bg-amber-500' : 'bg-red-500'"
+                                 :style="'width:' + Math.min(detail?.score ?? 0, 100) + '%'"></div>
+                        </div>
+                        <template x-if="detail?.score_details && Object.keys(detail?.score_details ?? {}).length">
+                            <div class="space-y-2 mt-3 border-t border-slate-700 pt-3">
+                                <template x-for="[key, val] in Object.entries(detail?.score_details ?? {})" :key="key">
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-slate-400 text-xs capitalize w-28 flex-shrink-0" x-text="key.replace(/_/g,' ')"></span>
+                                        <div class="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                            <div class="h-full bg-brand-500 rounded-full"
+                                                 :style="'width:' + Math.min(Number(val) ?? 0, 100) + '%'"></div>
+                                        </div>
+                                        <span class="text-slate-200 font-medium text-xs w-8 text-right" x-text="val"></span>
+                                    </div>
+                                </template>
+                            </div>
                         </template>
                     </div>
                 </div>
 
-                {{-- Score breakdown --}}
-                <div x-show="detail?.score_details && Object.keys(detail?.score_details ?? {}).length">
-                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Score breakdown</p>
-                    <div class="space-y-1.5">
-                        <template x-for="[key, val] in Object.entries(detail?.score_details ?? {})" :key="key">
-                            <div class="flex items-center justify-between text-xs">
-                                <span class="text-slate-400 capitalize" x-text="key.replace(/_/g,' ')"></span>
-                                <span class="text-slate-200 font-medium" x-text="val"></span>
-                            </div>
+                {{-- Skills --}}
+                <div x-show="detail?.skills?.length">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Skills Match</p>
+                    <div class="flex flex-wrap gap-1.5">
+                        <template x-for="skill in detail?.skills ?? []" :key="skill">
+                            <span class="px-2 py-0.5 bg-brand-600/20 text-brand-400 border border-brand-500/20 rounded text-xs" x-text="skill"></span>
                         </template>
                     </div>
                 </div>
@@ -231,6 +324,9 @@ function candidatesApp() {
         detailOpen: false,
         detailLoading: false,
         detail: null,
+        newStage: '',
+        stageSaving: false,
+        refreshTimer: null,
 
         async init() {
             const saved = JSON.parse(localStorage.getItem('filters_candidates') ?? '{}');
@@ -241,6 +337,8 @@ function candidatesApp() {
             if (this.stageFilter && !Object.keys(this.byStage).includes(this.stageFilter)) {
                 this.stageFilter = '';
             }
+            // Auto-refresh every 45s
+            this.refreshTimer = setInterval(() => this.load(), 45000);
         },
 
         async load() {
@@ -283,11 +381,13 @@ function candidatesApp() {
             this.detailOpen = true;
             this.detailLoading = true;
             this.detail = null;
+            this.newStage = '';
             try {
                 const r = await fetch('/dashboard/api/candidates/' + id, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const d = await r.json();
                 this.detail = d.candidate ?? null;
+                this.newStage = this.detail?.pipeline_stage ?? '';
             } catch (e) {
                 this.handleError(e);
                 this.detailOpen = false;
@@ -296,8 +396,47 @@ function candidatesApp() {
             }
         },
 
+        async changeStage() {
+            if (!this.newStage || !this.detail) return;
+            const oldStage = this.detail.pipeline_stage;
+            if (this.newStage === oldStage) { showToast('Candidate is already in the ' + this.newStage + ' stage', 'info'); return; }
+
+            const ok = await confirmAction(
+                'Move candidate?',
+                `Move ${this.detail.name} from "${oldStage ?? 'unknown'}" to "${this.newStage}"?`,
+                'Move',
+                'bg-brand-600 hover:bg-brand-700 text-white'
+            );
+            if (!ok) return;
+
+            this.stageSaving = true;
+            try {
+                await apiPatch('/dashboard/api/candidates/' + this.detail.id, { pipeline_stage: this.newStage });
+                this.detail.pipeline_stage = this.newStage;
+                showToast(this.detail.name + ' moved to ' + this.newStage, 'success');
+                // Update the table row without a full reload
+                const row = this.candidates.find(c => c.id === this.detail.id);
+                if (row) row.pipeline_stage = this.newStage;
+                // Reload stage counts
+                await this.load();
+            } catch (e) {
+                showToast('Failed to update stage: ' + e.message, 'error');
+            } finally {
+                this.stageSaving = false;
+            }
+        },
+
         statusBadge, relativeTime,
     }
 }
 </script>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('.stat-card', { opacity: 0, y: 18, duration: 0.45, stagger: 0.07, ease: 'power2.out', delay: 0.1, clearProps: 'all' });
+});
+</script>
+@endpush
 @endsection

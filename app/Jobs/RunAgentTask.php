@@ -23,10 +23,6 @@ class RunAgentTask implements ShouldQueue
     public int $tries = 1;         // do not auto-retry the whole job (AgentRunner handles step-level retries)
     public int $backoff = 0;
 
-    public int $tries = 1;         // do not auto-retry the whole job (AgentRunner handles step-level retries)
-
-    public int $backoff = 0;
-
     public function __construct(public readonly AgentTask $task)
     {
         $this->onQueue('agents');

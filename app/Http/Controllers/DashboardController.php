@@ -275,6 +275,29 @@ class DashboardController extends Controller
         }
     }
 
+    public function apiPatchCandidate(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'pipeline_stage' => 'sometimes|string|in:new,screening,interview,offer,hired,rejected',
+            'pipeline_notes' => 'sometimes|nullable|string|max:2000',
+            'score'          => 'sometimes|numeric|min:0|max:100',
+        ]);
+
+        try {
+            $candidate = Candidate::findOrFail($id);
+
+            if (isset($validated['pipeline_stage'])) {
+                $validated['stage_updated_at'] = now();
+            }
+
+            $candidate->update($validated);
+
+            return response()->json(['success' => true, 'candidate' => $candidate->fresh()]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+    }
+
     // ── API: Content ──────────────────────────────────────────────────
 
     public function apiContent(Request $request): JsonResponse
@@ -1378,8 +1401,10 @@ class DashboardController extends Controller
 
             // Audit log
             SystemEvent::create([
-                'level' => 'info',
-                'message' => sprintf(
+                'event_type' => 'social.publish',
+                'severity'   => 'info',
+                'source'     => 'social',
+                'message'    => sprintf(
                     'Published to %s: %s [%s]',
                     $entry->platform,
                     $entry->title,
@@ -1571,6 +1596,66 @@ class DashboardController extends Controller
             'tokens_expiring_soon' => $tokensExpiringSoon,
             'auto_post_enabled' => config('services.social.auto_post_enabled', false),
             'timestamp' => now()->toIso8601String(),
+        ]);
+    }
+
+    // ── API: Social Credentials (OAuth app credentials) ───────────────
+
+    public function apiSocialCredentials(): JsonResponse
+    {
+        $platforms = [
+            'instagram' => ['id_key' => 'SOCIAL_INSTAGRAM_CLIENT_ID', 'secret_key' => 'SOCIAL_INSTAGRAM_CLIENT_SECRET'],
+            'twitter'   => ['id_key' => 'SOCIAL_TWITTER_CLIENT_ID',   'secret_key' => 'SOCIAL_TWITTER_CLIENT_SECRET'],
+            'linkedin'  => ['id_key' => 'SOCIAL_LINKEDIN_CLIENT_ID',  'secret_key' => 'SOCIAL_LINKEDIN_CLIENT_SECRET'],
+            'facebook'  => ['id_key' => 'SOCIAL_FACEBOOK_CLIENT_ID',  'secret_key' => 'SOCIAL_FACEBOOK_CLIENT_SECRET'],
+            'tiktok'    => ['id_key' => 'SOCIAL_TIKTOK_CLIENT_KEY',   'secret_key' => 'SOCIAL_TIKTOK_CLIENT_SECRET'],
+            'youtube'   => ['id_key' => 'SOCIAL_YOUTUBE_CLIENT_ID',   'secret_key' => 'SOCIAL_YOUTUBE_CLIENT_SECRET'],
+        ];
+
+        $result = [];
+        foreach ($platforms as $platform => $keys) {
+            $clientId     = $this->credentials->retrieve($keys['id_key']) ?? '';
+            $clientSecret = $this->credentials->retrieve($keys['secret_key']) ?? '';
+            $isConfigured = ! empty($clientId) && ! str_contains($clientId, 'CHANGE_ME')
+                         && ! empty($clientSecret) && ! str_contains($clientSecret, 'CHANGE_ME');
+
+            $result[] = [
+                'platform'        => $platform,
+                'client_id'       => $isConfigured ? substr($clientId, 0, 8) . str_repeat('*', max(0, strlen($clientId) - 8)) : '',
+                'client_secret'   => $isConfigured ? str_repeat('*', 16) : '',
+                'is_configured'   => $isConfigured,
+                'status'          => $isConfigured ? 'configured' : 'missing',
+                'last_tested_at'  => null,
+                'last_test_error' => null,
+            ];
+        }
+
+        return response()->json($result);
+    }
+
+    public function apiStoreSocialCredentials(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'platform'      => 'required|string|in:instagram,twitter,linkedin,facebook,tiktok,youtube',
+            'client_id'     => 'required|string|min:4',
+            'client_secret' => 'required|string|min:4',
+        ]);
+
+        $platform = $validated['platform'];
+
+        $idKey     = match ($platform) {
+            'tiktok' => 'SOCIAL_TIKTOK_CLIENT_KEY',
+            default  => 'SOCIAL_' . strtoupper($platform) . '_CLIENT_ID',
+        };
+        $secretKey = 'SOCIAL_' . strtoupper($platform) . '_CLIENT_SECRET';
+
+        $this->credentials->store($platform, $idKey, $validated['client_id']);
+        $this->credentials->store($platform, $secretKey, $validated['client_secret']);
+
+        return response()->json([
+            'status'         => 'configured',
+            'platform'       => $platform,
+            'last_tested_at' => now()->toIso8601String(),
         ]);
     }
 }

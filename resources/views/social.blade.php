@@ -365,9 +365,12 @@
                             ['linkedin',  'LinkedIn',  '#0077B5'],
                             ['youtube',   'YouTube',   '#FF0000'],
                         ] as [$platform, $label, $color])
-                        <div class="stat-card relative overflow-hidden">
-                            {{-- Accent bar --}}
-                            <div class="absolute top-0 left-0 right-0 h-0.5" style="background: {{ $color }}"></div>
+                        <div class="stat-card card-lift relative overflow-hidden"
+                             style="border-top: 2px solid {{ $color }}40; box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px {{ $color }}15, inset 0 1px 0 rgba(255,255,255,0.04);">
+                            {{-- Accent glow --}}
+                            <div class="absolute top-0 left-0 right-0 h-px" style="background: {{ $color }}; opacity: 0.7;"></div>
+                            <div class="absolute -top-8 left-1/2 -translate-x-1/2 w-32 h-16 rounded-full opacity-10 pointer-events-none"
+                                 style="background: radial-gradient(circle, {{ $color }}, transparent);"></div>
 
                             <div class="flex items-start justify-between mb-3 mt-1">
                                 <div>
@@ -1031,6 +1034,15 @@ function trendComponent() {
 }
 
 // apiPut/apiPatch/apiDelete defined globally in layouts/app.blade.php
+</script>
+@endpush
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('.stat-card', { opacity: 0, y: 18, duration: 0.45, stagger: 0.07, ease: 'power2.out', delay: 0.1, clearProps: 'all' });
+});
 </script>
 @endpush
 @endsection

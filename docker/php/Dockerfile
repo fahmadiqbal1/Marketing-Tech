@@ -6,12 +6,12 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_HOME=/tmp/composer
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip curl ca-certificates supervisor nginx-light \
-    default-mysql-client libzip-dev libicu-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
+    git unzip curl ca-certificates supervisor \
+    libpq-dev libzip-dev libicu-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
     libxml2-dev libxslt1-dev libtidy-dev libonig-dev libmagickwand-dev \
     ffmpeg imagemagick clamav netcat-openbsd \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" bcmath exif gd intl opcache pcntl pdo_mysql mysqli sockets tidy xsl zip \
+    && docker-php-ext-install -j"$(nproc)" bcmath exif gd intl opcache pcntl pdo_pgsql pgsql sockets tidy xsl zip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer /usr/bin/composer /usr/bin/composer
@@ -39,4 +39,5 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 EXPOSE 9000
 
-CMD ["php-fpm", "--nodaemonize"]
+# supervisord manages php-fpm, horizon workers, and the scheduler
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

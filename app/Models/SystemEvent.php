@@ -27,6 +27,15 @@ class SystemEvent extends Model
         'occurred_at' => 'datetime',
     ];
 
+    /** Default values so legacy create() calls without event_type/source don't throw. */
+    protected $attributes = [
+        'event_type' => 'app.event',
+        'severity'   => 'info',
+        'source'     => 'app',
+        'payload'    => '{}',
+        'notified'   => false,
+    ];
+
     public static function emit(
         string  $type,
         string  $message,

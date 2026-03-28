@@ -59,7 +59,8 @@
             </template>
         </select>
 
-        <div class="ml-auto flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-3">
+            <span class="text-xs text-slate-500" x-text="'Refreshes in ' + refreshCountdown + 's'"></span>
             <span class="text-xs text-slate-500" x-text="totalEntries + ' jobs'"></span>
             <button @click="load()" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
                 <svg class="w-4 h-4" :class="loading ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -81,24 +82,91 @@
                 </tr>
             </thead>
             <tbody>
+                {{-- Skeleton loading rows --}}
                 <template x-if="loading && !jobs.length">
-                    <tr><td colspan="6" class="py-8 text-center text-slate-500">Loading…</td></tr>
+                    <template x-for="i in [1,2,3,4,5]" :key="i">
+                        <tr class="border-b border-slate-800/60">
+                            <td class="py-3"><div class="skeleton h-4 w-32 mb-1"></div><div class="skeleton h-3 w-48"></div></td>
+                            <td class="py-3"><div class="skeleton h-5 w-16 rounded-full"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-20"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-8"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-12"></div></td>
+                            <td class="py-3"><div class="skeleton h-4 w-16"></div></td>
+                        </tr>
+                    </template>
                 </template>
                 <template x-if="!loading && !jobs.length">
                     <tr><td colspan="6" class="py-8 text-center text-slate-500">No agent jobs found.</td></tr>
                 </template>
                 <template x-for="job in jobs" :key="job.id">
-                    <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors">
-                        <td class="py-3">
-                            <div class="font-medium text-slate-200" x-text="job.agent_type"></div>
-                            <div class="text-xs text-slate-500 max-w-xs truncate" x-text="job.short_description || '—'"></div>
-                        </td>
-                        <td class="py-3"><span class="badge" :class="statusBadge(job.status)" x-text="job.status"></span></td>
-                        <td class="py-3 text-slate-400 text-xs font-mono" x-text="job.workflow_id ? job.workflow_id.slice(0,8) + '…' : '–'"></td>
-                        <td class="py-3 text-slate-400" x-text="job.steps_taken ?? 0"></td>
-                        <td class="py-3 text-slate-400 text-xs" x-text="jobDuration(job)"></td>
-                        <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(job.created_at)"></td>
-                    </tr>
+                    {{-- Two rows per job: the main row and the expandable detail row --}}
+                    <template x-if="true">
+                        <tbody>
+                            <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors cursor-pointer"
+                                :class="job.status === 'running' ? 'border-l-2 border-l-blue-500' : ''"
+                                @click="expanded = expanded === job.id ? null : job.id">
+                                <td class="py-3">
+                                    <div class="flex items-center gap-2">
+                                        <div>
+                                            <div class="font-medium text-slate-200" x-text="job.agent_type"></div>
+                                            <div class="text-xs text-slate-500 max-w-xs truncate" x-text="job.short_description || '—'"></div>
+                                        </div>
+                                        {{-- Chevron icon --}}
+                                        <svg class="w-3.5 h-3.5 text-slate-500 ml-1 flex-shrink-0 transition-transform duration-200"
+                                             :class="expanded === job.id ? 'rotate-180' : ''"
+                                             fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </div>
+                                </td>
+                                <td class="py-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="badge" :class="statusBadge(job.status)" x-text="job.status"></span>
+                                        {{-- Pulsing dot for running jobs --}}
+                                        <span x-show="job.status === 'running'"
+                                              class="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                                    </div>
+                                </td>
+                                <td class="py-3 text-slate-400 text-xs font-mono" x-text="job.workflow_id ? job.workflow_id.slice(0,8) + '…' : '–'"></td>
+                                <td class="py-3 text-slate-400" x-text="job.steps_taken ?? 0"></td>
+                                <td class="py-3 text-slate-400 text-xs" x-text="jobDuration(job)"></td>
+                                <td class="py-3 text-slate-400 text-xs whitespace-nowrap" x-text="relativeTime(job.created_at)"></td>
+                            </tr>
+                            {{-- Expandable detail row --}}
+                            <tr x-show="expanded === job.id" class="bg-slate-900/60">
+                                <td colspan="6" class="px-4 pb-4 pt-2">
+                                    <div class="space-y-3">
+                                        {{-- Full description --}}
+                                        <div x-show="job.short_description">
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Description</p>
+                                            <p class="text-sm text-slate-300" x-text="job.short_description"></p>
+                                        </div>
+                                        {{-- Error message --}}
+                                        <div x-show="job.error_message">
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Error</p>
+                                            <div class="border border-red-500/40 bg-red-950/30 rounded-lg p-3">
+                                                <p class="text-xs text-red-300 font-mono whitespace-pre-wrap" x-text="job.error_message"></p>
+                                            </div>
+                                        </div>
+                                        {{-- Steps progress --}}
+                                        <div x-show="(job.total_steps ?? 0) > 0">
+                                            <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">
+                                                Steps: <span x-text="(job.steps_taken ?? 0) + ' / ' + (job.total_steps ?? 0)"></span>
+                                            </p>
+                                            <div class="h-2 bg-slate-800 rounded-full overflow-hidden w-full max-w-xs">
+                                                <div class="h-2 bg-violet-500 rounded-full transition-all duration-500"
+                                                     :style="`width:${Math.min(((job.steps_taken ?? 0) / (job.total_steps ?? 1)) * 100, 100)}%`"></div>
+                                            </div>
+                                        </div>
+                                        {{-- Steps taken only (no total) --}}
+                                        <div x-show="(job.total_steps ?? 0) === 0 && (job.steps_taken ?? 0) > 0">
+                                            <p class="text-xs text-slate-400">Steps taken: <span class="text-slate-200" x-text="job.steps_taken"></span></p>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
                 </template>
             </tbody>
         </table>
@@ -132,6 +200,9 @@ function jobsApp() {
         totalPages: 1,
         totalEntries: 0,
         loading: false,
+        expanded: null,
+        refreshInterval: 15,
+        refreshCountdown: 15,
 
         async init() {
             const saved = JSON.parse(localStorage.getItem('filters_jobs') ?? '{}');
@@ -143,6 +214,12 @@ function jobsApp() {
             if (this.agentTypeFilter && !Object.keys(this.byAgentType).includes(this.agentTypeFilter)) {
                 this.agentTypeFilter = '';
             }
+            // Auto-refresh every 15 seconds
+            setInterval(() => this.load(), 15000);
+            // Countdown ticker
+            setInterval(() => {
+                this.refreshCountdown = this.refreshCountdown > 1 ? this.refreshCountdown - 1 : this.refreshInterval;
+            }, 1000);
         },
 
         async load() {
@@ -151,6 +228,7 @@ function jobsApp() {
                 agentTypeFilter: this.agentTypeFilter,
             }));
             this.loading = true;
+            this.refreshCountdown = this.refreshInterval;
             this.clearMessages();
             try {
                 const params = new URLSearchParams({ page: this.currentPage });
@@ -198,4 +276,13 @@ function jobsApp() {
     }
 }
 </script>
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.gsap) return;
+    gsap.from('.stat-card', { opacity: 0, y: 18, duration: 0.45, stagger: 0.07, ease: 'power2.out', delay: 0.1, clearProps: 'all' });
+});
+</script>
+@endpush
 @endsection
