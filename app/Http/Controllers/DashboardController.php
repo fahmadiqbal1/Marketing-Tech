@@ -1378,7 +1378,7 @@ class DashboardController extends Controller
     {
         $validated = $request->validate([
             'name'       => 'required|string|max:255',
-            'platform'   => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
+            'platform'   => 'required|in:tiktok,instagram,facebook,twitter,linkedin,youtube',
             'niche'      => 'nullable|string|max:100',
             'tags'       => 'required|array|min:1',
             'tags.*'     => 'string',
@@ -1418,7 +1418,7 @@ class DashboardController extends Controller
     public function apiUpsertSocialAccount(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'platform'         => 'required|in:tiktok,instagram,facebook,twitter,linkedin',
+            'platform'         => 'required|in:tiktok,instagram,facebook,twitter,linkedin,youtube',
             'handle'           => 'required|string|max:255',
             'display_name'     => 'nullable|string|max:255',
             'access_token'     => 'nullable|string',

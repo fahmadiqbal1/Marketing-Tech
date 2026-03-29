@@ -3,9 +3,16 @@
 namespace App\Services\Telegram;
 
 use App\Agents\AgentOrchestrator;
+use App\Jobs\ProcessCampaignRequest;
+use App\Jobs\ProcessHiringRequest;
+use App\Services\AI\OpenAIService;
+use App\Services\Campaign\CampaignApprovalService;
+use App\Services\Hiring\HiringApprovalService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class TelegramBotService
 {
@@ -14,8 +21,11 @@ class TelegramBotService
     private array  $allowedUsers;
 
     public function __construct(
-        private readonly AgentOrchestrator $orchestrator,
-        private readonly CommandHandler    $commandHandler,
+        private readonly AgentOrchestrator       $orchestrator,
+        private readonly CommandHandler          $commandHandler,
+        private readonly OpenAIService           $openai,
+        private readonly CampaignApprovalService $approvalService,
+        private readonly HiringApprovalService   $hiringApproval,
     ) {
         $this->token       = config('agents.telegram.token');
         $this->apiBase     = "https://api.telegram.org/bot{$this->token}";
@@ -50,8 +60,51 @@ class TelegramBotService
             return;
         }
 
-        // Handle document / photo uploads
-        if (! empty($message['document']) || ! empty($message['photo'])) {
+        // Voice note → transcribe → hiring or campaign pipeline
+        if (! empty($message['voice'])) {
+            $transcript = $this->transcribeVoice($message['voice'], $chatId);
+            if ($transcript) {
+                if ($this->isHiringIntent($transcript)) {
+                    $this->dispatchHiringRequest($chatId, $transcript);
+                } else {
+                    $this->dispatchCampaignRequest($chatId, $transcript, null, 'none');
+                }
+            }
+            return;
+        }
+
+        // Audio document (mp3/ogg via document)
+        if (! empty($message['document']) && str_starts_with($message['document']['mime_type'] ?? '', 'audio/')) {
+            $transcript = $this->transcribeVoice($message['document'], $chatId);
+            if ($transcript) {
+                if ($this->isHiringIntent($transcript)) {
+                    $this->dispatchHiringRequest($chatId, $transcript);
+                } else {
+                    $this->dispatchCampaignRequest($chatId, $transcript, null, 'none');
+                }
+            }
+            return;
+        }
+
+        // Photo with caption → campaign pipeline
+        if (! empty($message['photo'])) {
+            $caption  = $message['caption'] ?? 'Create a campaign from this image';
+            $fileId   = end($message['photo'])['file_id'];
+            $mediaKey = $this->downloadTelegramMedia($fileId, 'jpg');
+            $this->dispatchCampaignRequest($chatId, $caption, $mediaKey, 'image');
+            return;
+        }
+
+        // Video with caption → campaign pipeline
+        if (! empty($message['video'])) {
+            $caption  = $message['caption'] ?? 'Create a campaign from this video';
+            $mediaKey = $this->downloadTelegramMedia($message['video']['file_id'], 'mp4');
+            $this->dispatchCampaignRequest($chatId, $caption, $mediaKey, 'video');
+            return;
+        }
+
+        // Document / photo upload (legacy non-campaign handler)
+        if (! empty($message['document'])) {
             $this->handleFileUpload($message, $chatId, $userId);
             return;
         }
@@ -64,7 +117,7 @@ class TelegramBotService
         if (str_starts_with($text, '/')) {
             $this->commandHandler->handle($text, $message, $chatId, $userId);
         } else {
-            // Free-form message — treat as agent instruction
+            // Free-form text → check if it looks like a campaign request, else fall through to agent
             $this->handleFreeText($text, $message, $chatId, $userId);
         }
     }
@@ -86,7 +139,36 @@ class TelegramBotService
         // Answer the callback to remove loading spinner
         $this->answerCallbackQuery($callback['id']);
 
-        // Parse action:payload format
+        // Hiring approval callbacks: jobpost:action:uuid
+        if (str_starts_with($data, 'jobpost:')) {
+            [$_p, $action, $jobPostId] = array_pad(explode(':', $data, 3), 3, '');
+            match ($action) {
+                'approve' => $this->hiringApproval->approve($jobPostId, $chatId, $messageId),
+                'regen'   => $this->hiringApproval->regenerate($jobPostId, $chatId, $messageId),
+                'edit'    => $this->hiringApproval->requestEdit($jobPostId, $chatId, $messageId),
+                'cancel'  => $this->editMessage($chatId, $messageId, '❌ Job post cancelled.'),
+                default   => $this->sendMessage($chatId, 'Unknown hiring action.'),
+            };
+            return;
+        }
+
+        // Campaign approval callbacks use campaign:action:uuid format
+        if (str_starts_with($data, 'campaign:')) {
+            $parts      = explode(':', $data, 3);
+            $action     = $parts[1] ?? '';
+            $campaignId = $parts[2] ?? '';
+
+            match ($action) {
+                'approve' => $this->approvalService->approve($campaignId, $chatId, $messageId),
+                'regen'   => $this->approvalService->regenerate($campaignId, $chatId, $messageId),
+                'edit'    => $this->approvalService->requestEdit($campaignId, $chatId, $messageId),
+                'cancel'  => $this->editMessage($chatId, $messageId, '❌ Campaign cancelled.'),
+                default   => $this->sendMessage($chatId, 'Unknown campaign action.'),
+            };
+            return;
+        }
+
+        // Parse action:payload format (legacy callbacks)
         [$action, $payload] = array_pad(explode(':', $data, 2), 2, '');
 
         match ($action) {
@@ -131,11 +213,16 @@ class TelegramBotService
     }
 
     /**
-     * Free-form text → agent orchestrator.
+     * Free-form text → hiring pipeline or agent orchestrator.
      */
     private function handleFreeText(string $text, array $message, int $chatId, int $userId): void
     {
         $this->sendTypingIndicator($chatId);
+
+        if ($this->isHiringIntent($text)) {
+            $this->dispatchHiringRequest($chatId, $text);
+            return;
+        }
 
         $this->orchestrator->dispatchFromTelegram(
             instruction: $text,
@@ -143,6 +230,37 @@ class TelegramBotService
             userId:      $userId,
             messageId:   $message['message_id'],
         );
+    }
+
+    /**
+     * Detect hiring/job-post intent from text without an API call.
+     */
+    private function isHiringIntent(string $text): bool
+    {
+        $lower = strtolower($text);
+        foreach ([
+            'hire ', 'hiring', 'recruit', 'job post', 'job opening', 'vacancy',
+            'open position', 'post a job', 'post an ad', 'need to hire',
+            'we need a ', 'looking for a ', 'seeking a ',
+        ] as $keyword) {
+            if (str_contains($lower, $keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Dispatch a ProcessHiringRequest job and send an acknowledgement.
+     */
+    private function dispatchHiringRequest(int $chatId, string $instruction): void
+    {
+        $this->sendTypingIndicator($chatId);
+        $this->sendMessage($chatId,
+            "📋 *Preparing job post draft...*\n"
+            . "I'll have a full description ready for your review shortly.");
+
+        ProcessHiringRequest::dispatch($chatId, $instruction)->onQueue('agents');
     }
 
     // ── Telegram API methods ──────────────────────────────────────
@@ -255,6 +373,96 @@ class TelegramBotService
     public function inlineKeyboard(array $buttons): array
     {
         return ['inline_keyboard' => $buttons];
+    }
+
+    // ── Campaign media helpers ────────────────────────────────────
+
+    /**
+     * Transcribe a voice/audio message using Whisper.
+     * Returns the transcript string, or null on failure.
+     */
+    private function transcribeVoice(array $voiceOrDoc, int $chatId): ?string
+    {
+        $fileId = $voiceOrDoc['file_id'];
+
+        $fileInfo = $this->apiCall('getFile', ['file_id' => $fileId]);
+        $filePath = $fileInfo['result']['file_path'] ?? null;
+        if (!$filePath) {
+            $this->sendMessage($chatId, '⚠️ Could not access voice file. Please try again.');
+            return null;
+        }
+
+        $content  = $this->downloadFile($filePath);
+        if (!$content) {
+            $this->sendMessage($chatId, '⚠️ Could not download voice file. Please try again.');
+            return null;
+        }
+
+        $tempPath = storage_path('app/temp/' . Str::uuid() . '.ogg');
+        @mkdir(dirname($tempPath), 0755, true);
+        file_put_contents($tempPath, $content);
+
+        try {
+            $transcript = $this->openai->transcribe($tempPath);
+            @unlink($tempPath);
+
+            if (empty(trim($transcript))) {
+                $this->sendMessage($chatId, '⚠️ Could not understand the voice note. Please try again or type your request.');
+                return null;
+            }
+
+            Log::info('TelegramBotService: voice transcribed', [
+                'chat_id' => $chatId,
+                'length'  => strlen($transcript),
+            ]);
+            return $transcript;
+        } catch (\Throwable $e) {
+            @unlink($tempPath);
+            Log::error('TelegramBotService: voice transcription failed', ['error' => $e->getMessage()]);
+            $this->sendMessage($chatId, '⚠️ Voice transcription failed. Please type your request instead.');
+            return null;
+        }
+    }
+
+    /**
+     * Download a Telegram media file and store in MinIO.
+     * Returns the MinIO storage key.
+     */
+    private function downloadTelegramMedia(string $fileId, string $ext): ?string
+    {
+        $fileInfo = $this->apiCall('getFile', ['file_id' => $fileId]);
+        $filePath = $fileInfo['result']['file_path'] ?? null;
+        if (!$filePath) return null;
+
+        $content = $this->downloadFile($filePath);
+        if (!$content) return null;
+
+        $key = 'uploads/' . Str::uuid() . '.' . $ext;
+        try {
+            Storage::disk('minio')->put($key, $content);
+            return $key;
+        } catch (\Throwable $e) {
+            Log::error('TelegramBotService: MinIO upload failed', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Dispatch a ProcessCampaignRequest job and send an acknowledgement message.
+     */
+    private function dispatchCampaignRequest(
+        int     $chatId,
+        string  $instruction,
+        ?string $mediaKey,
+        string  $mediaType,
+    ): void {
+        $this->sendTypingIndicator($chatId);
+        $this->sendMessage($chatId,
+            '🎯 *Analysing your request...*' . "\n"
+            . "I'll prepare campaign drafts for all platforms shortly.");
+
+        ProcessCampaignRequest::dispatch($chatId, $instruction, $mediaKey, $mediaType)
+            ->onQueue('agents');
     }
 
     // ── Private helpers ───────────────────────────────────────────

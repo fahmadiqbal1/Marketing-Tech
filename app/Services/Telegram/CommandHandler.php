@@ -10,9 +10,13 @@ use Illuminate\Support\Str;
 class CommandHandler
 {
     public function __construct(
-        private readonly TelegramBotService $bot,
-        private readonly AgentOrchestrator  $orchestrator,
+        private readonly AgentOrchestrator $orchestrator,
     ) {}
+
+    private function bot(): TelegramBotService
+    {
+        return app(TelegramBotService::class);
+    }
 
     public function handle(string $text, array $message, int $chatId, int $userId): void
     {
@@ -35,13 +39,13 @@ class CommandHandler
             '/agent'     => $this->handleAgent($args, $chatId, $userId),
             '/cancel'    => $this->handleCancel($args, $chatId),
             '/logs'      => $this->handleLogs($chatId),
-            default      => $this->bot->sendMessage($chatId, "❓ Unknown command. Use /help to see available commands."),
+            default      => $this->bot()->sendMessage($chatId, "❓ Unknown command. Use /help to see available commands."),
         };
     }
 
     private function handleStart(int $chatId): void
     {
-        $this->bot->sendMessage($chatId, <<<MSG
+        $this->bot()->sendMessage($chatId, <<<MSG
 🤖 *Autonomous Business Operations Platform*
 
 I automate your business operations. I can handle:
@@ -66,7 +70,7 @@ MSG
             $lines[] = "`{$cmd}` — {$desc}";
         }
         $lines[] = "\nOr just type a task in plain English — I'll route it automatically.";
-        $this->bot->sendMessage($chatId, implode("\n", $lines));
+        $this->bot()->sendMessage($chatId, implode("\n", $lines));
     }
 
     private function handleStatus(int $chatId): void
@@ -82,7 +86,7 @@ MSG
 
         $horizonStatus = $this->getHorizonStatus();
 
-        $this->bot->sendMessage($chatId, <<<MSG
+        $this->bot()->sendMessage($chatId, <<<MSG
 📊 *System Status*
 
 *Queue Health:* {$horizonStatus}
@@ -108,7 +112,7 @@ MSG
             ->get();
 
         if ($jobs->isEmpty()) {
-            $this->bot->sendMessage($chatId, '✅ No active jobs.');
+            $this->bot()->sendMessage($chatId, '✅ No active jobs.');
             return;
         }
 
@@ -123,13 +127,13 @@ MSG
             ['text' => "Cancel {$j->id}", 'callback_data' => "cancel_job:{$j->id}"],
         ])->toArray();
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines), $this->bot->inlineKeyboard($buttons));
+        $this->bot()->sendMessage($chatId, implode("\n", $lines), $this->bot()->inlineKeyboard($buttons));
     }
 
     private function handleCampaign(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 📣 *Campaign Manager*
 
 Usage: `/campaign <instruction>`
@@ -149,7 +153,7 @@ MSG
     private function handleContent(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 ✍️ *Content Generator*
 
 Usage: `/content <instruction>`
@@ -169,7 +173,7 @@ MSG
     private function handleMedia(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 🎬 *Media Processor*
 
 Usage: `/media <instruction>` then attach a file
@@ -189,7 +193,7 @@ MSG
     private function handleHire(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 👥 *Hiring Pipeline*
 
 Usage: `/hire <instruction>`
@@ -210,7 +214,7 @@ MSG
     private function handleGrowth(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 📊 *Growth Engine*
 
 Usage: `/growth <instruction>`
@@ -231,7 +235,7 @@ MSG
     private function handleKnowledge(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, <<<MSG
+            $this->bot()->sendMessage($chatId, <<<MSG
 🧠 *Knowledge Base*
 
 Usage: `/knowledge <query or instruction>`
@@ -251,7 +255,7 @@ MSG
     private function handleAgent(string $args, int $chatId, int $userId): void
     {
         if (empty($args)) {
-            $this->bot->sendMessage($chatId, 'Usage: `/agent <free-form task description>`');
+            $this->bot()->sendMessage($chatId, 'Usage: `/agent <free-form task description>`');
             return;
         }
 
@@ -267,7 +271,7 @@ MSG
     {
         $jobId = trim($args);
         if (empty($jobId)) {
-            $this->bot->sendMessage($chatId, 'Usage: `/cancel <job_id>`');
+            $this->bot()->sendMessage($chatId, 'Usage: `/cancel <job_id>`');
             return;
         }
         $this->cancelJob($jobId, $chatId);
@@ -277,17 +281,17 @@ MSG
     {
         $job = AgentJob::find($jobId);
         if (! $job) {
-            $this->bot->sendMessage($chatId, "❌ Job `{$jobId}` not found.");
+            $this->bot()->sendMessage($chatId, "❌ Job `{$jobId}` not found.");
             return;
         }
 
         if ($job->status === 'completed') {
-            $this->bot->sendMessage($chatId, "✅ Job `{$jobId}` already completed.");
+            $this->bot()->sendMessage($chatId, "✅ Job `{$jobId}` already completed.");
             return;
         }
 
         $job->update(['status' => 'cancelled']);
-        $this->bot->sendMessage($chatId, "🛑 Job `{$jobId}` cancelled.");
+        $this->bot()->sendMessage($chatId, "🛑 Job `{$jobId}` cancelled.");
     }
 
     public function confirmAndRun(string $payload, int $chatId, int $userId): void
@@ -304,11 +308,11 @@ MSG
     {
         $job = AgentJob::find($jobId);
         if (! $job || empty($job->result)) {
-            $this->bot->sendMessage($chatId, "Result not found for job `{$jobId}`.");
+            $this->bot()->sendMessage($chatId, "Result not found for job `{$jobId}`.");
             return;
         }
 
-        $this->bot->sendMessage($chatId, substr($job->result, 0, 4000));
+        $this->bot()->sendMessage($chatId, substr($job->result, 0, 4000));
     }
 
     private function handleLogs(int $chatId): void
@@ -319,7 +323,7 @@ MSG
             ->get(['id', 'agent_type', 'error_message', 'updated_at']);
 
         if ($recentErrors->isEmpty()) {
-            $this->bot->sendMessage($chatId, '✅ No recent errors.');
+            $this->bot()->sendMessage($chatId, '✅ No recent errors.');
             return;
         }
 
@@ -329,13 +333,13 @@ MSG
             $lines[] = "   " . Str::limit($job->error_message, 100);
         }
 
-        $this->bot->sendMessage($chatId, implode("\n", $lines));
+        $this->bot()->sendMessage($chatId, implode("\n", $lines));
     }
 
     private function dispatchToAgent(string $agentType, string $instruction, int $chatId, int $userId): void
     {
-        $this->bot->sendTypingIndicator($chatId);
-        $this->bot->sendMessage($chatId, "⚡ Dispatching to {$agentType} agent...");
+        $this->bot()->sendTypingIndicator($chatId);
+        $this->bot()->sendMessage($chatId, "⚡ Dispatching to {$agentType} agent...");
 
         $this->orchestrator->dispatch(
             agentType:   $agentType,

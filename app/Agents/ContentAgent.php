@@ -69,7 +69,9 @@ class ContentAgent extends BaseAgent
             'trend_analysis' => $this->toolTrendAnalysis($args),
             'cross_platform_adapt' => $this->toolCrossPlatformAdapt($args),
             'create_content_calendar' => $this->toolCreateContentCalendar($args),
-            'select_hashtags' => $this->toolSelectHashtags($args),
+            'select_hashtags'           => $this->toolSelectHashtags($args),
+            'generate_platform_variants'=> $this->toolGeneratePlatformVariants($args, $job),
+            'find_trending_audio'       => $this->toolFindTrendingAudio($args),
             default => $this->toolResult(false, null, "Unknown tool: {$name}"),
         };
     }
@@ -293,6 +295,43 @@ class ContentAgent extends BaseAgent
                             'niche' => ['type' => 'string', 'description' => 'Content niche or topic'],
                         ],
                         'required' => ['platform'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_platform_variants',
+                    'description' => 'Generate caption + hashtags for all 6 social platforms in one call, respecting platform char limits and format norms',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'campaign_type' => ['type' => 'string', 'description' => 'e.g. opening_soon, product_launch, promotion, event'],
+                            'key_message'   => ['type' => 'string', 'description' => 'The core one-sentence message'],
+                            'tone'          => ['type' => 'string', 'enum' => ['professional', 'casual', 'exciting', 'urgent', 'warm'], 'default' => 'exciting'],
+                            'cta'           => ['type' => 'string', 'description' => 'Call to action e.g. "Shop now", "Follow us"'],
+                            'platforms'     => [
+                                'type'  => 'array',
+                                'items' => ['type' => 'string', 'enum' => ['instagram', 'tiktok', 'linkedin', 'facebook', 'twitter', 'youtube']],
+                            ],
+                        ],
+                        'required'   => ['key_message', 'platforms'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'find_trending_audio',
+                    'description' => 'Search the knowledge base for trending audio/sounds for a specific platform, content type, and mood',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'platform'     => ['type' => 'string', 'enum' => ['tiktok', 'instagram', 'youtube', 'facebook']],
+                            'content_type' => ['type' => 'string', 'description' => 'e.g. reel, story, shorts, post'],
+                            'mood'         => ['type' => 'string', 'description' => 'e.g. upbeat, emotional, energetic, calm, funny'],
+                        ],
+                        'required'   => ['platform'],
                     ],
                 ],
             ],
@@ -926,5 +965,108 @@ PROMPT;
     private function formatList(array $items): string
     {
         return implode(', ', $items);
+    }
+
+    private function toolGeneratePlatformVariants(array $args, AgentJob $job): string
+    {
+        $platformLimits = [
+            'instagram' => ['chars' => 2200, 'hashtags' => 10, 'format' => 'Reel or Carousel caption'],
+            'tiktok'    => ['chars' => 2200, 'hashtags' => 5,  'format' => 'Short video caption'],
+            'linkedin'  => ['chars' => 3000, 'hashtags' => 5,  'format' => 'Professional post'],
+            'facebook'  => ['chars' => 63206,'hashtags' => 3,  'format' => 'Feed post or Reel'],
+            'twitter'   => ['chars' => 280,  'hashtags' => 2,  'format' => 'Tweet or thread start'],
+            'youtube'   => ['chars' => 5000, 'hashtags' => 5,  'format' => 'Video description'],
+        ];
+
+        $targets   = $args['platforms'] ?? array_keys($platformLimits);
+        $message   = $args['key_message'] ?? '';
+        $tone      = $args['tone']        ?? 'exciting';
+        $cta       = $args['cta']         ?? '';
+        $type      = $args['campaign_type'] ?? 'general';
+
+        $platformDetails = '';
+        foreach ($targets as $p) {
+            $spec = $platformLimits[$p] ?? ['chars' => 280, 'hashtags' => 3, 'format' => 'post'];
+            $platformDetails .= "- {$p}: max {$spec['chars']} chars, {$spec['hashtags']} hashtags, format={$spec['format']}\n";
+        }
+
+        $prompt = <<<PROMPT
+Generate platform-specific social media content variants.
+
+Campaign type: {$type}
+Key message: {$message}
+Tone: {$tone}
+CTA: {$cta}
+
+Create a variant for each platform, strictly respecting its limits:
+{$platformDetails}
+
+For EACH platform return:
+- caption: the post text (within char limit, including CTAs naturally)
+- hashtags: JSON array of hashtag strings, e.g. ["#opening","#grandopening","#food"] (count within the limit, mix of niche/broad)
+- char_count: actual character count of caption
+
+Return as JSON object: { "instagram": { "caption": "...", "hashtags": ["#tag1","#tag2"], "char_count": N }, ... }
+Return ONLY the JSON, no preamble.
+PROMPT;
+
+        try {
+            $raw     = $this->openai->complete($prompt, model: 'gpt-4o-mini', maxTokens: 1500, temperature: 0.7);
+            $decoded = json_decode(trim($raw), true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                // Try to extract JSON from markdown code block
+                preg_match('/```(?:json)?\s*(\{.*?\})\s*```/s', $raw, $m);
+                $decoded = isset($m[1]) ? json_decode($m[1], true) : null;
+            }
+
+            if (!$decoded) {
+                return $this->toolResult(false, null, 'LLM returned invalid JSON for platform variants');
+            }
+
+            return $this->toolResult(true, ['variants' => $decoded]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolFindTrendingAudio(array $args): string
+    {
+        $platform    = $args['platform'];
+        $contentType = $args['content_type'] ?? '';
+        $mood        = $args['mood']         ?? '';
+
+        $query = "trending audio sounds {$platform}";
+        if ($contentType) $query .= " {$contentType}";
+        if ($mood)        $query .= " {$mood} mood";
+
+        try {
+            $results = $this->knowledge->search($query, topK: 8, categories: ['content', 'general']);
+
+            $audioResults = array_filter($results, fn ($r) =>
+                str_contains(strtolower($r['content'] ?? ''), 'audio') ||
+                str_contains(strtolower($r['content'] ?? ''), 'sound') ||
+                str_contains(strtolower($r['content'] ?? ''), 'music') ||
+                str_contains(strtolower($r['title']   ?? ''), 'audio')
+            );
+
+            if (empty($audioResults)) {
+                return $this->toolResult(true, [
+                    'results' => [],
+                    'note'    => "No trending audio data found for {$platform}. Consider ingesting a trending audio knowledge base.",
+                ]);
+            }
+
+            return $this->toolResult(true, [
+                'platform' => $platform,
+                'results'  => array_values(array_map(fn ($r) => [
+                    'title'      => $r['title'],
+                    'excerpt'    => mb_substr($r['content'], 0, 300),
+                    'similarity' => $r['similarity'],
+                ], $audioResults)),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
     }
 }
