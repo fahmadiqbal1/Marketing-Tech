@@ -242,9 +242,9 @@
                             <div class="flex items-center justify-between mb-1.5">
                                 <p class="text-xs font-semibold text-slate-500 uppercase">Instructions</p>
                                 <button x-show="agent.system_prompt"
-                                        @click="agent._showPrompt = !agent._showPrompt"
+                                        @click="promptVisible[agent.name] = !promptVisible[agent.name]"
                                         class="text-xs text-slate-500 hover:text-slate-300 transition">
-                                    <span x-text="agent._showPrompt ? 'hide ▲' : 'show ▼'"></span>
+                                    <span x-text="promptVisible[agent.name] ? 'hide ▲' : 'show ▼'"></span>
                                 </button>
                             </div>
                             <template x-if="!agent.system_prompt">
@@ -254,7 +254,7 @@
                                 <div>
                                     <p class="text-xs text-slate-400 italic truncate"
                                        x-text="agent.system_prompt.length > 120 ? agent.system_prompt.substring(0, 120) + '…' : agent.system_prompt"></p>
-                                    <div x-show="agent._showPrompt" class="mt-2 p-3 bg-slate-900/70 rounded-xl border border-slate-800">
+                                    <div x-show="promptVisible[agent.name]" class="mt-2 p-3 bg-slate-900/70 rounded-xl border border-slate-800">
                                         <p class="text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed"
                                            x-text="agent.system_prompt"></p>
                                     </div>
@@ -412,6 +412,7 @@ function pipelineApp() {
         loadError: '',
         pollTimer: null,
         refreshTimer: null,
+        promptVisible: {},
         skeletonVisible: true,
         hoveredAgent: null,
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BusinessScope;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -11,11 +12,22 @@ class AgentJob extends Model
     use HasUuids;
 
     protected $fillable = [
+        'business_id',
         'workflow_id', 'campaign_id', 'agent_type', 'agent_class', 'task_type', 'ai_provider', 'model',
         'instruction', 'short_description', 'status',
         'result', 'error_message', 'steps_taken', 'total_tokens', 'last_tool', 'metadata',
         'chat_id', 'user_id', 'started_at', 'completed_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BusinessScope());
+        static::creating(function (self $model) {
+            if (auth()->check() && auth()->user()->business_id) {
+                $model->business_id ??= auth()->user()->business_id;
+            }
+        });
+    }
 
     protected $casts = [
         'metadata'     => 'array',

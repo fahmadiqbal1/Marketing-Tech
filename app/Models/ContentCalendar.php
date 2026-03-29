@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BusinessScope;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,7 +14,18 @@ class ContentCalendar extends Model
 
     protected $table = 'content_calendar';
 
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BusinessScope());
+        static::creating(function (self $model) {
+            if (auth()->check() && auth()->user()->business_id) {
+                $model->business_id ??= auth()->user()->business_id;
+            }
+        });
+    }
+
     protected $fillable = [
+        'business_id',
         'title', 'platform', 'content_type', 'draft_content',
         'status', 'moderation_status', 'moderation_notes',
         'scheduled_at', 'published_at',

@@ -35,6 +35,13 @@ return [
         'timeout'       => 60,
     ],
 
+    'swarm' => [
+        'enabled'        => (bool) env('AGENT_SWARM_ENABLED', false),
+        'max_rounds'     => (int)  env('AGENT_SWARM_MAX_ROUNDS', 3),
+        'judge_model'    => env('AGENT_SWARM_JUDGE_MODEL', 'gpt-4o-mini'),
+        'judge_provider' => env('AGENT_SWARM_JUDGE_PROVIDER', 'openai'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Agent Definitions

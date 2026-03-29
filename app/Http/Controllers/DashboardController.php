@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\EvaluateSocialAccount;
+use App\Jobs\IngestAiPlatformCapabilities;
 use App\Jobs\IngestGitHubRepo;
+use App\Jobs\IngestMcpServerCapabilities;
+use App\Models\McpServer;
 use App\Models\AgentJob;
 use App\Models\Campaign;
 use App\Models\Candidate;
@@ -435,18 +439,39 @@ class DashboardController extends Controller
             ->filter()
             ->values();
 
+        // Agent skill cards — one per agent type from config
+        $agentSkillCards = collect(config('agent_skills.agents', []))
+            ->map(fn ($def, $name) => [
+                'agent'       => $name,
+                'skill_count' => KnowledgeBase::where('category', 'agent-skills')
+                    ->whereRaw('lower(title) like ?', ['%' . strtolower($name) . '%'])
+                    ->whereNull('deleted_at')
+                    ->count(),
+                'tools'       => array_keys($def['skills'] ?? []),
+                'mcp_tools'   => $def['mcp_tools'] ?? [],
+            ])->values();
+
+        // Category breakdown (top-level entries only, no soft-deleted)
+        $categoryBreakdown = KnowledgeBase::whereNull('parent_id')
+            ->whereNull('deleted_at')
+            ->selectRaw('category, count(*) as total')
+            ->groupBy('category')
+            ->pluck('total', 'category');
+
         return response()->json([
-            'data'          => $paginated->items(),
-            'total'         => $paginated->total(),
-            'per_page'      => $paginated->perPage(),
-            'current_page'  => $paginated->currentPage(),
-            'last_page'     => $paginated->lastPage(),
-            'stats'         => [
+            'data'              => $paginated->items(),
+            'total'             => $paginated->total(),
+            'per_page'          => $paginated->perPage(),
+            'current_page'      => $paginated->currentPage(),
+            'last_page'         => $paginated->lastPage(),
+            'stats'             => [
                 'total_entries' => $totalEntries,
                 'total_chunks'  => $totalChunks,
                 'categories'    => $categories,
             ],
-            'meta'          => ['database_available' => true],
+            'agent_skill_cards' => $agentSkillCards,
+            'category_breakdown'=> $categoryBreakdown,
+            'meta'              => ['database_available' => true],
         ]);
     }
 
@@ -746,6 +771,7 @@ class DashboardController extends Controller
         ]);
 
         $platform = CustomAiPlatform::create($validated);
+        IngestAiPlatformCapabilities::dispatch($platform->id);
 
         return response()->json(['created' => true, 'id' => $platform->id], 201);
     }
@@ -754,6 +780,37 @@ class DashboardController extends Controller
     {
         $platform = CustomAiPlatform::findOrFail($id);
         $platform->delete();
+
+        return response()->json(['deleted' => true]);
+    }
+
+    // ─── MCP Servers ─────────────────────────────────────────────────────────
+
+    public function apiMcpServers(): JsonResponse
+    {
+        return response()->json(McpServer::orderBy('name')->get());
+    }
+
+    public function apiMcpServerCreate(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'      => 'required|string|max:100',
+            'transport' => 'required|in:stdio,sse,http',
+            'command'   => 'nullable|string|max:500',
+            'url'       => 'nullable|url|max:500',
+            'args'      => 'nullable|array',
+            'env_vars'  => 'nullable|array',
+        ]);
+
+        $server = McpServer::create($validated);
+        IngestMcpServerCapabilities::dispatch($server->id);
+
+        return response()->json(['created' => true, 'id' => $server->id], 201);
+    }
+
+    public function apiMcpServerDelete(string $id): JsonResponse
+    {
+        McpServer::findOrFail($id)->delete();
 
         return response()->json(['deleted' => true]);
     }
@@ -802,7 +859,7 @@ class DashboardController extends Controller
                 'access_token' => $tokenData['access_token'],
             ])->json();
 
-            SocialAccount::updateOrCreate(
+            $account = SocialAccount::updateOrCreate(
                 ['platform' => 'instagram', 'handle' => $profile['username'] ?? 'unknown'],
                 [
                     'platform_user_id' => $profile['id'] ?? null,
@@ -813,6 +870,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            EvaluateSocialAccount::dispatch($account->id, 'instagram');
 
             return redirect('/dashboard/social')->with('success', 'Instagram connected successfully');
         } catch (\Throwable $e) {
@@ -850,7 +908,7 @@ class DashboardController extends Controller
                 ->get('https://api.twitter.com/2/users/me', ['user.fields' => 'username'])->json();
             $userId       = $profile['data']['id']       ?? null;
             $username     = $profile['data']['username'] ?? 'unknown';
-            SocialAccount::updateOrCreate(
+            $account = SocialAccount::updateOrCreate(
                 ['platform' => 'twitter', 'handle' => $username],
                 [
                     'platform_user_id' => $userId,
@@ -862,6 +920,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            EvaluateSocialAccount::dispatch($account->id, 'twitter');
             session()->forget(['oauth_twitter_verifier', 'oauth_twitter_state']);
             return redirect('/dashboard/social')->with('success', 'Twitter / X connected successfully.');
         } catch (\Throwable $e) {
@@ -920,7 +979,7 @@ class DashboardController extends Controller
 
             $defaultOrgUrn = $organizations[0]['urn'] ?? null;
 
-            SocialAccount::updateOrCreate(
+            $account = SocialAccount::updateOrCreate(
                 ['platform' => 'linkedin', 'handle' => $userId ?? $name],
                 [
                     'platform_user_id' => $userId,
@@ -937,6 +996,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            EvaluateSocialAccount::dispatch($account->id, 'linkedin');
             session()->forget('oauth_linkedin_state');
             $orgMsg = $defaultOrgUrn ? ' (' . count($organizations) . ' organization(s) found)' : '';
             return redirect('/dashboard/social')->with('success', "LinkedIn connected successfully{$orgMsg}.");
@@ -986,7 +1046,7 @@ class DashboardController extends Controller
                 $pageName  = $page['name'] ?? 'Facebook Page';
                 $pageToken = $page['access_token'] ?? $userToken;
 
-                SocialAccount::updateOrCreate(
+                $fbAccount = SocialAccount::updateOrCreate(
                     ['platform' => 'facebook', 'handle' => $pageId],
                     [
                         'platform_user_id' => $pageId,
@@ -1003,6 +1063,7 @@ class DashboardController extends Controller
                         'last_synced_at'=> now(),
                     ]
                 );
+                EvaluateSocialAccount::dispatch($fbAccount->id, 'facebook');
                 $pageCount++;
             }
 
@@ -1010,7 +1071,7 @@ class DashboardController extends Controller
             if ($pageCount === 0) {
                 $pageId   = $tokenData['page_id']   ?? 'page';
                 $pageName = $tokenData['page_name'] ?? 'Facebook Page';
-                SocialAccount::updateOrCreate(
+                $fbAccount = SocialAccount::updateOrCreate(
                     ['platform' => 'facebook', 'handle' => $pageId],
                     [
                         'platform_user_id' => $pageId,
@@ -1023,6 +1084,7 @@ class DashboardController extends Controller
                         'last_synced_at'   => now(),
                     ]
                 );
+                EvaluateSocialAccount::dispatch($fbAccount->id, 'facebook');
                 $pageCount = 1;
             }
 
@@ -1065,7 +1127,7 @@ class DashboardController extends Controller
                 ->post('https://open.tiktok.com/v2/user/info/', ['fields' => 'open_id,display_name,avatar_url'])
                 ->json('data.user', []);
             $handle    = $openId ?? 'tiktok_user';
-            SocialAccount::updateOrCreate(
+            $account = SocialAccount::updateOrCreate(
                 ['platform' => 'tiktok', 'handle' => $handle],
                 [
                     'platform_user_id' => $openId,
@@ -1078,6 +1140,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            EvaluateSocialAccount::dispatch($account->id, 'tiktok');
             session()->forget(['oauth_tiktok_verifier', 'oauth_tiktok_state']);
             return redirect('/dashboard/social')->with('success', 'TikTok connected successfully.');
         } catch (\Throwable $e) {
@@ -1117,7 +1180,7 @@ class DashboardController extends Controller
             $channelId    = $channel['id']                       ?? null;
             $channelTitle = $channel['snippet']['title']         ?? 'YouTube Channel';
             $handle       = $channel['snippet']['customUrl']     ?? $channelId ?? 'youtube';
-            SocialAccount::updateOrCreate(
+            $account = SocialAccount::updateOrCreate(
                 ['platform' => 'youtube', 'handle' => ltrim($handle, '@')],
                 [
                     'platform_user_id' => $channelId,
@@ -1130,6 +1193,7 @@ class DashboardController extends Controller
                     'last_synced_at'   => now(),
                 ]
             );
+            EvaluateSocialAccount::dispatch($account->id, 'youtube');
             session()->forget('oauth_youtube_state');
             return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
         } catch (\Throwable $e) {

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BusinessScope;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 
@@ -10,11 +11,22 @@ class SocialAccount extends Model
     use HasUuids;
 
     protected $fillable = [
+        'business_id',
         'platform', 'handle', 'display_name', 'platform_user_id',
         'access_token', 'refresh_token', 'token_expires_at',
         'is_connected', 'follower_count', 'avg_engagement_rate',
         'metadata', 'last_error', 'last_synced_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BusinessScope());
+        static::creating(function (self $model) {
+            if (auth()->check() && auth()->user()->business_id) {
+                $model->business_id ??= auth()->user()->business_id;
+            }
+        });
+    }
 
     protected $hidden = [
         'access_token', 'refresh_token',

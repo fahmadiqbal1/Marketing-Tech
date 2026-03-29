@@ -4,7 +4,9 @@ namespace App\Agents;
 
 use App\Models\AgentJob;
 use App\Models\AgentStep;
+use App\Services\AI\AIRouter;
 use App\Services\AI\OpenAIService;
+use App\Services\AI\SwarmOrchestratorService;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
 use App\Services\ApiCredentialService;
@@ -28,6 +30,10 @@ abstract class BaseAgent
     /** Per-agent rate limit (requests per minute). 0 = unlimited. */
     private int $rateLimitPerMinute = 0;
 
+    /** Tracks the current running job ID for AIRouter cost attribution. */
+    private ?string $currentJobId = null;
+    private ?string $currentWorkflowId = null;
+
     /** Tool result cache TTL in seconds. 0 = no cache. */
     private int $toolCacheTtl = 0;
 
@@ -38,14 +44,16 @@ abstract class BaseAgent
     private int $toolMaxRetries = 2;
 
     public function __construct(
-        protected readonly OpenAIService          $openai,
-        protected readonly AnthropicService       $anthropic,
-        protected readonly GeminiService          $gemini,
-        protected readonly TelegramBotService     $telegram,
-        protected readonly VectorStoreService     $knowledge,
-        protected readonly ApiCredentialService   $credentials,
-        protected readonly IterationEngineService $iterationEngine,
-        protected readonly CampaignContextService $campaignContext,
+        protected readonly OpenAIService                $openai,
+        protected readonly AnthropicService             $anthropic,
+        protected readonly GeminiService                $gemini,
+        protected readonly TelegramBotService           $telegram,
+        protected readonly VectorStoreService           $knowledge,
+        protected readonly ApiCredentialService         $credentials,
+        protected readonly IterationEngineService       $iterationEngine,
+        protected readonly CampaignContextService       $campaignContext,
+        protected readonly ?AIRouter                    $aiRouter = null,
+        protected readonly ?SwarmOrchestratorService    $swarm = null,
     ) {
         $config = config("agents.agents.{$this->agentType}", []);
         $this->provider           = $config['provider']              ?? $this->provider;
@@ -56,6 +64,16 @@ abstract class BaseAgent
         $this->rateLimitPerMinute = $config['rate_limit_per_minute'] ?? 0;
         $this->toolCacheTtl       = $config['tool_cache_ttl']        ?? 0;
         $this->ragThreshold       = (float) config('agents.knowledge.similarity_threshold', 0.75);
+    }
+
+    /**
+     * Categories to scope RAG searches for this agent.
+     * Override in subclasses to restrict or broaden the search.
+     * Returns [] (empty) to search all categories.
+     */
+    protected function getRagCategories(): array
+    {
+        return array_filter([$this->agentType, 'general', 'agent-skills']);
     }
 
     /**
@@ -79,6 +97,9 @@ abstract class BaseAgent
         if (! empty($customPrompt)) {
             $this->systemPrompt = $customPrompt;
         }
+
+        $this->currentJobId      = $job->id;
+        $this->currentWorkflowId = $job->workflow_id ?? null;
 
         $job->update(['status' => 'running', 'started_at' => now()]);
         $this->notifyUser($job, "⚡ *{$this->agentType}* agent started...");
@@ -412,6 +433,43 @@ abstract class BaseAgent
 
     protected function callAI(array $messages, array $tools = []): array
     {
+        // Swarm mode: fan-out to all providers + consensus synthesis (non-Gemini only)
+        if ($this->provider !== 'gemini' && $this->swarm?->isEnabled()) {
+            return $this->swarm->run(
+                messages:    $messages,
+                system:      $this->systemPrompt,
+                tools:       $tools,
+                agentRunId:  $this->currentJobId,
+            );
+        }
+
+        // Gemini stays direct (AIRouter doesn't wrap Gemini yet)
+        if ($this->provider === 'gemini') {
+            return $this->gemini->chat(
+                messages:     $messages,
+                model:        $this->model,
+                systemPrompt: $this->systemPrompt,
+                tools:        $tools,
+                maxTokens:    config('agents.gemini.max_tokens', 4096),
+            );
+        }
+
+        // Route through AIRouter when available — enables custom platforms, cost tracking, and fallbacks
+        if ($this->aiRouter !== null) {
+            return $this->aiRouter->chat(
+                messages:    $messages,
+                model:       $this->model,
+                maxTokens:   config("agents.{$this->provider}.max_tokens", 4096),
+                temperature: 0.7,
+                system:      $this->systemPrompt,
+                tools:       $tools,
+                provider:    $this->provider,
+                agentRunId:  $this->currentJobId,
+                workflowId:  $this->currentWorkflowId,
+            );
+        }
+
+        // Legacy direct calls (fallback for agents not yet injecting AIRouter)
         return match ($this->provider) {
             'anthropic' => $this->anthropic->chat(
                 messages:     $messages,
@@ -419,13 +477,6 @@ abstract class BaseAgent
                 systemPrompt: $this->systemPrompt,
                 tools:        $this->convertToolsForAnthropic($tools),
                 maxTokens:    config('agents.anthropic.max_tokens', 8192),
-            ),
-            'gemini' => $this->gemini->chat(
-                messages:     $messages,
-                model:        $this->model,
-                systemPrompt: $this->systemPrompt,
-                tools:        $tools,
-                maxTokens:    config('agents.gemini.max_tokens', 4096),
             ),
             default => $this->openai->chat(
                 messages:     $messages,
@@ -493,13 +544,16 @@ abstract class BaseAgent
         $knowledgeScores  = [];
 
         // ── 1. RAG context (filtered by similarity threshold, deduplicated) ──
-        $rawContext = $this->knowledge->search($job->instruction, topK: 5);
+        $rawContext = $this->knowledge->search($job->instruction, topK: 5, categories: $this->getRagCategories());
         $seen       = [];
         $usedChunks = [];
 
         foreach ($rawContext as $item) {
-            $similarity = (float) ($item['similarity'] ?? 0.0);
-            if ($similarity < $this->ragThreshold) continue;
+            $similarity = $item['similarity'];
+
+            // PageIndex returns null similarity (reasoning-based, not scored).
+            // Only apply the threshold filter for legacy vector results (non-null).
+            if ($similarity !== null && (float) $similarity < $this->ragThreshold) continue;
 
             $hash = md5(mb_substr($item['content'] ?? '', 0, 200, 'UTF-8'));
             if (isset($seen[$hash])) continue;
@@ -507,7 +561,7 @@ abstract class BaseAgent
 
             $usedChunks[] = $item;
             if (! empty($item['id'])) {
-                $knowledgeScores[] = ['id' => $item['id'], 'score' => round($similarity, 4)];
+                $knowledgeScores[] = ['id' => $item['id'], 'score' => $similarity !== null ? round((float) $similarity, 4) : 1.0];
             }
         }
 

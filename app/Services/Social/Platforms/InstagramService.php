@@ -178,4 +178,26 @@ class InstagramService implements SocialPlatformInterface
 
         return $account->fresh();
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $resp = Http::get(self::GRAPH_URL . '/me/media', [
+                'fields'       => 'id,caption,like_count,comments_count,timestamp,media_type',
+                'limit'        => $limit,
+                'access_token' => $account->access_token,
+            ]);
+            return collect($resp->json('data', []))->map(fn($p) => [
+                'id'         => $p['id'] ?? null,
+                'text'       => $p['caption'] ?? '',
+                'created_at' => $p['timestamp'] ?? null,
+                'likes'      => $p['like_count'] ?? 0,
+                'comments'   => $p['comments_count'] ?? 0,
+                'type'       => $p['media_type'] ?? 'IMAGE',
+            ])->all();
+        } catch (\Throwable $e) {
+            Log::warning('Instagram getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

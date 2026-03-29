@@ -216,4 +216,31 @@ class TwitterService implements SocialPlatformInterface
             'simulated'   => false,
         ];
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $userId = $account->platform_user_id;
+            if (! $userId) {
+                return [];
+            }
+            $resp = Http::withToken($account->access_token)
+                ->get("https://api.twitter.com/2/users/{$userId}/tweets", [
+                    'max_results'  => min($limit, 100),
+                    'tweet.fields' => 'created_at,public_metrics,text',
+                ]);
+            return collect($resp->json('data', []))->map(fn($t) => [
+                'id'         => $t['id'] ?? null,
+                'text'       => $t['text'] ?? '',
+                'created_at' => $t['created_at'] ?? null,
+                'likes'      => $t['public_metrics']['like_count'] ?? 0,
+                'retweets'   => $t['public_metrics']['retweet_count'] ?? 0,
+                'replies'    => $t['public_metrics']['reply_count'] ?? 0,
+                'impressions'=> $t['public_metrics']['impression_count'] ?? 0,
+            ])->all();
+        } catch (\Throwable $e) {
+            Log::warning('Twitter getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

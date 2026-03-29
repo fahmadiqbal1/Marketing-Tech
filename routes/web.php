@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PipelineActionController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Middleware\Authenticate;
 use App\Http\Middleware\DashboardBasicAuth;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -13,6 +15,13 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
 Route::get('/', fn() => redirect('/dashboard'));
+
+// ── Authentication routes ─────────────────────────────────────────────────────
+Route::get('/login',    [AuthController::class, 'showLogin'])->name('login');
+Route::post('/login',   [AuthController::class, 'login']);
+Route::post('/logout',  [AuthController::class, 'logout'])->name('logout');
+Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
+Route::post('/register',[AuthController::class, 'register']);
 
 Route::get('/health', function () {
     $checks  = [];
@@ -125,8 +134,8 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
 
     Route::prefix('api')->group(function () {
 
-        // ── Polling / read endpoints — 60 req/min (safe for 2 tabs + auto-refresh) ──
-        Route::middleware('throttle:60,1')->group(function () {
+        // ── Polling / read endpoints ─────────────────────────────────────────────
+        Route::middleware('throttle:' . config('dashboard.throttle_read', 120) . ',1')->group(function () {
             Route::get('/stats',                       [DashboardController::class, 'apiStats']);
             Route::get('/workflows',                   [DashboardController::class, 'apiWorkflows']);
             Route::get('/workflows/{id}',              [DashboardController::class, 'apiWorkflowDetail']);
@@ -146,6 +155,7 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::get('/knowledge/import-status',     [DashboardController::class, 'apiKnowledgeImportStatus']);
             Route::get('/custom-platforms',            [DashboardController::class, 'apiCustomPlatforms']);
             Route::get('/variations/{jobId}',          [PipelineActionController::class, 'listVariations']);
+            Route::get('/mcp-servers',                 [DashboardController::class, 'apiMcpServers']);
 
             // Social media — reads/polling
             Route::get('/content-calendar',            [DashboardController::class, 'apiContentCalendar']);
@@ -156,8 +166,8 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::get('/social-credentials',         [DashboardController::class, 'apiSocialCredentials']);
         });
 
-        // ── Write / action endpoints — 10 req/min ────────────────────────────────
-        Route::middleware('throttle:10,1')->group(function () {
+        // ── Write / action endpoints ──────────────────────────────────────────────
+        Route::middleware('throttle:' . config('dashboard.throttle_write', 60) . ',1')->group(function () {
             Route::post('/campaigns',                           [DashboardController::class,      'apiCreateCampaign']);
             Route::post('/campaigns/{id}/pause',               [DashboardController::class,      'apiPauseCampaign']);
             Route::post('/campaigns/{id}/resume',              [DashboardController::class,      'apiResumeCampaign']);
@@ -173,6 +183,8 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::delete('/knowledge/{id}',                    [DashboardController::class,      'apiKnowledgeDelete']);
             Route::post('/custom-platforms',                    [DashboardController::class,      'apiCustomPlatformCreate']);
             Route::delete('/custom-platforms/{id}',             [DashboardController::class,      'apiCustomPlatformDelete']);
+            Route::post('/mcp-servers',                         [DashboardController::class,      'apiMcpServerCreate']);
+            Route::delete('/mcp-servers/{id}',                  [DashboardController::class,      'apiMcpServerDelete']);
             Route::post('/pipeline/steps/{id}/skip',            [PipelineActionController::class, 'skipStep']);
             Route::post('/pipeline/jobs/{id}/retry',            [PipelineActionController::class, 'retryJob']);
             Route::post('/pipeline/jobs/{id}/promote-winner',   [PipelineActionController::class, 'promoteWinner']);
@@ -199,8 +211,8 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/social-credentials', [DashboardController::class, 'apiStoreSocialCredentials']);
         });
 
-        // ── Heavy / expensive operations — 5 req/min ────────────────────────────
-        Route::middleware('throttle:5,1')->group(function () {
+        // ── Heavy / expensive operations ──────────────────────────────────────────
+        Route::middleware('throttle:' . config('dashboard.throttle_heavy', 30) . ',1')->group(function () {
             Route::post('/knowledge/github', [DashboardController::class, 'apiKnowledgeGitHub']);
 
             // Social media — heavy ops

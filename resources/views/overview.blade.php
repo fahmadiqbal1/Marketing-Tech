@@ -565,7 +565,7 @@ function overviewApp() {
                             },
                             scales: {
                                 x: { grid: { color: 'rgba(255,255,255,0.03)' }, border: { dash: [4,4] }, ticks: { color: '#475569', font: { size: 10 } } },
-                                y: { grid: { color: 'rgba(255,255,255,0.03)' }, border: { dash: [4,4] }, ticks: { color: '#475569', font: { size: 10 }, callback: v => '$' + v } },
+                                y: { beginAtZero: true, min: 0, suggestedMax: 0.10, grid: { color: 'rgba(255,255,255,0.03)' }, border: { dash: [4,4] }, ticks: { color: '#475569', font: { size: 10 }, callback: v => '$' + v } },
                             }
                         }
                     });
@@ -596,8 +596,11 @@ function overviewApp() {
             if (!this.costChartInstance?.canvas) return;
             try {
                 const d = this.applyMeta(await apiGet('/dashboard/api/ai-costs?days=' + this.costDays));
+                const costs = (d.daily ?? []).map(x => x.cost);
                 this.costChartInstance.data.labels = (d.daily ?? []).map(x => x.date);
-                this.costChartInstance.data.datasets[0].data = (d.daily ?? []).map(x => x.cost);
+                this.costChartInstance.data.datasets[0].data = costs;
+                const maxVal = costs.length ? Math.max(...costs) : 0;
+                this.costChartInstance.options.scales.y.suggestedMax = Math.max(maxVal * 1.4, 0.05);
                 this.costChartInstance.update();
                 this.costBreakdown = d.breakdown ?? [];
             } catch (error) { this.handleError(error); }

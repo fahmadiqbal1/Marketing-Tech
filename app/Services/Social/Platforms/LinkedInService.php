@@ -210,4 +210,35 @@ class LinkedInService implements SocialPlatformInterface
 
         return $account->fresh();
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $authorUrn = $account->metadata['organization_urn']
+                ?? ($account->platform_user_id ? 'urn:li:person:' . $account->platform_user_id : null);
+
+            if (! $authorUrn) {
+                return [];
+            }
+
+            $resp = Http::withToken($account->access_token)
+                ->withHeaders(['X-Restli-Protocol-Version' => '2.0.0'])
+                ->get('https://api.linkedin.com/v2/ugcPosts', [
+                    'q'       => 'authors',
+                    'authors' => "List({$authorUrn})",
+                    'count'   => $limit,
+                ]);
+
+            return collect($resp->json('elements', []))->map(fn($p) => [
+                'id'         => $p['id'] ?? null,
+                'text'       => $p['specificContent']['com.linkedin.ugc.ShareContent']['shareCommentary']['text'] ?? '',
+                'created_at' => isset($p['created']['time']) ? date('c', (int)($p['created']['time'] / 1000)) : null,
+                'likes'      => $p['socialDetail']['likes']['paging']['total'] ?? 0,
+                'comments'   => $p['socialDetail']['comments']['paging']['total'] ?? 0,
+            ])->all();
+        } catch (\Throwable $e) {
+            Log::warning('LinkedIn getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

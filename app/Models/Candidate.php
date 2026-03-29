@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\BusinessScope;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -11,8 +12,18 @@ class Candidate extends Model
 {
     use HasUuids, SoftDeletes;
 
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new BusinessScope());
+        static::creating(function (self $model) {
+            if (auth()->check() && auth()->user()->business_id) {
+                $model->business_id ??= auth()->user()->business_id;
+            }
+        });
+    }
+
     protected $fillable = [
-        'applied_job_id', 'name', 'email', 'phone', 'location', 'linkedin_url', 'github_url',
+        'business_id', 'applied_job_id', 'name', 'email', 'phone', 'location', 'linkedin_url', 'github_url',
         'summary', 'years_experience', 'current_title', 'current_company', 'skills', 'education',
         'experience', 'certifications', 'languages', 'source', 'pipeline_stage', 'pipeline_notes',
         'stage_updated_at', 'score', 'score_details', 'scored_for_job', 'cv_raw', 'outreach_history', 'embedding',

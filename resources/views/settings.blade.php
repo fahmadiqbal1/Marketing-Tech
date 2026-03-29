@@ -350,6 +350,86 @@
         </div>
     </div>
 
+    {{-- ── MCP Servers ─────────────────────────────────────────────── --}}
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">MCP Servers</h2>
+    <div class="stat-card mb-8">
+        <p class="text-xs text-slate-500 mb-4">Connect Model Context Protocol (MCP) servers to give agents access to additional tools. SSE/HTTP servers are auto-discovered and their tools are ingested into the knowledge base.</p>
+
+        {{-- Server list --}}
+        <div x-show="mcpServers.length > 0" class="mb-4 space-y-2">
+            <template x-for="s in mcpServers" :key="s.id">
+                <div class="flex items-center justify-between px-3 py-2.5 bg-slate-800/60 border border-slate-700/50 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-2 h-2 rounded-full" :class="s.is_active ? 'bg-emerald-400' : 'bg-slate-600'"></div>
+                        <div>
+                            <p class="text-sm font-medium text-white" x-text="s.name"></p>
+                            <p class="text-xs text-slate-500 font-mono" x-text="(s.url || s.command || '—') + ' · ' + (s.capabilities?.length ?? 0) + ' tools'"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="badge text-xs px-2 py-0.5 rounded"
+                              :class="s.transport === 'stdio' ? 'bg-slate-700 text-slate-400 border border-slate-600' : 'bg-violet-500/20 text-violet-400 border border-violet-500/30'"
+                              x-text="s.transport"></span>
+                        <span x-show="s.last_synced_at" class="text-xs text-slate-500" x-text="'synced ' + (s.last_synced_at ? new Date(s.last_synced_at).toLocaleDateString() : '')"></span>
+                        <button @click="deleteMcpServer(s.id)"
+                                class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        {{-- Add form toggle --}}
+        <div x-show="!showMcpForm">
+            <button @click="showMcpForm = true"
+                    class="px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 text-sm rounded-lg transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                Add MCP Server
+            </button>
+        </div>
+
+        <div x-show="showMcpForm" class="border border-slate-700/60 rounded-lg p-4 space-y-3">
+            <p class="text-xs font-semibold text-slate-300 uppercase">New MCP Server</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Name <span class="text-red-400">*</span></label>
+                    <input type="text" x-model="newMcp.name" placeholder="e.g. Filesystem Tools"
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-400 mb-1 block">Transport <span class="text-red-400">*</span></label>
+                    <select x-model="newMcp.transport"
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+                        <option value="sse">SSE</option>
+                        <option value="http">HTTP</option>
+                        <option value="stdio">stdio</option>
+                    </select>
+                </div>
+            </div>
+            <div x-show="newMcp.transport !== 'stdio'">
+                <label class="text-xs text-slate-400 mb-1 block">Server URL <span class="text-red-400">*</span></label>
+                <input type="url" x-model="newMcp.url" placeholder="https://mcp.example.com"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition">
+            </div>
+            <div x-show="newMcp.transport === 'stdio'">
+                <label class="text-xs text-slate-400 mb-1 block">Command <span class="text-red-400">*</span></label>
+                <input type="text" x-model="newMcp.command" placeholder="npx @modelcontextprotocol/server-filesystem"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 transition font-mono">
+            </div>
+            <div x-show="mcpError" class="text-xs text-red-400" x-text="mcpError"></div>
+            <div class="flex gap-3">
+                <button @click="showMcpForm = false; newMcp = {name:'',transport:'sse',command:'',url:''}; mcpError = ''"
+                        class="px-3 py-2 border border-slate-700 text-slate-400 text-sm rounded-lg hover:border-slate-500 hover:text-white transition">Cancel</button>
+                <button @click="addMcpServer()" :disabled="saving.mcp"
+                        class="px-4 py-2 bg-brand-600/80 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 flex items-center gap-2">
+                    <span x-show="saving.mcp" class="inline-block animate-spin text-sm">↻</span>
+                    <span x-text="saving.mcp ? 'Connecting...' : 'Connect Server'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     {{-- ── Telegram Integration ─────────────────────────────────────── --}}
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Telegram Integration</h2>
     <div class="stat-card mb-8">
@@ -469,7 +549,7 @@ function settingsApp() {
             openai_key: '', anthropic_key: '', gemini_key: '', app_url: '',
         },
 
-        saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false, customPlatform: false },
+        saving:     { openai: false, anthropic: false, gemini: false, system: false, webhook: false, customPlatform: false, mcp: false },
         testing:    { openai: false, anthropic: false, gemini: false, telegram: false },
         testResult: { openai: null, anthropic: null, gemini: null, telegram: null },
         webhookResult: '',
@@ -479,6 +559,10 @@ function settingsApp() {
         showAddCustomPlatform: false,
         customPlatformError: '',
         customForm: { name: '', website_url: '', api_base_url: '', default_model: '', api_key_env: '', auth_type: 'bearer', auth_header: '' },
+        mcpServers: [],
+        showMcpForm: false,
+        mcpError: '',
+        newMcp: { name: '', transport: 'sse', command: '', url: '' },
 
         async init() {
             try {
@@ -508,6 +592,7 @@ function settingsApp() {
             }
 
             await this.loadCustomPlatforms();
+            await this.loadMcpServers();
 
             // Auto-test configured providers so status badges reflect reality
             const autoTest = [];
@@ -604,6 +689,53 @@ function settingsApp() {
                 });
                 showToast('Platform removed.', 'success');
                 await this.loadCustomPlatforms();
+            } catch(e) {
+                showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        async loadMcpServers() {
+            try {
+                const d = await apiGet('/dashboard/api/mcp-servers');
+                this.mcpServers = Array.isArray(d) ? d : (d.data || []);
+            } catch(e) {
+                console.warn('Could not load MCP servers:', e.message);
+            }
+        },
+
+        async addMcpServer() {
+            this.mcpError = '';
+            if (!this.newMcp.name) { this.mcpError = 'Name is required.'; return; }
+            if (this.newMcp.transport !== 'stdio' && !this.newMcp.url) { this.mcpError = 'URL is required for SSE/HTTP transport.'; return; }
+            if (this.newMcp.transport === 'stdio' && !this.newMcp.command) { this.mcpError = 'Command is required for stdio transport.'; return; }
+            this.saving.mcp = true;
+            try {
+                await apiPost('/dashboard/api/mcp-servers', this.newMcp);
+                this.showMcpForm = false;
+                this.newMcp = { name: '', transport: 'sse', command: '', url: '' };
+                showToast('MCP server added. Tool discovery queued.', 'success');
+                await this.loadMcpServers();
+            } catch(e) {
+                this.mcpError = e.message || 'Failed to add MCP server.';
+            }
+            this.saving.mcp = false;
+        },
+
+        async deleteMcpServer(id) {
+            const ok = await confirmAction(
+                'Remove MCP server?',
+                'This will remove the server configuration and its tools from the knowledge base will not be automatically cleaned up.',
+                'Remove',
+                'bg-red-600 hover:bg-red-500 text-white'
+            );
+            if (!ok) return;
+            try {
+                await fetch('/dashboard/api/mcp-servers/' + id, {
+                    method: 'DELETE',
+                    headers: { 'X-CSRF-TOKEN': csrfToken() },
+                });
+                showToast('MCP server removed.', 'success');
+                await this.loadMcpServers();
             } catch(e) {
                 showToast('Error: ' + e.message, 'error');
             }

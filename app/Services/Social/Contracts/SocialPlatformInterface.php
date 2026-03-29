@@ -30,4 +30,12 @@ interface SocialPlatformInterface
      * Returns false for stub implementations.
      */
     public function isConfigured(): bool;
+
+    /**
+     * Fetch the most recent posts for the given account.
+     * Returns an array of posts; each post is a flat associative array with
+     * at least: id, text/caption, created_at, and any available engagement counts.
+     * Returns empty array on error — callers must not throw.
+     */
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array;
 }

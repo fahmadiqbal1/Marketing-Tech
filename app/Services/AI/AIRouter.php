@@ -229,9 +229,23 @@ class AIRouter
         }
 
         if ($provider === 'anthropic') {
-            return $this->anthropic->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature);
+            // Convert OpenAI tool format → Anthropic tool format automatically
+            $anthropicTools = $this->convertToolsForAnthropic($tools);
+            return $this->anthropic->chat($messages, $model, $system ?? '', $anthropicTools, $maxTokens, $temperature);
         }
         return $this->openai->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature);
+    }
+
+    /**
+     * Convert OpenAI-format tool definitions to Anthropic's input_schema format.
+     */
+    public function convertToolsForAnthropic(array $openAiTools): array
+    {
+        return array_map(fn ($tool) => [
+            'name'         => $tool['function']['name'],
+            'description'  => $tool['function']['description'],
+            'input_schema' => $tool['function']['parameters'],
+        ], array_filter($openAiTools, fn ($t) => isset($t['function'])));
     }
 
     private function providerForModel(string $model): string

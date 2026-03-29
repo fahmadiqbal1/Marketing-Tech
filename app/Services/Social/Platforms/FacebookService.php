@@ -220,4 +220,29 @@ class FacebookService implements SocialPlatformInterface
 
         return $account->fresh();
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $pageId = $account->metadata['page_id'] ?? $account->platform_user_id;
+            if (! $pageId) {
+                return [];
+            }
+            $resp = Http::get("https://graph.facebook.com/v19.0/{$pageId}/posts", [
+                'fields'       => 'id,message,created_time,shares,reactions.summary(true)',
+                'limit'        => $limit,
+                'access_token' => $account->access_token,
+            ]);
+            return collect($resp->json('data', []))->map(fn($p) => [
+                'id'         => $p['id'] ?? null,
+                'text'       => $p['message'] ?? '',
+                'created_at' => $p['created_time'] ?? null,
+                'shares'     => $p['shares']['count'] ?? 0,
+                'reactions'  => $p['reactions']['summary']['total_count'] ?? 0,
+            ])->all();
+        } catch (\Throwable $e) {
+            Log::warning('Facebook getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

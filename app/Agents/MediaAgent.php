@@ -5,7 +5,9 @@ namespace App\Agents;
 use App\Models\AgentJob;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
+use App\Services\AI\AIRouter;
 use App\Services\AI\OpenAIService;
+use App\Services\AI\SwarmOrchestratorService;
 use App\Services\ApiCredentialService;
 use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
@@ -17,6 +19,7 @@ use App\Services\Security\ClamAVService;
 use App\Services\Telegram\TelegramBotService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class MediaAgent extends BaseAgent
 {
@@ -35,8 +38,10 @@ class MediaAgent extends BaseAgent
         private readonly ImageService  $images,
         private readonly OCRService    $ocr,
         private readonly ClamAVService $clamav,
+        AIRouter $aiRouter,
+        SwarmOrchestratorService $swarm,
     ) {
-        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
+        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext, $aiRouter, $swarm);
     }
 
     protected function executeTool(string $name, array $args, AgentJob $job): mixed
@@ -48,7 +53,14 @@ class MediaAgent extends BaseAgent
             'scan_file'       => $this->toolScanFile($args),
             'store_media'     => $this->toolStoreMedia($args, $job),
             'get_media_info'  => $this->toolGetMediaInfo($args),
-            'generate_thumbnail' => $this->toolGenerateThumbnail($args, $job),
+            'generate_thumbnail'         => $this->toolGenerateThumbnail($args, $job),
+            'generate_image'             => $this->toolGenerateImage($args, $job),
+            'remove_background'          => $this->toolRemoveBackground($args, $job),
+            'create_platform_variants'   => $this->toolCreatePlatformVariants($args, $job),
+            'generate_voiceover'         => $this->toolGenerateVoiceover($args, $job),
+            'add_captions'               => $this->toolAddCaptions($args, $job),
+            'add_audio_to_video'         => $this->toolAddAudioToVideo($args, $job),
+            'generate_video_from_images' => $this->toolGenerateVideoFromImages($args, $job),
             default           => $this->toolResult(false, null, "Unknown tool: {$name}"),
         };
     }
@@ -179,6 +191,120 @@ class MediaAgent extends BaseAgent
                             'height'     => ['type' => 'integer'],
                         ],
                         'required'   => ['video_path'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_image',
+                    'description' => 'Generate a marketing image using DALL-E 3',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'prompt'   => ['type' => 'string', 'description' => 'Detailed image description'],
+                            'size'     => ['type' => 'string', 'enum' => ['1024x1024', '1792x1024', '1024x1792'], 'description' => 'Image dimensions'],
+                            'quality'  => ['type' => 'string', 'enum' => ['standard', 'hd'], 'default' => 'standard'],
+                            'style'    => ['type' => 'string', 'enum' => ['vivid', 'natural'], 'default' => 'vivid'],
+                        ],
+                        'required'   => ['prompt'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'remove_background',
+                    'description' => 'Remove the background from an image, returning a PNG with transparency',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'storage_key' => ['type' => 'string', 'description' => 'MinIO storage key of source image'],
+                        ],
+                        'required'   => ['storage_key'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'create_platform_variants',
+                    'description' => 'Resize/reformat a source image into variants for each target platform',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'storage_key' => ['type' => 'string', 'description' => 'MinIO key of source image'],
+                            'platforms'   => [
+                                'type'  => 'array',
+                                'items' => ['type' => 'string', 'enum' => ['instagram', 'instagram_story', 'tiktok', 'linkedin', 'twitter', 'youtube', 'facebook']],
+                                'description' => 'Platforms to create variants for',
+                            ],
+                        ],
+                        'required'   => ['storage_key', 'platforms'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_voiceover',
+                    'description' => 'Generate a voiceover audio file from text using OpenAI TTS',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'text'  => ['type' => 'string', 'description' => 'Script for the voiceover'],
+                            'voice' => ['type' => 'string', 'enum' => ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'], 'default' => 'nova'],
+                            'model' => ['type' => 'string', 'enum' => ['tts-1', 'tts-1-hd'], 'default' => 'tts-1'],
+                            'speed' => ['type' => 'number', 'description' => '0.25 to 4.0, default 1.0'],
+                        ],
+                        'required'   => ['text'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'add_captions',
+                    'description' => 'Burn SRT subtitle captions into a video for accessibility',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'video_key'    => ['type' => 'string', 'description' => 'MinIO key of source video'],
+                            'caption_text' => ['type' => 'string', 'description' => 'Text to convert to SRT captions'],
+                        ],
+                        'required'   => ['video_key', 'caption_text'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'add_audio_to_video',
+                    'description' => 'Merge a voiceover or music audio file into a video',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'video_key'    => ['type' => 'string', 'description' => 'MinIO key of source video'],
+                            'audio_key'    => ['type' => 'string', 'description' => 'MinIO key of audio file'],
+                            'volume_mix'   => ['type' => 'number', 'description' => 'Audio volume 0.0-1.0, default 0.8'],
+                        ],
+                        'required'   => ['video_key', 'audio_key'],
+                    ],
+                ],
+            ],
+            [
+                'type'     => 'function',
+                'function' => [
+                    'name'        => 'generate_video_from_images',
+                    'description' => 'Create a social media video slideshow from an array of images',
+                    'parameters'  => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'image_keys'      => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Ordered MinIO keys of images'],
+                            'sec_per_image'   => ['type' => 'number', 'description' => 'Seconds each image displays, default 3.0'],
+                            'output_format'   => ['type' => 'string', 'enum' => ['vertical_9_16', 'square_1_1', 'landscape_16_9'], 'default' => 'vertical_9_16'],
+                        ],
+                        'required'   => ['image_keys'],
                     ],
                 ],
             ],
@@ -332,5 +458,243 @@ class MediaAgent extends BaseAgent
         } catch (\Throwable $e) {
             return $this->toolResult(false, null, $e->getMessage());
         }
+    }
+
+    private function toolGenerateImage(array $args, AgentJob $job): string
+    {
+        try {
+            $result = $this->openai->generateImage(
+                prompt:  $args['prompt'],
+                size:    $args['size']    ?? '1024x1024',
+                quality: $args['quality'] ?? 'standard',
+                style:   $args['style']   ?? 'vivid',
+            );
+
+            // Download and store in MinIO so it persists
+            $imageContent = file_get_contents($result['url']);
+            $key          = 'generated/' . Str::uuid() . '.png';
+            Storage::disk('minio')->put($key, $imageContent);
+
+            return $this->toolResult(true, [
+                'storage_key'    => $key,
+                'url'            => Storage::disk('minio')->temporaryUrl($key, now()->addHours(24)),
+                'revised_prompt' => $result['revised_prompt'],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolRemoveBackground(array $args, AgentJob $job): string
+    {
+        try {
+            $disk     = Storage::disk('minio');
+            $tempIn   = storage_path('app/temp/' . Str::uuid() . '.jpg');
+            $content  = $disk->get($args['storage_key']);
+            file_put_contents($tempIn, $content);
+
+            $outputPath = $this->images->removeBackground($tempIn);
+
+            $outKey = 'enhanced/' . Str::uuid() . '.png';
+            $disk->put($outKey, file_get_contents($outputPath));
+
+            @unlink($tempIn);
+            @unlink($outputPath);
+
+            return $this->toolResult(true, [
+                'storage_key' => $outKey,
+                'url'         => $disk->temporaryUrl($outKey, now()->addHours(24)),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolCreatePlatformVariants(array $args, AgentJob $job): string
+    {
+        // Platform spec: [width, height]
+        $specs = [
+            'instagram'       => [1080, 1080],
+            'instagram_story' => [1080, 1920],
+            'tiktok'          => [1080, 1920],
+            'linkedin'        => [1200,  627],
+            'twitter'         => [1600,  900],
+            'youtube'         => [1280,  720],
+            'facebook'        => [1200,  630],
+        ];
+
+        try {
+            $disk    = Storage::disk('minio');
+            $content = $disk->get($args['storage_key']);
+            $tempIn  = storage_path('app/temp/' . Str::uuid() . '.jpg');
+            file_put_contents($tempIn, $content);
+
+            $variants = [];
+            foreach ($args['platforms'] as $platform) {
+                if (!isset($specs[$platform])) continue;
+                [$w, $h] = $specs[$platform];
+
+                $resized = $this->images->resize($tempIn, $w, $h);
+                $outKey  = 'processed/' . $platform . '_' . Str::uuid() . '.jpg';
+                $disk->put($outKey, file_get_contents($resized));
+                @unlink($resized);
+
+                $variants[$platform] = [
+                    'storage_key' => $outKey,
+                    'url'         => $disk->temporaryUrl($outKey, now()->addHours(24)),
+                    'dimensions'  => "{$w}x{$h}",
+                ];
+            }
+
+            @unlink($tempIn);
+            return $this->toolResult(true, ['variants' => $variants]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolGenerateVoiceover(array $args, AgentJob $job): string
+    {
+        try {
+            $mp3Content = $this->openai->generateVoiceover(
+                text:  $args['text'],
+                voice: $args['voice'] ?? 'nova',
+                model: $args['model'] ?? 'tts-1',
+                speed: (float) ($args['speed'] ?? 1.0),
+            );
+
+            $key  = 'uploads/' . Str::uuid() . '.mp3';
+            Storage::disk('minio')->put($key, $mp3Content);
+
+            return $this->toolResult(true, [
+                'storage_key' => $key,
+                'url'         => Storage::disk('minio')->temporaryUrl($key, now()->addHours(24)),
+                'char_count'  => strlen($args['text']),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolAddCaptions(array $args, AgentJob $job): string
+    {
+        try {
+            $disk    = Storage::disk('minio');
+            $tempVid = storage_path('app/temp/' . Str::uuid() . '.mp4');
+            file_put_contents($tempVid, $disk->get($args['video_key']));
+
+            // Auto-generate SRT from caption text (split into ~5-word segments)
+            $srtPath = $this->generateSimpleSrt($args['caption_text'], $tempVid);
+            $output  = $this->ffmpeg->burnCaptions($tempVid, $srtPath);
+
+            $outKey = 'processed/captioned_' . Str::uuid() . '.mp4';
+            $disk->put($outKey, file_get_contents($output));
+
+            @unlink($tempVid); @unlink($srtPath); @unlink($output);
+
+            return $this->toolResult(true, [
+                'storage_key' => $outKey,
+                'url'         => $disk->temporaryUrl($outKey, now()->addHours(24)),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolAddAudioToVideo(array $args, AgentJob $job): string
+    {
+        try {
+            $disk    = Storage::disk('minio');
+            $tempVid = storage_path('app/temp/' . Str::uuid() . '.mp4');
+            $tempAud = storage_path('app/temp/' . Str::uuid() . '.mp3');
+            file_put_contents($tempVid, $disk->get($args['video_key']));
+            file_put_contents($tempAud, $disk->get($args['audio_key']));
+
+            $output = $this->ffmpeg->mergeAudio($tempVid, $tempAud, (float) ($args['volume_mix'] ?? 0.8));
+
+            $outKey = 'processed/merged_' . Str::uuid() . '.mp4';
+            $disk->put($outKey, file_get_contents($output));
+
+            @unlink($tempVid); @unlink($tempAud); @unlink($output);
+
+            return $this->toolResult(true, [
+                'storage_key' => $outKey,
+                'url'         => $disk->temporaryUrl($outKey, now()->addHours(24)),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    private function toolGenerateVideoFromImages(array $args, AgentJob $job): string
+    {
+        $sizeMap = [
+            'vertical_9_16'  => '1080x1920',
+            'square_1_1'     => '1080x1080',
+            'landscape_16_9' => '1920x1080',
+        ];
+
+        try {
+            $disk       = Storage::disk('minio');
+            $localPaths = [];
+
+            foreach ($args['image_keys'] as $key) {
+                $tmpPath = storage_path('app/temp/' . Str::uuid() . '.jpg');
+                file_put_contents($tmpPath, $disk->get($key));
+                $localPaths[] = $tmpPath;
+            }
+
+            $size   = $sizeMap[$args['output_format'] ?? 'vertical_9_16'] ?? '1080x1920';
+            $output = $this->ffmpeg->createSlideshow($localPaths, (float) ($args['sec_per_image'] ?? 3.0), $size);
+
+            $outKey = 'processed/slideshow_' . Str::uuid() . '.mp4';
+            $disk->put($outKey, file_get_contents($output));
+
+            foreach ($localPaths as $p) { @unlink($p); }
+            @unlink($output);
+
+            return $this->toolResult(true, [
+                'storage_key' => $outKey,
+                'url'         => $disk->temporaryUrl($outKey, now()->addHours(24)),
+                'image_count' => count($localPaths),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->toolResult(false, null, $e->getMessage());
+        }
+    }
+
+    /**
+     * Generate a simple SRT file from caption text.
+     * Splits text into ~8-word segments with 2-second display per segment.
+     */
+    private function generateSimpleSrt(string $text, string $videoPath): string
+    {
+        $words    = explode(' ', trim($text));
+        $chunks   = array_chunk($words, 8);
+        $srtPath  = storage_path('app/temp/' . Str::uuid() . '.srt');
+        $srt      = '';
+        $index    = 1;
+        $start    = 0.0;
+
+        foreach ($chunks as $chunk) {
+            $end = $start + 2.0;
+            $srt .= "{$index}\n";
+            $srt .= $this->formatSrtTime($start) . ' --> ' . $this->formatSrtTime($end) . "\n";
+            $srt .= implode(' ', $chunk) . "\n\n";
+            $start = $end;
+            $index++;
+        }
+
+        file_put_contents($srtPath, $srt);
+        return $srtPath;
+    }
+
+    private function formatSrtTime(float $seconds): string
+    {
+        $h  = (int) ($seconds / 3600);
+        $m  = (int) (($seconds % 3600) / 60);
+        $s  = (int) ($seconds % 60);
+        $ms = (int) round(($seconds - floor($seconds)) * 1000);
+        return sprintf('%02d:%02d:%02d,%03d', $h, $m, $s, $ms);
     }
 }

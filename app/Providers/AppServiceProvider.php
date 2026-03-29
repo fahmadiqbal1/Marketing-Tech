@@ -18,6 +18,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\AI\OpenAIService::class);
         $this->app->singleton(\App\Services\AI\AnthropicService::class);
         $this->app->singleton(\App\Services\AI\AIRouter::class);
+        $this->app->singleton(\App\Services\AI\SwarmOrchestratorService::class);
 
         // Dashboard
         $this->app->singleton(\App\Services\Dashboard\DashboardStatsService::class);

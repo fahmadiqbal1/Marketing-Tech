@@ -271,4 +271,27 @@ class TikTokService implements SocialPlatformInterface
         $hashtags = collect($entry->hashtags ?? [])->take(5)->implode(' ');
         return trim(($entry->draft_content ?? '') . ($hashtags ? "\n\n{$hashtags}" : ''));
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $resp = Http::withToken($account->access_token)
+                ->post('https://open.tiktok.com/v2/video/list/', [
+                    'fields'   => ['id', 'title', 'create_time', 'like_count', 'comment_count', 'share_count', 'view_count'],
+                    'max_count'=> $limit,
+                ]);
+            return collect($resp->json('data.videos', []))->map(fn($v) => [
+                'id'         => $v['id'] ?? null,
+                'text'       => $v['title'] ?? '',
+                'created_at' => isset($v['create_time']) ? date('c', $v['create_time']) : null,
+                'likes'      => $v['like_count'] ?? 0,
+                'comments'   => $v['comment_count'] ?? 0,
+                'shares'     => $v['share_count'] ?? 0,
+                'views'      => $v['view_count'] ?? 0,
+            ])->all();
+        } catch (\Throwable $e) {
+            Log::warning('TikTok getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

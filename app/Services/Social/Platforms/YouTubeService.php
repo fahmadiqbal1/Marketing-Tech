@@ -265,4 +265,47 @@ class YouTubeService implements SocialPlatformInterface
         $suffix   = $isShort ? "\n\n#Shorts" : '';
         return trim($body . ($hashtags ? "\n\n{$hashtags}" : '') . $suffix);
     }
+
+    public function getRecentPosts(SocialAccount $account, int $limit = 20): array
+    {
+        try {
+            $resp = Http::withToken($account->access_token)
+                ->get('https://www.googleapis.com/youtube/v3/search', [
+                    'part'      => 'snippet',
+                    'forMine'   => 'true',
+                    'type'      => 'video',
+                    'maxResults'=> $limit,
+                    'order'     => 'date',
+                ]);
+            $videoIds = collect($resp->json('items', []))->pluck('id.videoId')->filter()->join(',');
+
+            $stats = [];
+            if ($videoIds) {
+                $statsResp = Http::withToken($account->access_token)
+                    ->get('https://www.googleapis.com/youtube/v3/videos', [
+                        'part' => 'statistics,snippet',
+                        'id'   => $videoIds,
+                    ]);
+                foreach ($statsResp->json('items', []) as $item) {
+                    $stats[$item['id']] = $item;
+                }
+            }
+
+            return collect($resp->json('items', []))->map(function ($item) use ($stats) {
+                $id = $item['id']['videoId'] ?? null;
+                $s  = $stats[$id]['statistics'] ?? [];
+                return [
+                    'id'         => $id,
+                    'text'       => $item['snippet']['title'] ?? '',
+                    'created_at' => $item['snippet']['publishedAt'] ?? null,
+                    'views'      => (int)($s['viewCount'] ?? 0),
+                    'likes'      => (int)($s['likeCount'] ?? 0),
+                    'comments'   => (int)($s['commentCount'] ?? 0),
+                ];
+            })->all();
+        } catch (\Throwable $e) {
+            Log::warning('YouTube getRecentPosts failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
 }

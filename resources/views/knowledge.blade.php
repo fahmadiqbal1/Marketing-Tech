@@ -189,6 +189,45 @@
         </div>
     </div>
 
+    {{-- ── Agent Skill Cards ──────────────────────────────────────────── --}}
+    <div x-show="agentSkillCards.length > 0" class="mb-6">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Agent Capabilities</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <template x-for="card in agentSkillCards" :key="card.agent">
+                <div @click="categoryFilter = 'agent-skills'; agentFilter = card.agent; loadKnowledge()"
+                     class="bg-slate-900 border border-slate-800 rounded-xl p-3 cursor-pointer hover:border-violet-500/50 transition-all group">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-semibold text-white capitalize" x-text="card.agent"></span>
+                        <span class="text-violet-400 text-sm font-bold" x-text="card.skill_count"></span>
+                    </div>
+                    <p class="text-xs text-slate-500 mb-2" x-text="card.tools.length + ' tools'"></p>
+                    <div class="flex flex-wrap gap-1">
+                        <template x-for="tool in (card.mcp_tools || []).slice(0,3)" :key="tool">
+                            <span class="text-xs bg-violet-500/10 text-violet-400 border border-violet-500/20 rounded px-1.5 py-0.5" x-text="tool"></span>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    {{-- ── Category Pills ──────────────────────────────────────────────── --}}
+    <div x-show="Object.keys(categoryBreakdown).length > 0" class="mb-6 flex flex-wrap gap-2">
+        <button @click="categoryFilter = ''; loadKnowledge()"
+                class="text-xs px-3 py-1.5 rounded-full border transition"
+                :class="!categoryFilter ? 'bg-violet-600 text-white border-violet-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-violet-500/50'">
+            All
+        </button>
+        <template x-for="(count, cat) in categoryBreakdown" :key="cat">
+            <button @click="categoryFilter = cat; loadKnowledge()"
+                    class="text-xs px-3 py-1.5 rounded-full border transition flex items-center gap-1.5"
+                    :class="categoryFilter === cat ? 'bg-violet-600 text-white border-violet-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-violet-500/50'">
+                <span x-text="cat"></span>
+                <span class="opacity-60" x-text="'(' + count + ')'"></span>
+            </button>
+        </template>
+    </div>
+
     {{-- ── Stats Bar ────────────────────────────────────────────────── --}}
     <div class="grid grid-cols-3 gap-4 mb-6">
         <div class="stat-card">
@@ -199,7 +238,7 @@
         <div class="stat-card">
             <p class="text-xs text-slate-400 uppercase mb-1">Total Chunks</p>
             <p class="text-3xl font-bold text-white" x-text="stats.total_chunks ?? '–'"></p>
-            <p class="text-xs text-slate-500 mt-1">embedded vector segments</p>
+            <p class="text-xs text-slate-500 mt-1">indexed document segments</p>
         </div>
         <div class="stat-card">
             <p class="text-xs text-slate-400 uppercase mb-1">Categories</p>
@@ -411,6 +450,9 @@ function knowledgeApp() {
     return {
         entries: [],
         stats: {},
+        agentSkillCards: [],
+        categoryBreakdown: {},
+        agentFilter: '',
         loading: false,
         searching: false,
         search: '',
@@ -461,11 +503,13 @@ function knowledgeApp() {
                 const r = await fetch('/dashboard/api/knowledge?' + params.toString());
                 const d = await r.json();
 
-                this.entries      = d.data || [];
-                this.totalEntries = d.total || 0;
-                this.totalPages   = d.last_page || 1;
-                this.currentPage  = d.current_page || 1;
-                this.stats        = d.stats || {};
+                this.entries          = d.data || [];
+                this.totalEntries     = d.total || 0;
+                this.totalPages       = d.last_page || 1;
+                this.currentPage      = d.current_page || 1;
+                this.stats            = d.stats || {};
+                this.agentSkillCards  = d.agent_skill_cards || [];
+                this.categoryBreakdown= d.category_breakdown || {};
 
                 updateTimestamp();
             } catch(e) {

@@ -7,7 +7,9 @@ use App\Models\Experiment;
 use App\Models\Campaign;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
+use App\Services\AI\AIRouter;
 use App\Services\AI\OpenAIService;
+use App\Services\AI\SwarmOrchestratorService;
 use App\Services\ApiCredentialService;
 use App\Services\CampaignContextService;
 use App\Services\Growth\ExperimentationEngine;
@@ -30,8 +32,10 @@ class GrowthAgent extends BaseAgent
         IterationEngineService $iterationEngine,
         CampaignContextService $campaignContext,
         private readonly ExperimentationEngine $experiments,
+        AIRouter $aiRouter,
+        SwarmOrchestratorService $swarm,
     ) {
-        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
+        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext, $aiRouter, $swarm);
     }
 
     protected function executeTool(string $name, array $args, AgentJob $job): mixed

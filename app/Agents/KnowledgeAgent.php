@@ -7,7 +7,9 @@ use App\Models\ContextGraphNode;
 use App\Models\KnowledgeBase;
 use App\Services\AI\AnthropicService;
 use App\Services\AI\GeminiService;
+use App\Services\AI\AIRouter;
 use App\Services\AI\OpenAIService;
+use App\Services\AI\SwarmOrchestratorService;
 use App\Services\ApiCredentialService;
 use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
@@ -30,8 +32,15 @@ class KnowledgeAgent extends BaseAgent
         IterationEngineService $iterationEngine,
         CampaignContextService $campaignContext,
         private readonly ContextGraphService $contextGraph,
+        AIRouter $aiRouter,
+        SwarmOrchestratorService $swarm,
     ) {
-        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext);
+        parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext, $aiRouter, $swarm);
+    }
+
+    protected function getRagCategories(): array
+    {
+        return []; // KnowledgeAgent manages the whole KB — search all categories
     }
 
     protected function executeTool(string $name, array $args, AgentJob $job): mixed

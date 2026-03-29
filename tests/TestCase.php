@@ -2,6 +2,8 @@
 
 namespace Tests;
 
+use App\Models\Business;
+use App\Models\User;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -11,8 +13,12 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
         RateLimiter::clear('api');
-        // Disable all throttle middleware in tests to avoid 429s
-        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
+        // Disable throttle and CSRF middleware in tests
+        $this->withoutMiddleware([
+            \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class,
+            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+        ]);
     }
 
     /**
@@ -71,5 +77,17 @@ abstract class TestCase extends BaseTestCase
             ['Authorization' => $this->dashboardAuthHeader()],
             $headers,
         ))->deleteJson($uri);
+    }
+
+    /**
+     * Create a Business + admin User and authenticate as them.
+     * Useful for tests that need session-based authentication.
+     */
+    protected function asBusiness(?Business $business = null, ?User $user = null): static
+    {
+        $business ??= Business::factory()->create();
+        $user     ??= User::factory()->create(['business_id' => $business->id]);
+
+        return $this->actingAs($user);
     }
 }
