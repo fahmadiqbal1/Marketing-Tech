@@ -53,14 +53,6 @@ return [
 
     'environments' => [
         'production' => [
-            'supervisor-default' => [
-                'connection'   => 'redis',
-                'queue'        => ['default'],
-                'balance'      => 'auto',
-                'maxProcesses' => 5,
-                'tries'        => 3,
-                'timeout'      => 120,
-            ],
             'supervisor-marketing' => [
                 'connection'   => 'redis',
                 'queue'        => ['marketing'],
