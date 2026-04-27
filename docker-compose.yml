@@ -95,7 +95,32 @@ services:
       - "3310:3310"
     restart: unless-stopped
 
+  # ── RAGFlow (semantic knowledge retrieval) ───────────────────────────────
+  # Optional — only starts when the "ragflow" profile is active.
+  # Usage:  docker compose --profile ragflow up -d
+  # Disable: omit --profile ragflow (default stack is unaffected)
+  ragflow:
+    profiles: ["ragflow"]
+    image: infiniflow/ragflow:latest
+    container_name: marketing-tech-ragflow
+    ports:
+      - "9380:9380"
+    environment:
+      - RAGFLOW_API_KEY=${RAGFLOW_API_KEY:-ragflow-local-dev-key}
+    volumes:
+      - ragflow-data:/ragflow/data
+      - ragflow-logs:/ragflow/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9380/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
+  ragflow-data:
+  ragflow-logs:

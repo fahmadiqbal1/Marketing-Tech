@@ -9,7 +9,7 @@ Read at every session start. Domain-specific rules live in subdirectory files (s
 Laravel 11 AI marketing platform:
 - **Agents**: `BaseAgent` → specialised agents (Content, Marketing, Media, Hiring, Growth, Knowledge) via Horizon queues. Tool dispatch: `getAllToolDefinitions()` (agent tools + universal `mcp_tool`) → `dispatchTool()` → `executeToolWithReliability()` (circuit breaker + schema validation). History compressed every 8 steps. Session learnings auto-persisted to `knowledge_base`.
 - **Workflow DAG**: `AgentOrchestrator::dispatchWorkflow()` creates `Workflow` + `WorkflowTask` records. `RunAgentJob::advanceWorkflowDag()` dispatches dependent steps on completion. API: `POST /agent/workflows`, `GET /agent/workflows/{id}`.
-- **RAGFlow**: Semantic RAG via `RAGFlowService` (port 9380). `VectorStoreService::search()` tries RAGFlow first, falls back to PageIndex → ILIKE. Dual-write on `store()`. Run `docker-compose -f docker-compose.ragflow.yml up -d` to start. Migrate existing KB: `php artisan knowledge:migrate-to-ragflow`.
+- **RAGFlow**: Semantic RAG via `RAGFlowService` (port 9380). `VectorStoreService::search()` tries RAGFlow first, falls back to PageIndex → ILIKE. Dual-write on `store()`. Run `docker compose --profile ragflow up -d` to start. Migrate existing KB: `php artisan knowledge:migrate-to-ragflow`.
 - **IterationEngineService**: feedback loop — patterns, winner selection, tool reliability, circuit breaker
 - **MCP Tool Execution**: `mcp_servers` DB table → `McpServer` model → `McpToolService` → universal `mcp_tool` in every agent. Supports stdio (JSON-RPC subprocess) and HTTP/SSE transports.
 - **Prompt Templates**: `PromptTemplateService::render()` replaces `{date}`, `{business_name}`, `{agent_type}` in all system prompts at job start. Add vars in `BaseAgent::run()`.
@@ -176,7 +176,7 @@ changes or unpushed commits. Resolve immediately; do not continue with a dirty t
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Marketing-Tech** (2908 symbols, 8123 relationships, 236 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Marketing-Tech** (2926 symbols, 8152 relationships, 238 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
