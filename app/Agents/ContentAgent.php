@@ -19,6 +19,7 @@ use App\Services\IterationEngineService;
 use App\Services\Knowledge\VectorStoreService;
 use App\Services\Telegram\TelegramBotService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -41,21 +42,30 @@ class ContentAgent extends BaseAgent
         parent::__construct($openai, $anthropic, $gemini, $telegram, $knowledge, $credentials, $iterationEngine, $campaignContext, $aiRouter, $swarm);
     }
 
+    protected function getToolResultSchemas(): array
+    {
+        return [
+            'generate_content'  => ['success', 'data'],
+            'check_seo'         => ['success', 'data'],
+            'keyword_research'  => ['success', 'data'],
+            'hashtag_strategy'  => ['success', 'data'],
+            'trend_analysis'    => ['success', 'data'],
+            'search_knowledge'  => ['success', 'data'],
+        ];
+    }
+
     protected function executeTool(string $name, array $args, AgentJob $job): mixed
     {
-        // Social tool gating: check task_type first, fall back to keyword regex for NULL (backward compat)
+        // Social tool gating: task_type wins; for NULL task_type use cached LLM classification
         $socialTools = ['hashtag_strategy', 'trend_analysis', 'cross_platform_adapt', 'create_content_calendar', 'select_hashtags'];
         if (in_array($name, $socialTools)) {
             $taskType = $job->task_type;
-            $instruction = strtolower($job->instruction ?? '');
-            $isSocial = $taskType === 'social'
-                || ($taskType === null && preg_match('/social|calendar|hashtag|trend|platform|schedule|instagram|tiktok|linkedin|twitter|facebook/', $instruction));
+            $isSocial = $taskType === 'social' || ($taskType === null && $this->classifyAsSocial($job->instruction ?? ''));
 
             if (! $isSocial) {
                 return $this->toolResult(false, null,
-                    "Tool '{$name}' requires task_type=social. ".
-                    'Current task_type: '.($taskType ?? 'null (keyword match also failed)').'. '.
-                    'Set task_type=social on the agent job, or include social keywords in the instruction.'
+                    "Tool '{$name}' requires a social media task. ".
+                    'Set task_type=social on the agent job, or rephrase the instruction to describe a social media task.'
                 );
             }
         }
@@ -340,6 +350,31 @@ class ContentAgent extends BaseAgent
                 ],
             ],
         ];
+    }
+
+    // ─── Social classification ────────────────────────────────────
+
+    /**
+     * LLM-based social classification for null task_type. Cached 1 hour per instruction.
+     */
+    private function classifyAsSocial(string $instruction): bool
+    {
+        if (empty(trim($instruction))) {
+            return false;
+        }
+
+        $cacheKey = 'social_classify:' . md5($instruction);
+
+        return Cache::remember($cacheKey, now()->addHour(), function () use ($instruction) {
+            try {
+                $prompt = 'You are a task classifier. Does the following instruction describe a social media task (posting, scheduling, hashtags, content calendars, platform-specific content)? Reply with valid JSON only: {"is_social": true} or {"is_social": false}. Instruction: ' . mb_substr($instruction, 0, 400);
+                $text   = $this->openai->complete($prompt, 'gpt-4o-mini', 30, 0.0);
+                $data   = json_decode(trim($text), true);
+                return (bool) ($data['is_social'] ?? false);
+            } catch (\Throwable) {
+                return false;
+            }
+        });
     }
 
     // ─── Tool Implementations ─────────────────────────────────────

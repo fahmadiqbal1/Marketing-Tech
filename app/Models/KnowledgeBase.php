@@ -25,7 +25,7 @@ class KnowledgeBase extends Model
 
     protected $table = 'knowledge_base';
 
-    protected $fillable = ['title', 'content', 'category', 'tags', 'source', 'embedding', 'chunk_index', 'parent_id', 'content_hash', 'index_tree', 'node_id', 'business_id'];
+    protected $fillable = ['title', 'content', 'category', 'tags', 'source', 'embedding', 'chunk_index', 'parent_id', 'content_hash', 'index_tree', 'node_id', 'business_id', 'ragflow_dataset_id', 'ragflow_doc_id', 'access_count'];
 
     protected $casts = ['tags' => 'array', 'index_tree' => 'array'];
 

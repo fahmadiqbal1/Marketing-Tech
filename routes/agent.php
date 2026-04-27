@@ -23,6 +23,10 @@ Route::prefix('agent')->name('agent.')->group(function () {
     Route::get('/tasks',  [AgentController::class, 'taskList'])->name('tasks');
     Route::get('/config', [AgentController::class, 'getConfig'])->name('config');
 
+    // Workflow DAG (read-only status — no auth)
+    Route::get('/workflows/{id}', [AgentController::class, 'workflowStatus'])->name('workflows.status')
+        ->where('id', '[0-9a-f\-]+');
+
     // State-mutating endpoints: throttled + optional token auth
     Route::middleware(['throttle:10,1', CheckAgentToken::class])->group(function () {
         Route::post('/run',          [AgentController::class, 'run'])->name('run');
@@ -31,5 +35,6 @@ Route::prefix('agent')->name('agent.')->group(function () {
         Route::post('/resume/{id}',  [AgentController::class, 'resume'])->name('resume')
             ->where('id', '[0-9a-f\-]+');
         Route::post('/update-api',   [AgentController::class, 'updateApi'])->name('update-api');
+        Route::post('/workflows',    [AgentController::class, 'createWorkflow'])->name('workflows.create');
     });
 });

@@ -2,6 +2,7 @@
 
 namespace App\Services\AI;
 
+use App\Exceptions\RateLimitException;
 use App\Services\ApiCredentialService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -44,6 +45,7 @@ class OpenAIService
         array   $tools        = [],
         int     $maxTokens    = 4096,
         float   $temperature  = 0.7,
+        bool    $jsonMode     = false,
     ): array {
         $payload = [
             'model'       => $model,
@@ -62,6 +64,10 @@ class OpenAIService
             $payload['tool_choice'] = 'auto';
         }
 
+        if ($jsonMode) {
+            $payload['response_format'] = ['type' => 'json_object'];
+        }
+
         return $this->request('chat/completions', $payload);
     }
 
@@ -73,12 +79,14 @@ class OpenAIService
         string $model       = 'gpt-4o-mini',
         int    $maxTokens   = 1024,
         float  $temperature = 0.7,
+        bool   $jsonMode    = false,
     ): string {
         $response = $this->chat(
             messages:    [['role' => 'user', 'content' => $prompt]],
             model:       $model,
             maxTokens:   $maxTokens,
             temperature: $temperature,
+            jsonMode:    $jsonMode,
         );
 
         return $response['choices'][0]['message']['content'] ?? '';
@@ -157,6 +165,60 @@ class OpenAIService
     }
 
     /**
+     * Generate an image using DALL-E 3.
+     *
+     * @return array{url: string, revised_prompt: string}
+     */
+    public function generateImage(
+        string $prompt,
+        string $size    = '1024x1024', // '1024x1024' | '1792x1024' | '1024x1792'
+        string $quality = 'standard',  // 'standard' | 'hd'
+        string $style   = 'vivid',     // 'vivid' | 'natural'
+    ): array {
+        $response = $this->request('images/generations', [
+            'model'   => 'dall-e-3',
+            'prompt'  => $prompt,
+            'n'       => 1,
+            'size'    => $size,
+            'quality' => $quality,
+            'style'   => $style,
+        ]);
+
+        $data = $response['data'][0] ?? [];
+        return [
+            'url'            => $data['url'] ?? '',
+            'revised_prompt' => $data['revised_prompt'] ?? $prompt,
+        ];
+    }
+
+    /**
+     * Generate a voiceover audio file using OpenAI TTS.
+     * Returns raw MP3 binary content.
+     */
+    public function generateVoiceover(
+        string $text,
+        string $voice = 'nova',    // alloy | echo | fable | onyx | nova | shimmer
+        string $model = 'tts-1',   // tts-1 | tts-1-hd
+        float  $speed = 1.0,       // 0.25 - 4.0
+    ): string {
+        $response = Http::withToken($this->apiKey())
+            ->timeout(120)
+            ->withHeaders(['Accept' => 'audio/mpeg'])
+            ->post("{$this->baseUrl}/audio/speech", [
+                'model'  => $model,
+                'input'  => $text,
+                'voice'  => $voice,
+                'speed'  => $speed,
+            ]);
+
+        if ($response->failed()) {
+            throw new \RuntimeException("OpenAI TTS failed: " . $response->body());
+        }
+
+        return $response->body();
+    }
+
+    /**
      * List available models (used by test-connection endpoint).
      */
     public function listModels(): array
@@ -202,9 +264,8 @@ class OpenAIService
 
                 if ($status === 429) {
                     $retryAfter = (int) ($response->header('Retry-After') ?? 10);
-                    Log::warning("OpenAI rate limit hit, retrying after {$retryAfter}s");
-                    sleep($retryAfter);
-                    continue;
+                    Log::warning("OpenAI rate limit hit — releasing job for retry after {$retryAfter}s");
+                    throw new RateLimitException($retryAfter, 'openai');
                 }
 
                 if ($status >= 500 && $attempt < $this->retryAttempts) {

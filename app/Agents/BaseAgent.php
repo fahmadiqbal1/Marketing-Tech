@@ -12,6 +12,8 @@ use App\Services\AI\GeminiService;
 use App\Services\ApiCredentialService;
 use App\Services\CampaignContextService;
 use App\Services\IterationEngineService;
+use App\Services\McpToolService;
+use App\Services\PromptTemplateService;
 use App\Services\Telegram\TelegramBotService;
 use App\Services\Knowledge\VectorStoreService;
 use Illuminate\Support\Facades\Cache;
@@ -43,6 +45,15 @@ abstract class BaseAgent
     /** Max tool retries on failure. */
     private int $toolMaxRetries = 2;
 
+    /** Compress history after this many steps to prevent unbounded context growth. */
+    private int $maxHistorySteps = 8;
+
+    /** Total context budget in characters (configurable per agent). */
+    private int $contextBudgetChars = 8000;
+
+    /** Characters reserved for the LLM response. */
+    private int $contextReservedChars = 2000;
+
     public function __construct(
         protected readonly OpenAIService                $openai,
         protected readonly AnthropicService             $anthropic,
@@ -54,16 +65,21 @@ abstract class BaseAgent
         protected readonly CampaignContextService       $campaignContext,
         protected readonly ?AIRouter                    $aiRouter = null,
         protected readonly ?SwarmOrchestratorService    $swarm = null,
+        protected readonly ?PromptTemplateService       $promptTemplate = null,
+        protected readonly ?McpToolService              $mcpTools = null,
     ) {
         $config = config("agents.agents.{$this->agentType}", []);
-        $this->provider           = $config['provider']              ?? $this->provider;
-        $this->model              = $config['model']                 ?? 'gpt-4o';
-        $this->maxSteps           = $config['max_steps']             ?? $this->maxSteps;
-        $this->systemPrompt       = $config['system_prompt']         ?? $this->systemPrompt;
-        $this->tools              = $config['tools']                 ?? $this->tools;
-        $this->rateLimitPerMinute = $config['rate_limit_per_minute'] ?? 0;
-        $this->toolCacheTtl       = $config['tool_cache_ttl']        ?? 0;
-        $this->ragThreshold       = (float) config('agents.knowledge.similarity_threshold', 0.75);
+        $this->provider              = $config['provider']               ?? $this->provider;
+        $this->model                 = $config['model']                  ?? 'gpt-4o';
+        $this->maxSteps              = $config['max_steps']              ?? $this->maxSteps;
+        $this->systemPrompt          = $config['system_prompt']          ?? $this->systemPrompt;
+        $this->tools                 = $config['tools']                  ?? $this->tools;
+        $this->rateLimitPerMinute    = $config['rate_limit_per_minute']  ?? 0;
+        $this->toolCacheTtl          = $config['tool_cache_ttl']         ?? 0;
+        $this->maxHistorySteps       = $config['max_history_steps']      ?? 8;
+        $this->contextBudgetChars    = $config['context_budget_chars']   ?? 8000;
+        $this->contextReservedChars  = $config['context_reserved_chars'] ?? 2000;
+        $this->ragThreshold          = (float) config('agents.knowledge.similarity_threshold', 0.75);
     }
 
     /**
@@ -98,6 +114,16 @@ abstract class BaseAgent
             $this->systemPrompt = $customPrompt;
         }
 
+        // ── Dynamic prompt template rendering ─────────────────────────
+        if ($this->promptTemplate !== null) {
+            $business = $job->business ?? null;
+            $this->systemPrompt = $this->promptTemplate->render($this->systemPrompt, [
+                'date'          => now()->toDateString(),
+                'business_name' => $business?->name ?? 'your organisation',
+                'agent_type'    => $this->agentType,
+            ]);
+        }
+
         $this->currentJobId      = $job->id;
         $this->currentWorkflowId = $job->workflow_id ?? null;
 
@@ -127,6 +153,11 @@ abstract class BaseAgent
                     $this->enforceRateLimit($traceId);
                 }
 
+                // ── History compression — prevent unbounded token growth ──
+                if ($stepCount > 0 && $stepCount % $this->maxHistorySteps === 0) {
+                    $this->compressHistory($messages, $traceId);
+                }
+
                 $stepCount++;
 
                 Log::debug('Agent step', [
@@ -139,7 +170,7 @@ abstract class BaseAgent
 
                 // ── Call AI model ─────────────────────────────────────
                 $aiStart    = (int) round(microtime(true) * 1000);
-                $response   = $this->callAI($messages, $this->getToolDefinitions());
+                $response   = $this->callAI($messages, $this->getAllToolDefinitions());
                 $aiLatency  = (int) round(microtime(true) * 1000) - $aiStart;
                 $tokensUsed = $this->extractTokensUsed($response);
                 $totalTokens += $tokensUsed;
@@ -315,6 +346,9 @@ abstract class BaseAgent
 
             $this->notifyUser($job, "✅ *{$this->agentType}* completed:\n\n{$result}");
 
+            // ── Persist cross-job learnings to knowledge base ──────────
+            $this->persistSessionLearnings($job, $result ?? '', $stepCount);
+
         } catch (\Throwable $e) {
             $errorMsg = $e->getMessage();
 
@@ -340,13 +374,98 @@ abstract class BaseAgent
 
     /**
      * Execute a named tool. Subclasses implement specific tools here.
+     * BaseAgent intercepts the 'mcp_tool' universal tool before delegating.
      */
     abstract protected function executeTool(string $name, array $args, AgentJob $job): mixed;
 
     /**
      * Return tool definitions in OpenAI function-calling format.
+     * Subclasses implement agent-specific tools; base appends the universal mcp_tool.
      */
     abstract protected function getToolDefinitions(): array;
+
+    /**
+     * Merged tool definitions: agent-specific + universal base tools.
+     */
+    final protected function getAllToolDefinitions(): array
+    {
+        return array_merge($this->getToolDefinitions(), $this->baseToolDefinitions());
+    }
+
+    /**
+     * Universal tools available to every agent (MCP execution, etc.).
+     */
+    private function baseToolDefinitions(): array
+    {
+        if ($this->mcpTools === null) {
+            return [];
+        }
+
+        return [[
+            'type'     => 'function',
+            'function' => [
+                'name'        => 'mcp_tool',
+                'description' => 'Execute a tool on a registered MCP server. Use when you need capabilities not available in your standard tool set.',
+                'parameters'  => [
+                    'type'       => 'object',
+                    'properties' => [
+                        'server_name' => ['type' => 'string', 'description' => 'Name of the registered MCP server'],
+                        'tool_name'   => ['type' => 'string', 'description' => 'Name of the tool to execute on the server'],
+                        'params'      => ['type' => 'object', 'description' => 'Tool-specific parameters', 'additionalProperties' => true],
+                    ],
+                    'required'   => ['server_name', 'tool_name'],
+                ],
+            ],
+        ]];
+    }
+
+    /**
+     * Route the 'mcp_tool' universal call; all other names delegate to executeTool().
+     */
+    final protected function dispatchTool(string $name, array $args, AgentJob $job): mixed
+    {
+        if ($name === 'mcp_tool' && $this->mcpTools !== null) {
+            return $this->mcpTools->execute(
+                $args['server_name'] ?? '',
+                $args['tool_name']   ?? '',
+                $args['params']      ?? [],
+            );
+        }
+
+        return $this->executeTool($name, $args, $job);
+    }
+
+    /**
+     * Override in subclasses to declare expected result shapes per tool name.
+     * Keys are tool names; values are arrays of required keys (for array results).
+     */
+    protected function getToolResultSchemas(): array
+    {
+        return [];
+    }
+
+    /**
+     * Validate tool result against declared schemas. Throws \UnexpectedValueException
+     * so executeToolWithReliability's retry logic catches it naturally.
+     */
+    protected function validateToolResult(string $name, mixed $result): void
+    {
+        $schemas = $this->getToolResultSchemas();
+        if (! isset($schemas[$name])) {
+            return;
+        }
+
+        $requiredKeys = $schemas[$name];
+        if (! is_array($result)) {
+            throw new \UnexpectedValueException("Tool {$name} must return an array, got " . gettype($result));
+        }
+
+        foreach ($requiredKeys as $key) {
+            if (! array_key_exists($key, $result)) {
+                throw new \UnexpectedValueException("Tool {$name} result missing required key: {$key}");
+            }
+        }
+    }
 
     // ─── Tool Reliability ─────────────────────────────────────────
 
@@ -384,12 +503,15 @@ abstract class BaseAgent
         while ($attempt <= $this->toolMaxRetries) {
             $attempt++;
             try {
-                $result = $this->executeTool($name, $args, $job);
+                $result = $this->dispatchTool($name, $args, $job);
 
                 // Basic validation: result must be non-null and non-empty
                 if ($result === null || $result === '' || $result === []) {
                     throw new \RuntimeException("Tool {$name} returned empty result");
                 }
+
+                // Structural validation: subclasses may define expected result shapes
+                $this->validateToolResult($name, $result);
 
                 $this->iterationEngine->recordToolOutcome($name, true);
                 return [$result, true, null];
@@ -491,23 +613,20 @@ abstract class BaseAgent
     // ─── Message Building ─────────────────────────────────────────
 
     /**
-     * Per-section character limits (applied before the global budget guard).
-     * Using mb_substr/mb_strlen consistently for UTF-8 correctness.
+     * Per-section character limits as fractions of the total budget.
+     * Applied before the global budget guard.
      */
-    private const SECTION_LIMITS = [
-        'rag'      => 2500,
-        'patterns' => 1500,
-        'global'   => 1000,
-        'campaign' => 1500,
-        'failures' => 800,
-    ];
-
-    /**
-     * Total context budget in characters.
-     * 2000 chars reserved for the LLM response, leaving 6000 usable.
-     */
-    private const MAX_CONTEXT_CHARS    = 8000;
-    private const RESERVED_FOR_RESPONSE = 2000;
+    private function sectionLimits(): array
+    {
+        $budget = $this->contextBudgetChars - $this->contextReservedChars;
+        return [
+            'rag'      => (int) ($budget * 0.35),
+            'patterns' => (int) ($budget * 0.20),
+            'global'   => (int) ($budget * 0.12),
+            'campaign' => (int) ($budget * 0.20),
+            'failures' => (int) ($budget * 0.13),
+        ];
+    }
 
     /** Running total of injected context chars for this request. */
     private int $promptUsed = 0;
@@ -515,13 +634,13 @@ abstract class BaseAgent
     /**
      * Trim a section to its per-section limit, then check against the global
      * budget. Returns trimmed text, or empty string if budget exhausted.
-     * All length operations use mb_* for UTF-8 safety.
      */
     private function addSection(string $section, string $text): string
     {
-        $sectionMax   = self::SECTION_LIMITS[$section] ?? 1500;
+        $limits       = $this->sectionLimits();
+        $sectionMax   = $limits[$section] ?? (int) (($this->contextBudgetChars - $this->contextReservedChars) * 0.20);
         $trimmed      = mb_substr($text, 0, $sectionMax, 'UTF-8');
-        $usableBudget = self::MAX_CONTEXT_CHARS - self::RESERVED_FOR_RESPONSE;
+        $usableBudget = $this->contextBudgetChars - $this->contextReservedChars;
 
         if (($this->promptUsed + mb_strlen($trimmed, 'UTF-8')) > $usableBudget) {
             return '';
@@ -566,10 +685,16 @@ abstract class BaseAgent
         }
 
         if (! empty($usedChunks)) {
-            $contextText = "Relevant knowledge from the knowledge base:\n\n";
-            foreach ($usedChunks as $item) {
-                $sanitized    = $this->iterationEngine->sanitizeForPrompt($item['content'] ?? '');
-                $contextText .= "- {$sanitized}\n";
+            $contextText = "[KNOWLEDGE CONTEXT — ranked by relevance]\n\n";
+            foreach ($usedChunks as $i => $item) {
+                $num        = $i + 1;
+                $title      = $item['title']    ?? 'Unknown';
+                $category   = $item['category'] ?? 'general';
+                $score      = $item['similarity'] !== null
+                    ? 'Score: ' . round((float) $item['similarity'], 2)
+                    : 'Relevance: HIGH';
+                $sanitized  = $this->iterationEngine->sanitizeForPrompt($item['content'] ?? '');
+                $contextText .= "{$num}. [Source: {$title} | Category: {$category} | {$score}]\n   {$sanitized}\n\n";
             }
             $trimmed = $this->addSection('rag', $contextText);
             if (! empty($trimmed)) {
@@ -746,6 +871,126 @@ abstract class BaseAgent
             'description'  => $tool['function']['description'],
             'input_schema' => $tool['function']['parameters'],
         ], $openAiTools);
+    }
+
+    // ─── History Management ───────────────────────────────────────
+
+    /**
+     * Compress the oldest history pairs to prevent unbounded context growth.
+     *
+     * Replaces the oldest 4 assistant+tool message pairs with a single
+     * [COMPRESSED HISTORY] summary, keeping the initial context messages intact.
+     */
+    private function compressHistory(array &$messages, string $traceId): void
+    {
+        // Keep first N messages (initial context injections) + last pair in place.
+        // Only compress middle history pairs.
+        $initialCount = 0;
+        foreach ($messages as $msg) {
+            if (isset($msg['role']) && in_array($msg['role'], ['user', 'assistant'])) {
+                // Count the initial context setup messages (before any tool calls)
+                $initialCount++;
+            }
+            if ($initialCount >= 6) break; // stop after assumed initial block
+        }
+
+        $compressible = array_slice($messages, $initialCount, -2); // preserve last pair
+        if (count($compressible) < 4) {
+            return; // not enough history to compress
+        }
+
+        $pairsToCompress = array_slice($compressible, 0, 4);
+        $summaryText = '';
+        foreach ($pairsToCompress as $m) {
+            $content = is_array($m['content'])
+                ? json_encode($m['content'])
+                : ($m['content'] ?? '');
+            $summaryText .= "[{$m['role']}]: " . mb_substr((string) $content, 0, 300, 'UTF-8') . "\n";
+        }
+
+        try {
+            $prompt = "Summarise these agent interaction steps into one concise paragraph (max 150 words) preserving key decisions and results:\n\n{$summaryText}";
+            $summary = $this->aiRouter
+                ? $this->aiRouter->complete($prompt, 'gpt-4o-mini', 200, 0.0)
+                : mb_substr($summaryText, 0, 400, 'UTF-8');
+
+            $summaryMessage = ['role' => 'user', 'content' => "[COMPRESSED HISTORY]\n{$summary}"];
+            $ackMessage     = ['role' => 'assistant', 'content' => 'Understood — I have the prior context summary.'];
+
+            // Replace the first 4 compressible messages with the summary pair
+            array_splice($messages, $initialCount, 4, [$summaryMessage, $ackMessage]);
+
+            Log::debug('BaseAgent: history compressed', [
+                'trace_id'       => $traceId,
+                'agent'          => $this->agentType,
+                'messages_after' => count($messages),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('BaseAgent: history compression failed — continuing without compression', [
+                'trace_id' => $traceId,
+                'error'    => $e->getMessage(),
+            ]);
+        }
+    }
+
+    // ─── Cross-job Memory ─────────────────────────────────────────
+
+    /**
+     * Extract and persist key learnings from this job into the shared knowledge base.
+     * These feed back into RAG context for future agent runs via the 'agent-skills' category.
+     */
+    private function persistSessionLearnings(AgentJob $job, string $result, int $steps): void
+    {
+        if (empty($result) || $steps < 2) {
+            return; // Not enough signal to learn from
+        }
+
+        try {
+            $prompt = <<<PROMPT
+You are summarising the key learnings from a completed {$this->agentType} agent job.
+Job instruction: {$job->instruction}
+Job result (excerpt): {excerpt}
+Steps taken: {$steps}
+
+Extract exactly 3 concise, reusable learnings that would help future {$this->agentType} agents do better work.
+Format as a JSON array: ["learning 1", "learning 2", "learning 3"]
+Each learning must be a single sentence under 100 characters.
+Respond with ONLY the JSON array.
+PROMPT;
+            $excerpt = mb_substr($result, 0, 500, 'UTF-8');
+            $prompt  = str_replace('{excerpt}', $excerpt, $prompt);
+
+            $raw = $this->aiRouter
+                ? $this->aiRouter->complete($prompt, 'gpt-4o-mini', 250, 0.0)
+                : null;
+
+            if (empty($raw)) return;
+
+            $clean    = trim(preg_replace('/^```(?:json)?\s*/i', '', preg_replace('/\s*```$/i', '', trim($raw))));
+            $learnings = json_decode($clean, true);
+
+            if (! is_array($learnings) || empty($learnings)) return;
+
+            $content = implode("\n", array_map(fn($l, $i) => ($i + 1) . ". {$l}", $learnings, array_keys($learnings)));
+            $this->knowledge->store(
+                title:    "Agent Learning: {$this->agentType} — " . now()->toDateString(),
+                content:  $content,
+                tags:     [$this->agentType, 'auto-learned', "job:{$job->id}"],
+                category: 'agent-skills',
+                source:   "agent_job:{$job->id}",
+            );
+
+            Log::debug('BaseAgent: session learnings persisted', [
+                'job_id'     => $job->id,
+                'agent_type' => $this->agentType,
+                'learnings'  => count($learnings),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('BaseAgent: failed to persist session learnings', [
+                'job_id' => $job->id,
+                'error'  => $e->getMessage(),
+            ]);
+        }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────

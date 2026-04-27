@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Agents\AgentOrchestrator;
 use App\Jobs\RunAgentJob;
 use App\Models\AgentJob;
 use App\Models\AgentStep;
+use App\Models\Workflow;
 use App\Services\ApiCredentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -199,6 +201,67 @@ class AgentController extends Controller
         RunAgentJob::dispatch($job->id)->onQueue($queue);
 
         return response()->json(['message' => 'Task resumed.', 'task_id' => $id]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Workflow DAG
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /api/workflows
+     * Body: { "name": string, "steps": [{ "agent_type": string, "instruction": string, "depends_on_step": ?int }] }
+     */
+    public function createWorkflow(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'                       => 'nullable|string|max:255',
+            'steps'                      => 'required|array|min:1|max:20',
+            'steps.*.agent_type'         => 'required|string|in:marketing,content,media,hiring,growth,knowledge',
+            'steps.*.instruction'        => 'required|string|max:2000',
+            'steps.*.depends_on_step'    => 'nullable|integer|min:0',
+        ]);
+
+        $orchestrator = app(AgentOrchestrator::class);
+        $workflow = $orchestrator->dispatchWorkflow(
+            steps:  $validated['steps'],
+            userId: $request->user()?->id ?? 0,
+            chatId: 0,
+            name:   $validated['name'] ?? '',
+        );
+
+        return response()->json([
+            'workflow_id' => $workflow->id,
+            'name'        => $workflow->name,
+            'status'      => $workflow->status,
+            'steps'       => count($validated['steps']),
+        ], 201);
+    }
+
+    /**
+     * GET /api/workflows/{id}
+     */
+    public function workflowStatus(string $id): JsonResponse
+    {
+        $workflow = Workflow::with('tasks')->find($id);
+
+        if (! $workflow) {
+            return response()->json(['error' => 'Workflow not found'], 404);
+        }
+
+        return response()->json([
+            'id'         => $workflow->id,
+            'name'       => $workflow->name,
+            'status'     => $workflow->status,
+            'tasks'      => $workflow->tasks->map(fn ($t) => [
+                'id'          => $t->id,
+                'agent_type'  => $t->agent_type,
+                'status'      => $t->status,
+                'sequence'    => $t->sequence,
+                'depends_on'  => $t->depends_on_task_id,
+            ]),
+            'started_at'   => $workflow->started_at,
+            'completed_at' => $workflow->completed_at,
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 
 namespace App\Services\AI;
 
+use App\Exceptions\RateLimitException;
 use App\Services\ApiCredentialService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -38,12 +39,13 @@ class AnthropicService
      * Chat completion with optional tool use.
      */
     public function chat(
-        array  $messages,
-        string $model        = 'claude-opus-4-5',
-        string $systemPrompt = '',
-        array  $tools        = [],
-        int    $maxTokens    = 8192,
-        float  $temperature  = 0.7,
+        array   $messages,
+        string  $model        = 'claude-sonnet-4-6',
+        string  $systemPrompt = '',
+        array   $tools        = [],
+        int     $maxTokens    = 8192,
+        float   $temperature  = 0.7,
+        ?array  $jsonSchema   = null,
     ): array {
         $payload = [
             'model'       => $model,
@@ -58,6 +60,13 @@ class AnthropicService
 
         if (! empty($tools)) {
             $payload['tools'] = $tools;
+        }
+
+        if ($jsonSchema !== null) {
+            $payload['response_format'] = [
+                'type'        => 'json',
+                'json_schema' => $jsonSchema,
+            ];
         }
 
         return $this->request('messages', $payload);
@@ -132,9 +141,8 @@ class AnthropicService
 
                 if ($status === 529 || $status === 429) {
                     $retryAfter = (int) ($response->header('retry-after') ?? 15);
-                    Log::warning("Anthropic rate limit / overload, retrying after {$retryAfter}s");
-                    sleep($retryAfter);
-                    continue;
+                    Log::warning("Anthropic rate limit / overload — releasing job for retry after {$retryAfter}s");
+                    throw new RateLimitException($retryAfter, 'anthropic');
                 }
 
                 if ($status >= 500 && $attempt < $this->retryAttempts) {

@@ -35,6 +35,8 @@ class SwarmOrchestratorService
     /**
      * Run the swarm: fan-out + consensus synthesis.
      * Returns a standard chat response array (choices[0].message.content).
+     * When $tools are provided, returns the first tool-calling response directly
+     * (consensus synthesis only applies to text-only responses).
      */
     public function run(
         array   $messages,
@@ -43,7 +45,23 @@ class SwarmOrchestratorService
         ?string $agentRunId = null,
     ): array {
         $providers = $this->getActiveProviders();
-        $responses = $this->fanOut($messages, $system, $providers);
+        $responses = $this->fanOut($messages, $system, $providers, $tools);
+
+        // If any provider returned a tool-use response, return it directly —
+        // tool calls cannot be meaningfully synthesised across providers.
+        if (! empty($tools)) {
+            foreach ($responses as $providerKey => $resp) {
+                if (is_array($resp) && $this->hasToolCalls($resp)) {
+                    Log::debug('Swarm: returning tool-calling response directly', ['provider' => $providerKey]);
+                    return $resp;
+                }
+            }
+            // No provider returned tool calls — extract text and fall through to synthesis
+            $responses = array_map(
+                fn($r) => is_array($r) ? ($r['choices'][0]['message']['content'] ?? '') : (string) $r,
+                $responses
+            );
+        }
 
         if (empty($responses)) {
             throw new \RuntimeException('Swarm: all providers failed — no responses collected');
@@ -86,16 +104,24 @@ class SwarmOrchestratorService
 
     /**
      * Call every active provider with the same messages. Returns provider→response map.
+     * When $tools are provided, raw response arrays are returned (not text strings)
+     * so tool-call blocks are preserved for inspection in run().
      */
-    private function fanOut(array $messages, ?string $system, array $providers): array
+    private function fanOut(array $messages, ?string $system, array $providers, array $tools = []): array
     {
         $responses = [];
 
         foreach ($providers as $providerKey => $config) {
             try {
-                $text = $this->callProvider($providerKey, $config, $messages, $system);
-                if (! empty(trim($text))) {
-                    $responses[$providerKey] = $text;
+                $response = $this->callProvider($providerKey, $config, $messages, $system, $tools);
+                if (! empty($tools)) {
+                    // Preserve full response array so run() can check for tool calls
+                    $responses[$providerKey] = $response;
+                } else {
+                    $text = is_string($response) ? $response : ($response['choices'][0]['message']['content'] ?? '');
+                    if (! empty(trim($text))) {
+                        $responses[$providerKey] = $text;
+                    }
                 }
             } catch (\Throwable $e) {
                 Log::warning('Swarm fan-out: provider failed', [
@@ -109,21 +135,43 @@ class SwarmOrchestratorService
     }
 
     /**
-     * Call a single provider, returning the text content.
+     * Check if a response array contains tool calls (OpenAI or Anthropic format).
      */
-    private function callProvider(string $key, array $config, array $messages, ?string $system): string
+    private function hasToolCalls(array $response): bool
+    {
+        // OpenAI format
+        $toolCalls = $response['choices'][0]['message']['tool_calls'] ?? [];
+        if (! empty($toolCalls)) return true;
+
+        // Anthropic format
+        foreach ($response['content'] ?? [] as $block) {
+            if (($block['type'] ?? '') === 'tool_use') return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Call a single provider, returning either text or full response array.
+     */
+    private function callProvider(string $key, array $config, array $messages, ?string $system, array $tools = []): mixed
     {
         $model    = $config['model'];
         $provider = $config['type'];
 
         if ($provider === 'anthropic') {
-            $result = $this->anthropic->chat($messages, $model, $system ?? '', [], 4096, 0.7);
-            return $result['choices'][0]['message']['content'] ?? '';
+            $anthropicTools = ! empty($tools) ? $this->convertToolsForAnthropic($tools) : [];
+            $result = $this->anthropic->chat($messages, $model, $system ?? '', $anthropicTools, 4096, 0.7);
+            return empty($tools)
+                ? ($result['choices'][0]['message']['content'] ?? '')
+                : $result;
         }
 
         if ($provider === 'openai') {
-            $result = $this->openai->chat($messages, $model, $system ?? '', [], 4096, 0.7);
-            return $result['choices'][0]['message']['content'] ?? '';
+            $result = $this->openai->chat($messages, $model, $system ?? '', $tools, 4096, 0.7);
+            return empty($tools)
+                ? ($result['choices'][0]['message']['content'] ?? '')
+                : $result;
         }
 
         // Custom platform via HTTP
@@ -190,7 +238,7 @@ PROMPT;
             if ($judgeProvider === 'anthropic') {
                 $text = $this->anthropic->complete($prompt, $judgeModel, 2000, 0.2);
             } else {
-                $text = $this->openai->complete($prompt, $judgeModel, 2000, 0.2);
+                $text = $this->openai->complete($prompt, $judgeModel, 2000, 0.2, jsonMode: true);
             }
 
             $decoded = json_decode(trim($text), true);
@@ -204,6 +252,18 @@ PROMPT;
         // Fallback: return the longest response
         $longest = collect($responses)->sortByDesc(fn ($t) => mb_strlen($t))->first();
         return [$longest, 0.5];
+    }
+
+    /**
+     * Convert OpenAI-format tool definitions to Anthropic's input_schema format.
+     */
+    private function convertToolsForAnthropic(array $openAiTools): array
+    {
+        return array_map(fn ($tool) => [
+            'name'         => $tool['function']['name'],
+            'description'  => $tool['function']['description'],
+            'input_schema' => $tool['function']['parameters'],
+        ], array_filter($openAiTools, fn ($t) => isset($t['function'])));
     }
 
     /**

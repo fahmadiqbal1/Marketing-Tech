@@ -9,9 +9,19 @@ class McpServer extends Model
 {
     use HasUuids;
 
+    protected $table = 'mcp_servers';
+
     protected $fillable = [
-        'business_id', 'name', 'transport', 'command', 'url',
-        'args', 'env_vars', 'is_active', 'capabilities', 'last_synced_at',
+        'business_id',
+        'name',
+        'transport',
+        'command',
+        'url',
+        'args',
+        'env_vars',
+        'is_active',
+        'capabilities',
+        'last_synced_at',
     ];
 
     protected $casts = [

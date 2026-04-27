@@ -27,7 +27,10 @@ class VectorStoreService
     private int $chunkSize    = 1200;
     private int $chunkOverlap = 150;
 
-    public function __construct(private readonly AIRouter $aiRouter) {}
+    public function __construct(
+        private readonly AIRouter       $aiRouter,
+        private readonly RAGFlowService $ragflow,
+    ) {}
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -91,10 +94,29 @@ class VectorStoreService
             ]);
         }
 
+        // Dual-write: also upload to RAGFlow when enabled
+        if ($this->ragflow->isEnabled()) {
+            try {
+                $datasetId = $this->getOrCreateRagflowDataset($category);
+                $docId     = $this->ragflow->uploadDocument($datasetId, $content, $title);
+
+                KnowledgeBase::where('id', $parentId)->update([
+                    'ragflow_dataset_id' => $datasetId,
+                    'ragflow_doc_id'     => $docId,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('VectorStoreService: RAGFlow dual-write failed (non-fatal)', [
+                    'error' => $e->getMessage(),
+                    'title' => $title,
+                ]);
+            }
+        }
+
         Log::debug('Knowledge stored (PageIndex)', [
-            'title'  => $title,
-            'chunks' => count($chunks),
-            'nodes'  => count($treeNodes),
+            'title'   => $title,
+            'chunks'  => count($chunks),
+            'nodes'   => count($treeNodes),
+            'ragflow' => $this->ragflow->isEnabled(),
         ]);
 
         return $parentId;
@@ -115,6 +137,23 @@ class VectorStoreService
         ?string $category   = null,
         array   $categories = [],
     ): array {
+        // RAGFlow-first: semantic search when enabled
+        if ($this->ragflow->isEnabled()) {
+            try {
+                $datasetIds = $this->resolveRagflowDatasetIds($category, $categories);
+                if (! empty($datasetIds)) {
+                    $results = $this->ragflow->retrieve($query, $datasetIds, $topK);
+                    if (! empty($results)) {
+                        return $results;
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('RAGFlow search failed, falling through to PageIndex', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         try {
             return $this->pageIndexSearch($query, $topK, $category, $categories);
         } catch (\Throwable $e) {
@@ -131,6 +170,53 @@ class VectorStoreService
     public function delete(string $id): void
     {
         KnowledgeBase::where('id', $id)->orWhere('parent_id', $id)->delete();
+    }
+
+    // ── PageIndex core ────────────────────────────────────────────────────────
+
+    // ── RAGFlow helpers ───────────────────────────────────────────────────────
+
+    /** Cache of category → RAGFlow dataset ID, populated lazily. */
+    private array $ragflowDatasetCache = [];
+
+    private function getOrCreateRagflowDataset(string $category): string
+    {
+        if (isset($this->ragflowDatasetCache[$category])) {
+            return $this->ragflowDatasetCache[$category];
+        }
+
+        $chunkMethodMap = config('agents.ragflow.chunk_methods', []);
+        $chunkMethod    = $chunkMethodMap[$category] ?? 'naive';
+
+        foreach ($this->ragflow->listDatasets() as $dataset) {
+            if (($dataset['name'] ?? '') === $category) {
+                $this->ragflowDatasetCache[$category] = $dataset['id'];
+                return $dataset['id'];
+            }
+        }
+
+        $id = $this->ragflow->createDataset($category, $chunkMethod);
+        $this->ragflowDatasetCache[$category] = $id;
+
+        return $id;
+    }
+
+    private function resolveRagflowDatasetIds(?string $category, array $categories): array
+    {
+        $allDatasets = $this->ragflow->listDatasets();
+        $names = array_filter(array_unique(array_merge(
+            $category ? [$category] : [],
+            $categories,
+        )));
+
+        if (empty($names)) {
+            return array_column($allDatasets, 'id');
+        }
+
+        return collect($allDatasets)
+            ->filter(fn ($d) => in_array($d['name'] ?? '', $names))
+            ->pluck('id')
+            ->all();
     }
 
     // ── PageIndex core ────────────────────────────────────────────────────────

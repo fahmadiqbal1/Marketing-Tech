@@ -4,6 +4,8 @@ namespace App\Agents;
 
 use App\Jobs\RunAgentJob;
 use App\Models\AgentJob;
+use App\Models\Workflow;
+use App\Models\WorkflowTask;
 use App\Services\AI\OpenAIService;
 use App\Services\Telegram\TelegramBotService;
 use Illuminate\Support\Facades\Log;
@@ -89,6 +91,98 @@ class AgentOrchestrator
     }
 
     /**
+     * Dispatch a multi-step agent workflow with optional DAG dependencies.
+     *
+     * Each step: ['agent_type' => string, 'instruction' => string, 'depends_on_step' => ?int (0-indexed)]
+     * Steps with no dependency (or depends_on_step = null) start immediately.
+     * Dependent steps are dispatched by RunAgentJob when their prerequisite completes.
+     */
+    public function dispatchWorkflow(array $steps, int $userId, int $chatId = 0, string $name = ''): Workflow
+    {
+        $workflow = Workflow::create([
+            'id'            => (string) Str::uuid(),
+            'name'          => $name ?: 'Workflow ' . now()->format('Y-m-d H:i'),
+            'type'          => 'agent_dag',
+            'status'        => Workflow::STATUS_TASK_EXECUTION,
+            'user_id'       => $userId,
+            'chat_id'       => $chatId,
+            'input_payload' => ['steps' => $steps],
+            'started_at'    => now(),
+        ]);
+
+        // First pass: create all WorkflowTask rows and collect task IDs by step index
+        $taskIdsByStep = [];
+
+        foreach ($steps as $index => $step) {
+            $agentType = $step['agent_type'] ?? 'content';
+            $task = WorkflowTask::create([
+                'workflow_id' => $workflow->id,
+                'name'        => "Step {$index}: {$agentType}",
+                'type'        => 'agent_run',
+                'status'      => 'pending',
+                'sequence'    => $index,
+                'agent_type'  => $agentType,
+                'input'       => ['instruction' => $step['instruction'] ?? ''],
+            ]);
+            $taskIdsByStep[$index] = $task->id;
+        }
+
+        // Second pass: wire depends_on_task_id, then dispatch unblocked steps
+        foreach ($steps as $index => $step) {
+            $dependsOnStep = $step['depends_on_step'] ?? null;
+
+            if ($dependsOnStep !== null && isset($taskIdsByStep[$dependsOnStep])) {
+                WorkflowTask::where('id', $taskIdsByStep[$index])
+                    ->update(['depends_on_task_id' => $taskIdsByStep[$dependsOnStep]]);
+            } else {
+                // No dependency — dispatch immediately
+                $this->dispatchWorkflowStep($workflow, $taskIdsByStep[$index], $steps[$index], $userId, $chatId);
+            }
+        }
+
+        Log::info('Workflow DAG dispatched', [
+            'workflow_id' => $workflow->id,
+            'steps'       => count($steps),
+        ]);
+
+        return $workflow;
+    }
+
+    /**
+     * Dispatch a single workflow step as an AgentJob.
+     * Called both at workflow start and by RunAgentJob on step completion.
+     */
+    public function dispatchWorkflowStep(Workflow $workflow, string $taskId, array $step, int $userId, int $chatId): AgentJob
+    {
+        $agentType  = $step['agent_type'] ?? 'content';
+        $agentClass = $this->agentMap[$agentType] ?? ContentAgent::class;
+        $queue      = config("agents.agents.{$agentType}.queue", 'default');
+
+        $job = AgentJob::create([
+            'id'                => (string) Str::uuid(),
+            'workflow_id'       => $workflow->id,
+            'agent_type'        => $agentType,
+            'agent_class'       => $agentClass,
+            'instruction'       => $step['instruction'] ?? '',
+            'short_description' => Str::limit($step['instruction'] ?? '', 80),
+            'status'            => 'pending',
+            'chat_id'           => $chatId,
+            'user_id'           => $userId,
+            'metadata'          => ['workflow_task_id' => $taskId],
+        ]);
+
+        WorkflowTask::where('id', $taskId)->update([
+            'status'     => 'running',
+            'started_at' => now(),
+            'metadata'   => ['agent_job_id' => $job->id],
+        ]);
+
+        RunAgentJob::dispatch($job->id)->onQueue($queue);
+
+        return $job;
+    }
+
+    /**
      * Handle file upload from Telegram — route to media agent.
      */
     public function handleFileUpload(
@@ -140,6 +234,7 @@ PROMPT;
                 model:       'gpt-4o-mini',
                 maxTokens:   50,
                 temperature: 0.0,
+                jsonMode:    true,
             );
 
             $data = json_decode($response, true);

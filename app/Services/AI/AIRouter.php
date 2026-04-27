@@ -58,6 +58,8 @@ class AIRouter
         string  $provider    = 'auto',
         ?string $agentRunId  = null,
         ?string $workflowId  = null,
+        bool    $jsonMode    = false,
+        ?array  $jsonSchema  = null,
     ): array {
         $resolvedModel    = $model    ?? $this->selectModel('', $provider);
         $resolvedProvider = $provider === 'auto' ? $this->providerForModel($resolvedModel) : $provider;
@@ -66,7 +68,7 @@ class AIRouter
 
         try {
             $response = $this->executeWithFallback(
-                fn ($m, $p) => $this->callProviderChat($p, $m, $messages, $system, $maxTokens, $temperature, $tools),
+                fn ($m, $p) => $this->callProviderChat($p, $m, $messages, $system, $maxTokens, $temperature, $tools, $jsonMode, $jsonSchema),
                 $resolvedModel,
                 $resolvedProvider,
                 $agentRunId,
@@ -212,7 +214,7 @@ class AIRouter
         return $this->openai->complete($messages[0]['content'], $model, $maxTokens, $temperature);
     }
 
-    private function callProviderChat(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature, array $tools): array
+    private function callProviderChat(string $provider, string $model, array $messages, ?string $system, int $maxTokens, float $temperature, array $tools, bool $jsonMode = false, ?array $jsonSchema = null): array
     {
         $custom = $this->resolveCustomPlatform($provider);
         if ($custom) {
@@ -224,16 +226,15 @@ class AIRouter
                     'error'       => $e->getMessage(),
                     'fallback_to' => 'openai/gpt-4o',
                 ]);
-                return $this->openai->chat($messages, 'gpt-4o', $system ?? '', $tools, $maxTokens, $temperature);
+                return $this->openai->chat($messages, 'gpt-4o', $system ?? '', $tools, $maxTokens, $temperature, $jsonMode);
             }
         }
 
         if ($provider === 'anthropic') {
-            // Convert OpenAI tool format → Anthropic tool format automatically
             $anthropicTools = $this->convertToolsForAnthropic($tools);
-            return $this->anthropic->chat($messages, $model, $system ?? '', $anthropicTools, $maxTokens, $temperature);
+            return $this->anthropic->chat($messages, $model, $system ?? '', $anthropicTools, $maxTokens, $temperature, $jsonSchema);
         }
-        return $this->openai->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature);
+        return $this->openai->chat($messages, $model, $system ?? '', $tools, $maxTokens, $temperature, $jsonMode);
     }
 
     /**
