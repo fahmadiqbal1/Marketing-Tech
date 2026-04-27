@@ -54,6 +54,10 @@ abstract class BaseAgent
     /** Characters reserved for the LLM response. */
     private int $contextReservedChars = 2000;
 
+    // Not readonly — self-initialised below when subclasses omit them from parent::__construct()
+    protected ?PromptTemplateService $promptTemplate = null;
+    protected ?McpToolService        $mcpTools       = null;
+
     public function __construct(
         protected readonly OpenAIService                $openai,
         protected readonly AnthropicService             $anthropic,
@@ -65,8 +69,8 @@ abstract class BaseAgent
         protected readonly CampaignContextService       $campaignContext,
         protected readonly ?AIRouter                    $aiRouter = null,
         protected readonly ?SwarmOrchestratorService    $swarm = null,
-        protected readonly ?PromptTemplateService       $promptTemplate = null,
-        protected readonly ?McpToolService              $mcpTools = null,
+        ?PromptTemplateService                          $promptTemplate = null,
+        ?McpToolService                                 $mcpTools = null,
     ) {
         $config = config("agents.agents.{$this->agentType}", []);
         $this->provider              = $config['provider']               ?? $this->provider;
@@ -80,6 +84,11 @@ abstract class BaseAgent
         $this->contextBudgetChars    = $config['context_budget_chars']   ?? 8000;
         $this->contextReservedChars  = $config['context_reserved_chars'] ?? 2000;
         $this->ragThreshold          = (float) config('agents.knowledge.similarity_threshold', 0.75);
+
+        // Ensure these are always available regardless of whether subclass threads them through.
+        // Both services have zero constructor dependencies so direct instantiation is safe.
+        $this->promptTemplate ??= $promptTemplate ?? new PromptTemplateService();
+        $this->mcpTools       ??= $mcpTools ?? new McpToolService();
     }
 
     /**
@@ -727,7 +736,7 @@ abstract class BaseAgent
         if (! empty($job->campaign_id)) {
             $rawCampaignCtx = $this->campaignContext->getCampaignContext($job->campaign_id);
             if (! empty($rawCampaignCtx)) {
-                $campaignCtx = $this->iterationEngine->sanitizeForPrompt($rawCampaignCtx, self::SECTION_LIMITS['campaign']);
+                $campaignCtx = $this->iterationEngine->sanitizeForPrompt($rawCampaignCtx);
                 $trimmed     = $this->addSection('campaign', $campaignCtx);
                 if (! empty($trimmed)) {
                     $messages[] = ['role' => 'user',      'content' => $trimmed];
@@ -1052,15 +1061,13 @@ PROMPT;
         $current = (int) Cache::get($key, 0);
 
         if ($current >= $this->rateLimitPerMinute) {
-            $sleepSeconds = 60 - (int) date('s');
-            Log::warning('Agent rate limit reached, waiting', [
-                'trace_id'   => $traceId,
-                'agent'      => $this->agentType,
-                'sleep_secs' => $sleepSeconds,
+            $retryAfter = max(1, 60 - (int) date('s'));
+            Log::warning('Agent rate limit reached, releasing job', [
+                'trace_id'    => $traceId,
+                'agent'       => $this->agentType,
+                'retry_after' => $retryAfter,
             ]);
-            sleep(max(1, $sleepSeconds));
-            Cache::forget($key);
-            $current = 0;
+            throw new \App\Exceptions\RateLimitException($retryAfter, $this->agentType);
         }
 
         Cache::put($key, $current + 1, 120);
