@@ -115,8 +115,9 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
     Route::get('/system',     [DashboardController::class, 'system']);
     Route::get('/settings',   [SettingsController::class,  'index']);
     Route::get('/pipeline',   [DashboardController::class, 'pipeline']);
-    Route::get('/knowledge',  [DashboardController::class, 'knowledge']);
-    Route::get('/social',     [DashboardController::class, 'social']);
+    Route::get('/knowledge',      [DashboardController::class, 'knowledge']);
+    Route::get('/social',         [DashboardController::class, 'social']);
+    Route::get('/intelligence',   [DashboardController::class, 'intelligence'])->name('dashboard.intelligence');
 
     // Social OAuth flows — all platforms (no throttle — user-initiated)
     Route::get('/social/auth/instagram/redirect',  [DashboardController::class, 'socialInstagramRedirect']);
@@ -216,9 +217,6 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             // Intelligence layer
             Route::get('/intelligence/stats', [DashboardController::class, 'apiIntelligenceStats']);
         });
-
-        // Intelligence dashboard page
-        Route::get('/intelligence', [DashboardController::class, 'intelligence'])->name('dashboard.intelligence');
 
         // ── Heavy / expensive operations ──────────────────────────────────────────
         Route::middleware('throttle:' . config('dashboard.throttle_heavy', 30) . ',1')->group(function () {

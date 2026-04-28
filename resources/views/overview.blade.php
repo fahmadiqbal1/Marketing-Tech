@@ -131,7 +131,9 @@
         {{-- Workflow status breakdown --}}
         <div class="stat-card col-span-1">
             <h3 class="text-sm font-semibold text-white mb-4">Workflow Status</h3>
-            <canvas id="statusChart" height="180"></canvas>
+            <div style="position:relative;height:180px;">
+                <canvas id="statusChart"></canvas>
+            </div>
         </div>
 
         {{-- AI cost chart with time range --}}
@@ -147,7 +149,9 @@
                     </template>
                 </div>
             </div>
-            <canvas id="costChart" height="130"></canvas>
+            <div style="position:relative;height:130px;">
+                <canvas id="costChart"></canvas>
+            </div>
         </div>
     </div>
 

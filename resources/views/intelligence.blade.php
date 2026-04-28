@@ -213,7 +213,13 @@ function intelligenceApp() {
             this.loading = true;
             try {
                 const r = await apiGet('/dashboard/api/intelligence/stats');
-                this.stats = r;
+                // Flatten top-level flags into the stats object so the template can access them uniformly
+                this.stats = {
+                    ...r,
+                    layer_enabled:   r.layer_enabled  ?? false,
+                    bandit_enabled:  r.bandit_enabled  ?? false,
+                    strategic_mode:  r.strategic_mode  ?? 'shadow',
+                };
             } catch (e) {
                 showToast('Failed to load intelligence stats: ' + e.message, 'error');
             } finally {
