@@ -38,4 +38,12 @@ interface SocialPlatformInterface
      * Returns empty array on error — callers must not throw.
      */
     public function getRecentPosts(SocialAccount $account, int $limit = 20): array;
+
+    /**
+     * Test whether the stored access token is still valid.
+     * Makes a lightweight read-only API call.
+     * Returns ['healthy' => bool, 'error' => ?string].
+     * Must never throw — catch all Throwable internally.
+     */
+    public function testConnection(SocialAccount $account): array;
 }

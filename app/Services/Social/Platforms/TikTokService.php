@@ -294,4 +294,21 @@ class TikTokService implements SocialPlatformInterface
             return [];
         }
     }
+
+    public function testConnection(SocialAccount $account): array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withToken($account->access_token)
+                ->post('https://open.tiktokapis.com/v2/user/info/', [
+                    'fields' => ['open_id', 'display_name'],
+                ]);
+            if ($response->successful() && $response->json('data.user.open_id')) {
+                return ['healthy' => true, 'error' => null];
+            }
+            return ['healthy' => false, 'error' => 'TikTok: ' . ($response->json('error.message') ?? $response->status())];
+        } catch (\Throwable $e) {
+            return ['healthy' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

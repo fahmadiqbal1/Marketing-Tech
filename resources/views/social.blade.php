@@ -60,21 +60,32 @@
                                         </div>
                                         <div class="bg-amber-500/20 text-amber-400 text-xs rounded px-2 py-1 mt-1">This exact URL must be added to your app's Authorized Redirect URIs</div>
                                     </div>
-                                    <div class="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label class="text-xs text-slate-400 mb-1 block">Client ID</label>
-                                            <input x-model="cred.client_id" type="text" class="form-input w-full" placeholder="App ID / Client ID">
+                                    <template x-for="field in platformFields[cred.platform] || defaultFields" :key="field.key">
+                                        <div class="mt-2">
+                                            <label class="text-xs text-slate-400 mb-1 block" x-text="field.label + (field.required ? '' : ' (optional)')"></label>
+                                            <input
+                                                :type="field.type || 'text'"
+                                                :value="cred.fields[field.key] || ''"
+                                                @input="cred.fields[field.key] = $event.target.value"
+                                                class="form-input w-full"
+                                                :placeholder="field.label">
                                         </div>
-                                        <div>
-                                            <label class="text-xs text-slate-400 mb-1 block">Client Secret</label>
-                                            <input x-model="cred.client_secret" type="password" class="form-input w-full" placeholder="App Secret / Client Secret">
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2 mt-2">
-                                        <button @click="saveAndVerify(cred)" class="btn-primary px-3 py-1.5 text-xs">Save & Verify</button>
-                                        <span x-show="cred.status === 'verified'" class="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-xs">Verified <span x-text="cred.last_tested_at"></span></span>
-                                        <span x-show="cred.status === 'needs_attention'" class="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded text-xs">Needs attention</span>
-                                        <span x-show="cred.status === 'not_configured'" class="bg-red-500/20 text-red-400 px-2 py-0.5 rounded text-xs">Not configured</span>
+                                    </template>
+                                    <div class="flex items-center gap-2 mt-3">
+                                        <button @click="saveAndVerify(cred)" :disabled="cred.saving" class="btn-primary px-3 py-1.5 text-xs disabled:opacity-50">
+                                            <span x-show="!cred.saving">Save & Verify</span>
+                                            <span x-show="cred.saving">Verifying…</span>
+                                        </button>
+                                        <span x-show="cred.status === 'verified'" class="flex items-center gap-1 bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-xs">
+                                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                            Verified<span x-show="cred.platform_user" x-text="' — ' + cred.platform_user"></span>
+                                        </span>
+                                        <span x-show="cred.status === 'saved'" class="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded text-xs">Saved — not verified</span>
+                                        <span x-show="cred.status === 'not_configured'" class="bg-slate-700 text-slate-400 px-2 py-0.5 rounded text-xs">Not configured</span>
+                                        <span x-show="cred.status === 'needs_attention'" class="flex items-center gap-1 bg-red-500/20 text-red-400 px-2 py-0.5 rounded text-xs">
+                                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                            Verification failed
+                                        </span>
                                     </div>
                                     <div x-show="cred.last_test_error" class="text-xs text-red-400 mt-1">Error: <span x-text="cred.last_test_error"></span></div>
                                 </div>
@@ -86,34 +97,68 @@
         function credentialsComponent() {
             return {
                 credentials: [],
+                platformFields: {
+                    twitter:   [
+                        {key:'client_id',     label:'Client ID',              type:'text',     required:true},
+                        {key:'client_secret', label:'Client Secret',          type:'password', required:true},
+                        {key:'bearer_token',  label:'Bearer Token',           type:'password', required:false},
+                    ],
+                    tiktok:    [
+                        {key:'client_id',     label:'Client Key',             type:'text',     required:true},
+                        {key:'client_secret', label:'Client Secret',          type:'password', required:true},
+                    ],
+                    instagram: [{key:'client_id', label:'App ID',         type:'text',     required:true}, {key:'client_secret', label:'App Secret',     type:'password', required:true}],
+                    linkedin:  [{key:'client_id', label:'Client ID',      type:'text',     required:true}, {key:'client_secret', label:'Client Secret',  type:'password', required:true}],
+                    facebook:  [{key:'client_id', label:'App ID',         type:'text',     required:true}, {key:'client_secret', label:'App Secret',     type:'password', required:true}],
+                    youtube:   [{key:'client_id', label:'OAuth Client ID',type:'text',     required:true}, {key:'client_secret', label:'Client Secret',  type:'password', required:true}],
+                },
+                defaultFields: [
+                    {key:'client_id',     label:'Client ID',     type:'text',     required:true},
+                    {key:'client_secret', label:'Client Secret', type:'password', required:true},
+                ],
                 async init() {
                     const res = await fetch('/dashboard/api/social-credentials');
-                    this.credentials = await res.json();
+                    const data = await res.json();
+                    this.credentials = data.map(c => ({ ...c, fields: {}, saving: false, platform_user: null }));
                 },
                 async saveAndVerify(cred) {
+                    const fields = this.platformFields[cred.platform] || this.defaultFields;
+                    const requiredMissing = fields.filter(f => f.required && !cred.fields[f.key]);
+                    if (requiredMissing.length) {
+                        cred.last_test_error = 'Please fill in: ' + requiredMissing.map(f => f.label).join(', ');
+                        cred.status = 'needs_attention';
+                        return;
+                    }
+                    cred.saving = true;
+                    cred.last_test_error = null;
                     try {
+                        const payload = {
+                            platform:      cred.platform,
+                            client_id:     cred.fields.client_id || '',
+                            client_secret: cred.fields.client_secret || '',
+                        };
+                        if (cred.fields.bearer_token) payload.bearer_token = cred.fields.bearer_token;
+
                         const res = await fetch('/dashboard/api/social-credentials', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                platform: cred.platform,
-                                client_id: cred.client_id,
-                                client_secret: cred.client_secret
-                            })
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+                            body: JSON.stringify(payload)
                         });
+                        const data = await res.json();
                         if (!res.ok) {
-                            const data = await res.json();
-                            cred.last_test_error = data.error || 'Unknown error';
+                            cred.last_test_error = data.error || 'Verification failed';
                             cred.status = 'needs_attention';
                         } else {
-                            const data = await res.json();
                             cred.status = data.status;
-                            cred.last_tested_at = data.last_tested_at;
+                            cred.platform_user = data.platform_user || null;
+                            cred.validated_at = data.tested_at;
                             cred.last_test_error = null;
                         }
                     } catch (e) {
                         cred.last_test_error = e.message;
                         cred.status = 'needs_attention';
+                    } finally {
+                        cred.saving = false;
                     }
                 },
                 copyToClipboard(text) {
@@ -337,7 +382,7 @@
                 {{-- Info banner: all platforms use real OAuth --}}
                 <div class="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/8 px-4 py-3 text-xs text-sky-300">
                     <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <span>All platforms use real OAuth 2.0. Click <strong>Connect</strong> to authorise via the official platform login. Credentials must be set in <code class="bg-slate-800 px-1 rounded">.env</code> first.</span>
+                    <span>All platforms use real OAuth 2.0. Click <strong>Connect</strong> to authorise via the official platform login. Configure credentials in the <strong>Settings</strong> tab first, then connect accounts.</span>
                 </div>
 
                 {{-- Skeleton accounts --}}

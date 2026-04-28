@@ -200,4 +200,21 @@ class InstagramService implements SocialPlatformInterface
             return [];
         }
     }
+
+    public function testConnection(SocialAccount $account): array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->get('https://graph.instagram.com/me', [
+                    'fields'       => 'id,username',
+                    'access_token' => $account->access_token,
+                ]);
+            if ($response->successful() && $response->json('id')) {
+                return ['healthy' => true, 'error' => null];
+            }
+            return ['healthy' => false, 'error' => 'Instagram: ' . ($response->json('error.message') ?? $response->status())];
+        } catch (\Throwable $e) {
+            return ['healthy' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

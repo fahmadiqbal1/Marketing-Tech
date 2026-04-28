@@ -27,7 +27,14 @@ class DispatchScheduledPosts implements ShouldQueue
 
     public function handle(SocialPlatformService $social, IterationEngineService $iteration): void
     {
-        $entries = ContentCalendar::scheduledNow()->get();
+        $entries = ContentCalendar::scheduledNow()->get()
+            ->sortBy(function ($e) {
+                // Priority: 0=overdue>30min, 1=due within 5min, 2=normal
+                if ($e->scheduled_at->lt(now()->subMinutes(30))) return 0;
+                if ($e->scheduled_at->lt(now()->addMinutes(5)))  return 1;
+                return 2;
+            })
+            ->values();
 
         if ($entries->isEmpty()) {
             return;
@@ -35,7 +42,13 @@ class DispatchScheduledPosts implements ShouldQueue
 
         Log::info("DispatchScheduledPosts: processing {$entries->count()} entries");
 
+        // Track which platforms are exhausted this run to avoid redundant checks
+        $exhaustedPlatforms = [];
+
         foreach ($entries as $entry) {
+            if (isset($exhaustedPlatforms[$entry->platform])) {
+                continue;
+            }
             try {
                 $posted = false;
                 $result = [];
@@ -54,15 +67,19 @@ class DispatchScheduledPosts implements ShouldQueue
                             ]);
                             $posted = true;
                         } catch (\RuntimeException $e) {
-                            // Rate limited — check if RATE_LIMITED signal and re-queue with backoff
                             if (str_starts_with($e->getMessage(), 'RATE_LIMITED:')) {
                                 $delay = SocialPlatformService::backoffSeconds($entry->retry_count + 1);
                                 $entry->increment('retry_count');
                                 $entry->update(['last_error' => 'Rate limited — retry in '.$delay.'s']);
                                 Log::warning("Rate limited for entry {$entry->id}. Retry in {$delay}s.");
                                 SystemEvent::create(['level' => 'warning', 'message' => "Rate limited [{$account->platform}] @{$account->handle} — \"{$entry->title}\" delayed {$delay}s (retry {$entry->retry_count}/3)"]);
-
-                                continue; // Scheduler will re-pick up next minute
+                                continue;
+                            }
+                            if (str_starts_with($e->getMessage(), 'DAILY_QUOTA_EXCEEDED:')) {
+                                $exhaustedPlatforms[$entry->platform] = true;
+                                $entry->update(['last_error' => 'Daily quota exceeded — will retry tomorrow']);
+                                SystemEvent::create(['level' => 'warning', 'message' => "Daily quota exceeded for {$entry->platform} — skipping remaining entries"]);
+                                continue;
                             }
                             throw $e;
                         }

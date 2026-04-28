@@ -243,4 +243,19 @@ class TwitterService implements SocialPlatformInterface
             return [];
         }
     }
+
+    public function testConnection(SocialAccount $account): array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withToken($account->access_token)
+                ->get(self::BASE_URL . '/2/users/me', ['user.fields' => 'id,name,username']);
+            if ($response->successful() && $response->json('data.id')) {
+                return ['healthy' => true, 'error' => null];
+            }
+            return ['healthy' => false, 'error' => 'Twitter: ' . ($response->json('detail') ?? $response->status())];
+        } catch (\Throwable $e) {
+            return ['healthy' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

@@ -14,7 +14,8 @@ class SocialAccount extends Model
         'business_id',
         'platform', 'handle', 'display_name', 'platform_user_id',
         'access_token', 'refresh_token', 'token_expires_at',
-        'is_connected', 'follower_count', 'avg_engagement_rate',
+        'is_connected', 'connection_healthy', 'last_tested_at',
+        'follower_count', 'avg_engagement_rate',
         'metadata', 'last_error', 'last_synced_at',
     ];
 
@@ -38,8 +39,10 @@ class SocialAccount extends Model
         'metadata'          => 'array',
         'token_expires_at'  => 'datetime',
         'last_synced_at'    => 'datetime',
-        'is_connected'      => 'boolean',
-        'follower_count'    => 'integer',
+        'is_connected'       => 'boolean',
+        'connection_healthy' => 'boolean',
+        'last_tested_at'     => 'datetime',
+        'follower_count'     => 'integer',
         'avg_engagement_rate' => 'float',
     ];
 

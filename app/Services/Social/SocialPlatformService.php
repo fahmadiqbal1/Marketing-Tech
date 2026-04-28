@@ -12,6 +12,7 @@ use App\Services\Social\Platforms\TikTokService;
 use App\Services\Social\Platforms\TwitterService;
 use App\Services\Social\Platforms\YouTubeService;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Log;
 
 class SocialPlatformService
@@ -65,11 +66,30 @@ class SocialPlatformService
         $key      = "social-post:{$account->platform}:{$account->id}";
         $perMin   = $this->rateLimit($account->platform);
 
+        // Check Retry-After key from previous 429 response
+        if (Redis::exists("social:retry_after:{$account->platform}")) {
+            $wait = (int) Redis::get("social:retry_after:{$account->platform}");
+            throw new \RuntimeException("RATE_LIMITED:{$wait}");
+        }
+
+        // Check daily quota
+        $dailyKey = "social:quota:{$account->platform}:" . now()->toDateString();
+        $dailyCount = (int) Redis::get($dailyKey);
+        if ($dailyCount >= $this->dailyLimit($account->platform)) {
+            throw new \RuntimeException("DAILY_QUOTA_EXCEEDED:{$account->platform}");
+        }
+
         $executed = RateLimiter::attempt(
             $key,
             perMinute: $perMin,
-            callback: function () use ($account, $entry) {
-                return $this->driver($account->platform)->publish($account, $entry);
+            callback: function () use ($account, $entry, $dailyKey) {
+                $result = $this->driver($account->platform)->publish($account, $entry);
+                // Increment daily quota counter on successful publish
+                $count = Redis::incr($dailyKey);
+                if ($count === 1) {
+                    Redis::expireAt($dailyKey, now()->endOfDay()->timestamp);
+                }
+                return $result;
             },
             decaySeconds: 60
         );
@@ -81,6 +101,37 @@ class SocialPlatformService
         }
 
         return $executed;
+    }
+
+    public function dailyLimit(string $platform): int
+    {
+        return match ($platform) {
+            'youtube'   => 6,
+            'tiktok'    => 200,
+            'linkedin'  => 150,
+            'instagram' => 200,
+            'twitter'   => 500,
+            'facebook'  => 200,
+            default     => 100,
+        };
+    }
+
+    public function getQuotaStatus(): array
+    {
+        $today  = now()->toDateString();
+        $result = [];
+        foreach (self::platforms() as $platform) {
+            $used       = (int) Redis::get("social:quota:{$platform}:{$today}");
+            $retryAfter = Redis::get("social:retry_after:{$platform}");
+            $result[$platform] = [
+                'used'          => $used,
+                'limit'         => $this->dailyLimit($platform),
+                'resets_at'     => now()->endOfDay()->toIso8601String(),
+                'rate_limited'  => (bool) $retryAfter,
+                'retry_after_s' => $retryAfter ? (int) $retryAfter : null,
+            ];
+        }
+        return $result;
     }
 
     /**

@@ -241,4 +241,19 @@ class LinkedInService implements SocialPlatformInterface
             return [];
         }
     }
+
+    public function testConnection(SocialAccount $account): array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withToken($account->access_token)
+                ->get('https://api.linkedin.com/v2/me');
+            if ($response->successful() && $response->json('id')) {
+                return ['healthy' => true, 'error' => null];
+            }
+            return ['healthy' => false, 'error' => 'LinkedIn: ' . ($response->json('message') ?? $response->status())];
+        } catch (\Throwable $e) {
+            return ['healthy' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

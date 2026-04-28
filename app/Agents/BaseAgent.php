@@ -22,6 +22,9 @@ use Illuminate\Support\Str;
 
 abstract class BaseAgent
 {
+    use \App\Agents\Concerns\HookableTrait;
+    use \App\Agents\Concerns\ValidatesOutput;
+
     protected string $agentType;
     protected string $provider    = 'openai';
     protected string $model;
@@ -138,6 +141,8 @@ abstract class BaseAgent
 
         $job->update(['status' => 'running', 'started_at' => now()]);
         $this->notifyUser($job, "⚡ *{$this->agentType}* agent started...");
+
+        $this->fireHook('before_run', $job);
 
         [$messages, $knowledgeScores] = $this->buildInitialMessages($job);
         $stepCount   = 0;
@@ -295,6 +300,14 @@ abstract class BaseAgent
             if ($stepCount >= $this->maxSteps && $result === null) {
                 $result = "Agent reached maximum steps ({$this->maxSteps}). Partial work may have been completed.";
                 Log::warning('Agent hit max steps', ['trace_id' => $traceId, 'agent' => $this->agentType]);
+                $this->fireHook('after_run', $job, 'EXHAUSTED');
+                \Illuminate\Support\Facades\DB::table('agent_dead_letters')->insert([
+                    'agent_job_id' => $job->id,
+                    'agent_type'   => $this->agentType,
+                    'reason'       => 'max_steps_exhausted',
+                    'last_step'    => $stepCount,
+                    'created_at'   => now(),
+                ]);
             }
 
             $job->update([
@@ -353,6 +366,11 @@ abstract class BaseAgent
                 'total_tokens' => $totalTokens,
             ]);
 
+            if ($result !== null) {
+                $result = $this->assertOutput($result);
+            }
+
+            $this->fireHook('after_run', $job, $result);
             $this->notifyUser($job, "✅ *{$this->agentType}* completed:\n\n{$result}");
 
             // ── Persist cross-job learnings to knowledge base ──────────
@@ -512,6 +530,7 @@ abstract class BaseAgent
         while ($attempt <= $this->toolMaxRetries) {
             $attempt++;
             try {
+                $this->fireHook('before_tool', $name, $args);
                 $result = $this->dispatchTool($name, $args, $job);
 
                 // Basic validation: result must be non-null and non-empty
@@ -522,6 +541,7 @@ abstract class BaseAgent
                 // Structural validation: subclasses may define expected result shapes
                 $this->validateToolResult($name, $result);
 
+                $this->fireHook('after_tool', $name, $result);
                 $this->iterationEngine->recordToolOutcome($name, true);
                 return [$result, true, null];
 

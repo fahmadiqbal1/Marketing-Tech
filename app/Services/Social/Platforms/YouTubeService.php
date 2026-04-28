@@ -308,4 +308,22 @@ class YouTubeService implements SocialPlatformInterface
             return [];
         }
     }
+
+    public function testConnection(SocialAccount $account): array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withToken($account->access_token)
+                ->get('https://www.googleapis.com/youtube/v3/channels', [
+                    'mine' => 'true',
+                    'part' => 'id',
+                ]);
+            if ($response->successful() && $response->json('pageInfo.totalResults') > 0) {
+                return ['healthy' => true, 'error' => null];
+            }
+            return ['healthy' => false, 'error' => 'YouTube: ' . ($response->json('error.message') ?? $response->status())];
+        } catch (\Throwable $e) {
+            return ['healthy' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

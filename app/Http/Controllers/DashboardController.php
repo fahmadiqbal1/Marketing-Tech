@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\EvaluateSocialAccount;
+use App\Jobs\TestSocialConnectionJob;
 use App\Jobs\IngestAiPlatformCapabilities;
 use App\Jobs\IngestGitHubRepo;
 use App\Jobs\IngestMcpServerCapabilities;
@@ -871,6 +872,7 @@ class DashboardController extends Controller
                 ]
             );
             EvaluateSocialAccount::dispatch($account->id, 'instagram');
+            TestSocialConnectionJob::dispatch($account);
 
             return redirect('/dashboard/social')->with('success', 'Instagram connected successfully');
         } catch (\Throwable $e) {
@@ -921,6 +923,7 @@ class DashboardController extends Controller
                 ]
             );
             EvaluateSocialAccount::dispatch($account->id, 'twitter');
+            TestSocialConnectionJob::dispatch($account);
             session()->forget(['oauth_twitter_verifier', 'oauth_twitter_state']);
             return redirect('/dashboard/social')->with('success', 'Twitter / X connected successfully.');
         } catch (\Throwable $e) {
@@ -997,6 +1000,7 @@ class DashboardController extends Controller
                 ]
             );
             EvaluateSocialAccount::dispatch($account->id, 'linkedin');
+            TestSocialConnectionJob::dispatch($account);
             session()->forget('oauth_linkedin_state');
             $orgMsg = $defaultOrgUrn ? ' (' . count($organizations) . ' organization(s) found)' : '';
             return redirect('/dashboard/social')->with('success', "LinkedIn connected successfully{$orgMsg}.");
@@ -1064,6 +1068,7 @@ class DashboardController extends Controller
                     ]
                 );
                 EvaluateSocialAccount::dispatch($fbAccount->id, 'facebook');
+                TestSocialConnectionJob::dispatch($fbAccount);
                 $pageCount++;
             }
 
@@ -1085,6 +1090,7 @@ class DashboardController extends Controller
                     ]
                 );
                 EvaluateSocialAccount::dispatch($fbAccount->id, 'facebook');
+                TestSocialConnectionJob::dispatch($fbAccount);
                 $pageCount = 1;
             }
 
@@ -1141,6 +1147,7 @@ class DashboardController extends Controller
                 ]
             );
             EvaluateSocialAccount::dispatch($account->id, 'tiktok');
+            TestSocialConnectionJob::dispatch($account);
             session()->forget(['oauth_tiktok_verifier', 'oauth_tiktok_state']);
             return redirect('/dashboard/social')->with('success', 'TikTok connected successfully.');
         } catch (\Throwable $e) {
@@ -1194,6 +1201,7 @@ class DashboardController extends Controller
                 ]
             );
             EvaluateSocialAccount::dispatch($account->id, 'youtube');
+            TestSocialConnectionJob::dispatch($account);
             session()->forget('oauth_youtube_state');
             return redirect('/dashboard/social')->with('success', "YouTube channel \"{$channelTitle}\" connected successfully.");
         } catch (\Throwable $e) {
@@ -1598,21 +1606,42 @@ class DashboardController extends Controller
             'youtube'   => ['id_key' => 'SOCIAL_YOUTUBE_CLIENT_ID',   'secret_key' => 'SOCIAL_YOUTUBE_CLIENT_SECRET'],
         ];
 
+        $callbackBase = config('app.url') . '/oauth';
+        $setupGuides  = [
+            'twitter'   => 'https://developer.twitter.com/en/portal/dashboard',
+            'instagram' => 'https://developers.facebook.com/apps/',
+            'facebook'  => 'https://developers.facebook.com/apps/',
+            'linkedin'  => 'https://www.linkedin.com/developers/apps',
+            'tiktok'    => 'https://developers.tiktok.com/',
+            'youtube'   => 'https://console.cloud.google.com/',
+        ];
+
         $result = [];
         foreach ($platforms as $platform => $keys) {
             $clientId     = $this->credentials->retrieve($keys['id_key']) ?? '';
             $clientSecret = $this->credentials->retrieve($keys['secret_key']) ?? '';
-            $isConfigured = ! empty($clientId) && ! str_contains($clientId, 'CHANGE_ME')
+            $hasValue     = ! empty($clientId) && ! str_contains($clientId, 'CHANGE_ME')
                          && ! empty($clientSecret) && ! str_contains($clientSecret, 'CHANGE_ME');
+
+            // Determine 4-state status from api_credentials DB row
+            $credRow = \App\Models\ApiCredential::where('env_key', $keys['id_key'])->first();
+            $status  = match (true) {
+                ! $hasValue                                      => 'not_configured',
+                $credRow?->is_valid && $credRow?->validated_at  => 'verified',
+                $hasValue                                        => 'saved',
+                default                                          => 'not_configured',
+            };
 
             $result[] = [
                 'platform'        => $platform,
-                'client_id'       => $isConfigured ? substr($clientId, 0, 8) . str_repeat('*', max(0, strlen($clientId) - 8)) : '',
-                'client_secret'   => $isConfigured ? str_repeat('*', 16) : '',
-                'is_configured'   => $isConfigured,
-                'status'          => $isConfigured ? 'configured' : 'missing',
-                'last_tested_at'  => null,
+                'client_id'       => $hasValue ? substr($clientId, 0, 8) . str_repeat('*', max(0, strlen($clientId) - 8)) : '',
+                'client_secret'   => $hasValue ? str_repeat('*', 16) : '',
+                'is_configured'   => $hasValue,
+                'status'          => $status,
+                'validated_at'    => $credRow?->validated_at?->toIso8601String(),
                 'last_test_error' => null,
+                'callback_url'    => "{$callbackBase}/{$platform}/callback",
+                'setup_guide'     => $setupGuides[$platform] ?? '#',
             ];
         }
 
@@ -1625,6 +1654,7 @@ class DashboardController extends Controller
             'platform'      => 'required|string|in:instagram,twitter,linkedin,facebook,tiktok,youtube',
             'client_id'     => 'required|string|min:4',
             'client_secret' => 'required|string|min:4',
+            'bearer_token'  => 'nullable|string|min:4',
         ]);
 
         $platform = $validated['platform'];
@@ -1638,10 +1668,167 @@ class DashboardController extends Controller
         $this->credentials->store($platform, $idKey, $validated['client_id']);
         $this->credentials->store($platform, $secretKey, $validated['client_secret']);
 
+        if (! empty($validated['bearer_token']) && $platform === 'twitter') {
+            $this->credentials->store('twitter', 'SOCIAL_TWITTER_BEARER_TOKEN', $validated['bearer_token']);
+        }
+
+        // Re-inject into config so the verify call below uses the freshly saved values
+        app(\App\Providers\SocialCredentialServiceProvider::class)->boot();
+
+        return $this->apiVerifySocialCredentials($request, $platform);
+    }
+
+    public function apiVerifySocialCredentials(Request $request, string $platform): JsonResponse
+    {
+        $clientId     = $this->credentials->retrieve(match ($platform) {
+            'tiktok' => 'SOCIAL_TIKTOK_CLIENT_KEY',
+            default  => 'SOCIAL_' . strtoupper($platform) . '_CLIENT_ID',
+        });
+        $clientSecret = $this->credentials->retrieve('SOCIAL_' . strtoupper($platform) . '_CLIENT_SECRET');
+
+        if (empty($clientId) || empty($clientSecret)) {
+            return response()->json(['verified' => false, 'error' => 'Credentials not configured.'], 422);
+        }
+
+        try {
+            [$verified, $platformUser, $error] = match ($platform) {
+                'twitter'   => $this->verifyTwitterAppCredentials($clientId, $clientSecret),
+                'instagram' => $this->verifyMetaAppCredentials($clientId, $clientSecret),
+                'facebook'  => $this->verifyMetaAppCredentials($clientId, $clientSecret),
+                'linkedin'  => $this->verifyLinkedInAppCredentials($clientId, $clientSecret),
+                'tiktok'    => $this->verifyTikTokAppCredentials($clientId, $clientSecret),
+                'youtube'   => [false, null, 'YouTube credentials verified after OAuth connect flow.'],
+                default     => [false, null, 'Unknown platform'],
+            };
+        } catch (\Throwable $e) {
+            return response()->json(['verified' => false, 'error' => $e->getMessage()], 422);
+        }
+
+        if ($verified) {
+            // Mark credential row as validated
+            \App\Models\ApiCredential::where('env_key', match ($platform) {
+                'tiktok' => 'SOCIAL_TIKTOK_CLIENT_KEY',
+                default  => 'SOCIAL_' . strtoupper($platform) . '_CLIENT_ID',
+            })->update(['validated_at' => now()]);
+        }
+
+        if (! $verified) {
+            return response()->json(['verified' => false, 'platform' => $platform, 'error' => $error], 422);
+        }
+
         return response()->json([
-            'status'         => 'configured',
-            'platform'       => $platform,
-            'last_tested_at' => now()->toIso8601String(),
+            'verified'      => true,
+            'status'        => 'verified',
+            'platform'      => $platform,
+            'platform_user' => $platformUser,
+            'tested_at'     => now()->toIso8601String(),
         ]);
+    }
+
+    private function verifyTwitterAppCredentials(string $clientId, string $clientSecret): array
+    {
+        $response = Http::timeout(10)
+            ->withBasicAuth($clientId, $clientSecret)
+            ->asForm()
+            ->post('https://api.twitter.com/oauth2/token', ['grant_type' => 'client_credentials']);
+
+        if ($response->successful() && ! empty($response->json('access_token'))) {
+            return [true, 'Twitter App', null];
+        }
+
+        return [false, null, 'Twitter: ' . ($response->json('error_description') ?? $response->status())];
+    }
+
+    private function verifyMetaAppCredentials(string $appId, string $appSecret): array
+    {
+        $response = Http::timeout(10)->get('https://graph.facebook.com/oauth/access_token', [
+            'client_id'     => $appId,
+            'client_secret' => $appSecret,
+            'grant_type'    => 'client_credentials',
+        ]);
+
+        if ($response->successful() && ! empty($response->json('access_token'))) {
+            return [true, 'Meta App', null];
+        }
+
+        return [false, null, 'Meta: ' . ($response->json('error.message') ?? $response->status())];
+    }
+
+    private function verifyLinkedInAppCredentials(string $clientId, string $clientSecret): array
+    {
+        $response = Http::timeout(10)->asForm()->post('https://www.linkedin.com/oauth/v2/accessToken', [
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $clientId,
+            'client_secret' => $clientSecret,
+        ]);
+
+        if ($response->successful() && ! empty($response->json('access_token'))) {
+            return [true, 'LinkedIn App', null];
+        }
+
+        return [false, null, 'LinkedIn: ' . ($response->json('error_description') ?? $response->status())];
+    }
+
+    private function verifyTikTokAppCredentials(string $clientKey, string $clientSecret): array
+    {
+        $response = Http::timeout(10)->asForm()->post('https://open-api.tiktok.com/oauth/access_token/v2/', [
+            'client_key'    => $clientKey,
+            'client_secret' => $clientSecret,
+            'grant_type'    => 'client_credential',
+        ]);
+
+        if ($response->successful() && $response->json('data.error_code') === 0) {
+            return [true, 'TikTok App', null];
+        }
+
+        return [false, null, 'TikTok: ' . ($response->json('data.description') ?? $response->status())];
+    }
+
+    public function apiTestSocialAccount(string $id): JsonResponse
+    {
+        $account = \App\Models\SocialAccount::withoutGlobalScopes()->findOrFail($id);
+
+        try {
+            $result = app(\App\Services\Social\SocialPlatformService::class)
+                ->driver($account->platform)
+                ->testConnection($account);
+        } catch (\Throwable $e) {
+            $result = ['healthy' => false, 'error' => $e->getMessage()];
+        }
+
+        $account->update([
+            'connection_healthy' => $result['healthy'],
+            'last_tested_at'     => now(),
+            'last_error'         => $result['error'] ?? null,
+        ]);
+
+        return response()->json([
+            'healthy'    => $result['healthy'],
+            'tested_at'  => now()->toIso8601String(),
+            'error'      => $result['error'] ?? null,
+        ]);
+    }
+
+    public function apiSocialQuotaStatus(): JsonResponse
+    {
+        $platforms = ['twitter', 'instagram', 'linkedin', 'facebook', 'tiktok', 'youtube'];
+        $limits    = ['youtube' => 6, 'tiktok' => 200, 'linkedin' => 150, 'instagram' => 200, 'twitter' => 500, 'facebook' => 200];
+        $today     = now()->toDateString();
+        $result    = [];
+
+        foreach ($platforms as $platform) {
+            $used      = (int) \Illuminate\Support\Facades\Redis::get("social:quota:{$platform}:{$today}");
+            $limit     = $limits[$platform] ?? 100;
+            $retryAfter = \Illuminate\Support\Facades\Redis::get("social:retry_after:{$platform}");
+            $result[$platform] = [
+                'used'          => $used,
+                'limit'         => $limit,
+                'resets_at'     => now()->endOfDay()->toIso8601String(),
+                'rate_limited'  => (bool) $retryAfter,
+                'retry_after_s' => $retryAfter ? (int) $retryAfter : null,
+            ];
+        }
+
+        return response()->json($result);
     }
 }

@@ -22,6 +22,7 @@ return [
     'twitter' => [
         'client_id'     => env('SOCIAL_TWITTER_CLIENT_ID'),
         'client_secret' => env('SOCIAL_TWITTER_CLIENT_SECRET'),
+        'bearer_token'  => env('SOCIAL_TWITTER_BEARER_TOKEN'),
         'redirect_uri'  => env('SOCIAL_TWITTER_REDIRECT_URI'),
     ],
 

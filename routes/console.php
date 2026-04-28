@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\AutoReplenishContent;
+use App\Jobs\CheckAllSocialAccountHealth;
 use App\Jobs\DispatchScheduledPosts;
 use App\Jobs\FetchSocialMetrics;
 use App\Jobs\ProcessTrends;
@@ -28,6 +29,9 @@ Schedule::job(new ProcessTrends, 'low')->everyFourHours();
 
 // Social: refresh OAuth tokens expiring within 24h (queue: low)
 Schedule::job(new RefreshSocialTokens, 'low')->dailyAt('03:00');
+
+// Social: re-validate connected account tokens every hour (queue: low)
+Schedule::job(new CheckAllSocialAccountHealth, 'low')->hourly();
 
 // Hiring: prune rejected candidates older than 30 days (queue: low)
 use App\Jobs\PruneRejectedCandidates;

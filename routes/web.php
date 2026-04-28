@@ -209,6 +209,9 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
 
             // Social platform OAuth app credentials
             Route::post('/social-credentials', [DashboardController::class, 'apiStoreSocialCredentials']);
+            Route::post('/social-credentials/{platform}/verify', [DashboardController::class, 'apiVerifySocialCredentials']);
+            Route::post('/social-accounts/{id}/test', [DashboardController::class, 'apiTestSocialAccount']);
+            Route::get('/social/quota-status', [DashboardController::class, 'apiSocialQuotaStatus']);
         });
 
         // ── Heavy / expensive operations ──────────────────────────────────────────
