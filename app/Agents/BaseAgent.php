@@ -101,7 +101,8 @@ abstract class BaseAgent
      */
     protected function getRagCategories(): array
     {
-        return array_filter([$this->agentType, 'general', 'agent-skills']);
+        // 'brand' included so BrandBrainService identity is always present in agent context
+        return array_filter([$this->agentType, 'general', 'agent-skills', 'brand']);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Services\AI;
 
 use App\Models\AiRequest;
 use App\Models\CustomAiPlatform;
+use App\Services\AI\BanditModelSelector;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -351,6 +352,13 @@ class AIRouter
         if ($preference === 'openai') {
             return config('agents.openai.default_model', 'gpt-4o');
         }
+
+        // UCB1 bandit routing when enabled — learns the best model per task type over time
+        if (config('agents.bandit_model_selection', false)) {
+            $taskType = strlen($prompt) < 500 ? 'classification' : 'content';
+            return BanditModelSelector::choose($taskType);
+        }
+
         return strlen($prompt) < 500
             ? 'gpt-4o-mini'
             : config('agents.openai.default_model', 'gpt-4o');

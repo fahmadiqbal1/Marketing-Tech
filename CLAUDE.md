@@ -177,7 +177,7 @@ changes or unpushed commits. Resolve immediately; do not continue with a dirty t
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Marketing-Tech** (2984 symbols, 8347 relationships, 243 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Marketing-Tech** (2996 symbols, 8361 relationships, 244 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

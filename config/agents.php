@@ -44,6 +44,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Intelligence Layer (StrategicAgent + Bandit Routing + Budget)
+    |--------------------------------------------------------------------------
+    | strategic_layer_enabled — gates the entire strategic evaluation pipeline
+    | strategic_mode          — shadow (log only) | advisory (suggest) | active (modify/block)
+    | strategic_model         — LLM used by StrategicAgent (cheap, fast, structured)
+    | bandit_model_selection  — enable UCB1 adaptive model routing
+    | budget_tracking         — track per-domain AI spend
+    | budget_enforced         — hard-block when budget exceeded (advisory only when false)
+    */
+    'strategic_layer_enabled' => (bool) env('STRATEGIC_LAYER_ENABLED', false),
+    'strategic_mode'          => env('STRATEGIC_MODE', 'shadow'),
+    'strategic_model'         => env('STRATEGIC_MODEL', 'gpt-4o-mini'),
+    'bandit_model_selection'  => (bool) env('BANDIT_MODEL_SELECTION', false),
+    'budget_tracking'         => (bool) env('BUDGET_TRACKING', true),
+    'budget_enforced'         => (bool) env('BUDGET_ENFORCED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Agent Definitions
     |--------------------------------------------------------------------------
     | Each agent has: class, queue, model preference, system_prompt, tools

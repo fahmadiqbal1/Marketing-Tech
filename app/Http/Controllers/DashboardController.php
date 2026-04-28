@@ -1831,4 +1831,70 @@ class DashboardController extends Controller
 
         return response()->json($result);
     }
+
+    // ── Intelligence Dashboard ────────────────────────────────────
+
+    public function intelligence(): \Illuminate\View\View
+    {
+        return view('intelligence');
+    }
+
+    public function apiIntelligenceStats(): JsonResponse
+    {
+        // Strategic decision summary
+        $decisions = \Illuminate\Support\Facades\DB::table('strategic_decisions')
+            ->selectRaw('
+                COUNT(*) as total,
+                AVG(confidence) as avg_confidence,
+                AVG(outcome_score) as avg_outcome,
+                SUM(CASE WHEN action = \'APPROVE\' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN action = \'MODIFY\' THEN 1 ELSE 0 END) as modified,
+                SUM(CASE WHEN action = \'REJECT\' THEN 1 ELSE 0 END) as rejected,
+                SUM(CASE WHEN action = \'DELAY\' THEN 1 ELSE 0 END) as delayed
+            ')
+            ->where('created_at', '>=', now()->subDays(30))
+            ->first();
+
+        // Model performance leaderboard
+        $modelPerformance = \Illuminate\Support\Facades\DB::table('model_performance')
+            ->orderByDesc('score')
+            ->limit(10)
+            ->get(['model_name', 'task_type', 'pulls', 'score', 'avg_latency_ms', 'avg_cost_usd']);
+
+        // Budget status
+        $budgets = \App\Services\BudgetAllocator::getStatus();
+
+        // Recent strategic insights
+        $insights = \Illuminate\Support\Facades\DB::table('strategic_insights')
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->orderByDesc('confidence')
+            ->limit(12)
+            ->get(['domain', 'insight', 'confidence', 'sample_size', 'extracted_at']);
+
+        // Domain outcome scores (last 30 days)
+        $outcomes = \Illuminate\Support\Facades\DB::table('agent_outcomes')
+            ->select('domain', \Illuminate\Support\Facades\DB::raw('AVG(value) as avg_score, COUNT(*) as count'))
+            ->where('created_at', '>=', now()->subDays(30))
+            ->groupBy('domain')
+            ->get();
+
+        // User feedback distribution
+        $feedback = \Illuminate\Support\Facades\DB::table('agent_feedback')
+            ->select('user_action', \Illuminate\Support\Facades\DB::raw('COUNT(*) as count'))
+            ->where('created_at', '>=', now()->subDays(30))
+            ->groupBy('user_action')
+            ->pluck('count', 'user_action');
+
+        return response()->json([
+            'decisions'        => $decisions,
+            'model_performance'=> $modelPerformance,
+            'budgets'          => $budgets,
+            'insights'         => $insights,
+            'outcomes'         => $outcomes,
+            'feedback'         => $feedback,
+            'strategic_mode'   => config('agents.strategic_mode', 'shadow'),
+            'layer_enabled'    => config('agents.strategic_layer_enabled', false),
+            'bandit_enabled'   => config('agents.bandit_model_selection', false),
+        ]);
+    }
 }

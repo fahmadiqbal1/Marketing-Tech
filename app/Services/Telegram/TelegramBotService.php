@@ -3,6 +3,7 @@
 namespace App\Services\Telegram;
 
 use App\Agents\AgentOrchestrator;
+use App\Agents\StrategicAgent;
 use App\Jobs\ProcessCampaignRequest;
 use App\Jobs\ProcessHiringRequest;
 use App\Services\AI\OpenAIService;
@@ -219,6 +220,12 @@ class TelegramBotService
     {
         $this->sendTypingIndicator($chatId);
 
+        // ── Strategic evaluation (non-disruptive: disabled when flag is off) ──
+        $text = $this->applyStrategicLayer($text, $chatId, ['domain' => 'general']);
+        if ($text === null) {
+            return; // StrategicAgent blocked in active mode
+        }
+
         if ($this->isHiringIntent($text)) {
             $this->dispatchHiringRequest($chatId, $text);
             return;
@@ -255,6 +262,11 @@ class TelegramBotService
      */
     private function dispatchHiringRequest(int $chatId, string $instruction): void
     {
+        $instruction = $this->applyStrategicLayer($instruction, $chatId, ['domain' => 'hiring']);
+        if ($instruction === null) {
+            return;
+        }
+
         $this->sendTypingIndicator($chatId);
         $this->sendMessage($chatId,
             "📋 *Preparing job post draft...*\n"
@@ -456,6 +468,11 @@ class TelegramBotService
         ?string $mediaKey,
         string  $mediaType,
     ): void {
+        $instruction = $this->applyStrategicLayer($instruction, $chatId, ['domain' => 'campaign']);
+        if ($instruction === null) {
+            return;
+        }
+
         $this->sendTypingIndicator($chatId);
         $this->sendMessage($chatId,
             '🎯 *Analysing your request...*' . "\n"
@@ -463,6 +480,30 @@ class TelegramBotService
 
         ProcessCampaignRequest::dispatch($chatId, $instruction, $mediaKey, $mediaType)
             ->onQueue('agents');
+    }
+
+    // ── Strategic layer ──────────────────────────────────────────
+
+    /**
+     * Run StrategicAgent evaluation and apply its decision.
+     * Returns the (possibly modified) instruction, or null if blocked.
+     * Zero-cost when STRATEGIC_LAYER_ENABLED=false.
+     */
+    private function applyStrategicLayer(string $instruction, int $chatId, array $context = []): ?string
+    {
+        if (! config('agents.strategic_layer_enabled', false)) {
+            return $instruction;
+        }
+
+        $decision = StrategicAgent::evaluate($instruction, $context);
+        $mode     = config('agents.strategic_mode', 'shadow');
+
+        return StrategicAgent::apply(
+            decision:    $decision,
+            instruction: $instruction,
+            mode:        $mode,
+            notifyFn:    fn (string $msg) => $this->sendMessage($chatId, $msg),
+        );
     }
 
     // ── Private helpers ───────────────────────────────────────────

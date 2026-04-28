@@ -36,3 +36,15 @@ Schedule::job(new CheckAllSocialAccountHealth, 'low')->hourly();
 // Hiring: prune rejected candidates older than 30 days (queue: low)
 use App\Jobs\PruneRejectedCandidates;
 Schedule::job(new PruneRejectedCandidates, 'low')->dailyAt('02:30');
+
+// Intelligence: extract strategic insights from outcome patterns (daily at 04:00)
+use App\Jobs\ExtractStrategicInsights;
+Schedule::job(new ExtractStrategicInsights, 'low')->dailyAt('04:00');
+
+// Intelligence: score unscored strategic decisions + recalculate domain ROI (every 30 min)
+use App\Jobs\ScoreStrategicDecisions;
+Schedule::job(new ScoreStrategicDecisions, 'low')->everyThirtyMinutes();
+
+// Intelligence: recalculate UCB1 model scores + rebalance budgets (nightly at 01:00)
+use App\Jobs\RecalculateModelScores;
+Schedule::job(new RecalculateModelScores, 'low')->dailyAt('01:00');

@@ -212,7 +212,13 @@ Route::prefix('dashboard')->middleware(DashboardBasicAuth::class)->group(functio
             Route::post('/social-credentials/{platform}/verify', [DashboardController::class, 'apiVerifySocialCredentials']);
             Route::post('/social-accounts/{id}/test', [DashboardController::class, 'apiTestSocialAccount']);
             Route::get('/social/quota-status', [DashboardController::class, 'apiSocialQuotaStatus']);
+
+            // Intelligence layer
+            Route::get('/intelligence/stats', [DashboardController::class, 'apiIntelligenceStats']);
         });
+
+        // Intelligence dashboard page
+        Route::get('/intelligence', [DashboardController::class, 'intelligence'])->name('dashboard.intelligence');
 
         // ── Heavy / expensive operations ──────────────────────────────────────────
         Route::middleware('throttle:' . config('dashboard.throttle_heavy', 30) . ',1')->group(function () {
