@@ -160,7 +160,7 @@
             <template x-if="!costBreakdown.length">
                 <p class="text-xs text-slate-500 py-4 text-center">No AI requests recorded yet.</p>
             </template>
-            <div class="space-y-2">
+            <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
                 <template x-for="row in costBreakdown" :key="row.model">
                     <div class="flex items-center justify-between text-xs">
                         <div class="flex-1 min-w-0">
@@ -179,7 +179,7 @@
             <template x-if="!Object.keys(agentTypes).length">
                 <p class="text-xs text-slate-500 py-4 text-center">No agent jobs recorded yet.</p>
             </template>
-            <div class="space-y-2">
+            <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
                 <template x-for="[type, count] in Object.entries(agentTypes)" :key="type">
                     <div class="flex items-center gap-2">
                         <span class="text-xs text-slate-300 w-32 truncate" x-text="type"></span>
@@ -204,7 +204,7 @@
                 <h3 class="text-sm font-semibold text-white">Recent Workflows</h3>
                 <a href="/dashboard/workflows" class="text-xs text-brand-400 hover:text-brand-300 transition-colors">View all →</a>
             </div>
-            <div class="space-y-2">
+            <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
                 <template x-if="stats.recent_workflows?.length === 0">
                     <div class="flex flex-col items-center gap-2 py-8">
                         <svg class="w-8 h-8 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
@@ -239,7 +239,7 @@
                 <h3 class="text-sm font-semibold text-white">System Events</h3>
                 <a href="/dashboard/system" class="text-xs text-brand-400 hover:text-brand-300 transition-colors">View all →</a>
             </div>
-            <div class="space-y-2">
+            <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
                 <template x-if="!stats.recent_events?.length">
                     <p class="text-sm text-slate-500 text-center py-6">No events yet</p>
                 </template>

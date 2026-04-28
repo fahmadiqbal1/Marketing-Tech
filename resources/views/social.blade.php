@@ -44,13 +44,16 @@
                 <div x-show="activeTab === 'settings'" x-cloak>
                     <div x-data="credentialsComponent()" x-init="init()" class="space-y-6">
                         <h2 class="text-lg font-semibold text-white mb-4">Social Platform Credentials</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                             <template x-for="cred in credentials" :key="cred.platform">
                                 <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex flex-col gap-3">
                                     <div class="flex items-center gap-2 mb-2">
                                         <span x-html="platformIcon(cred.platform)"></span>
                                         <span class="font-semibold text-white text-base capitalize" x-text="cred.platform"></span>
-                                        <a :href="cred.setup_guide" target="_blank" class="ml-auto text-xs text-violet-400 hover:underline">Setup guide</a>
+                                        <button @click="openGuide(cred.platform)" class="ml-auto text-xs text-violet-400 hover:text-violet-300 hover:underline flex items-center gap-1">
+                                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                            Setup guide
+                                        </button>
                                     </div>
                                     <div class="mb-2">
                                         <label class="text-xs text-slate-400 mb-1 block">Callback URL</label>
@@ -91,12 +94,94 @@
                                 </div>
                             </template>
                         </div>
+
+                        {{-- Setup Guide Modal --}}
+                        <div x-show="guideModal.open" x-cloak
+                             class="fixed inset-0 z-50 flex items-center justify-center p-4"
+                             @keydown.escape.window="guideModal.open = false">
+                            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="guideModal.open = false"></div>
+                            <div class="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+                                <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700/60">
+                                    <div class="flex items-center gap-2">
+                                        <span x-html="platformIcon(guideModal.platform)" class="opacity-90"></span>
+                                        <h3 class="text-sm font-semibold text-white capitalize" x-text="guideModal.platform + ' — Setup Guide'"></h3>
+                                    </div>
+                                    <button @click="guideModal.open = false" class="text-slate-400 hover:text-white transition-colors">
+                                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                </div>
+                                <div class="px-5 py-4 max-h-[60vh] overflow-y-auto">
+                                    <ol class="space-y-3 list-none">
+                                        <template x-for="(step, i) in (guideSteps[guideModal.platform] ?? [])" :key="i">
+                                            <li class="flex gap-3 text-sm">
+                                                <span class="flex-shrink-0 w-5 h-5 rounded-full bg-violet-600/30 text-violet-300 text-xs flex items-center justify-center font-semibold mt-0.5" x-text="i + 1"></span>
+                                                <span class="text-slate-300 leading-relaxed" x-html="step"></span>
+                                            </li>
+                                        </template>
+                                    </ol>
+                                    <div class="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300 leading-relaxed">
+                                        <strong>Callback URL</strong> — paste this into your app's redirect URI settings:<br>
+                                        <code class="mt-1 block font-mono text-amber-200 break-all" x-text="credentials.find(c => c.platform === guideModal.platform)?.callback_url ?? ''"></code>
+                                    </div>
+                                </div>
+                                <div class="px-5 py-3 border-t border-slate-700/60 flex justify-end">
+                                    <button @click="guideModal.open = false" class="btn-secondary text-xs px-4 py-1.5">Close</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
         <script>
         function credentialsComponent() {
             return {
                 credentials: [],
+                guideModal: { open: false, platform: null },
+                guideSteps: {
+                    twitter: [
+                        'Go to <strong>developer.twitter.com</strong> → Projects & Apps → your app → <em>Keys and tokens</em>.',
+                        'Under <strong>OAuth 2.0 Client ID and Client Secret</strong> click "Regenerate" if no values are shown.',
+                        'Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields on this page.',
+                        'Optionally copy the <strong>Bearer Token</strong> from the same page for app-level API access.',
+                        'In your app → <em>User authentication settings</em>: set Type of App to <strong>Web App</strong>, enable OAuth 2.0, set permissions to <strong>Read and Write</strong>.',
+                        'Paste the <strong>Callback URL</strong> shown below into the "Callback URI / Redirect URL" field and save.',
+                    ],
+                    instagram: [
+                        'Go to <strong>developers.facebook.com</strong> → My Apps → select or create your app.',
+                        'In <em>App Settings → Basic</em>: copy the <strong>App ID</strong> (Client ID) and <strong>App Secret</strong> (Client Secret).',
+                        'Add the <strong>Instagram Basic Display</strong> product from the Add Products section.',
+                        'In <em>Instagram Basic Display → Basic Display → Settings</em>: paste the <strong>Callback URL</strong> below into "Valid OAuth Redirect URIs" and save.',
+                        'Submit the app for review if you need access beyond test users.',
+                    ],
+                    facebook: [
+                        'Go to <strong>developers.facebook.com</strong> → My Apps → select or create your app.',
+                        'In <em>App Settings → Basic</em>: copy the <strong>App ID</strong> (Client ID) and <strong>App Secret</strong> (Client Secret).',
+                        'Add the <strong>Facebook Login</strong> product and go to its <em>Settings</em> tab.',
+                        'Paste the <strong>Callback URL</strong> below into "Valid OAuth Redirect URIs" and save.',
+                        'Ensure your app has the <code>pages_manage_posts</code> and <code>pages_read_engagement</code> permissions.',
+                    ],
+                    linkedin: [
+                        'Go to <strong>linkedin.com/developers</strong> → My Apps → select or create your app.',
+                        'In the <em>Auth</em> tab: copy the <strong>Client ID</strong> and <strong>Client Secret</strong>.',
+                        'Paste the <strong>Callback URL</strong> below into "Authorized redirect URLs for your app" and save.',
+                        'In the <em>Products</em> tab: request access to <strong>Share on LinkedIn</strong> and <strong>Sign In with LinkedIn using OpenID Connect</strong>.',
+                        'Wait for LinkedIn to approve the product request (usually instant for Share on LinkedIn).',
+                    ],
+                    tiktok: [
+                        'Go to <strong>developers.tiktok.com</strong> → Manage apps → select or create your app.',
+                        'In <em>App details</em>: copy the <strong>Client Key</strong> (Client ID) and <strong>Client Secret</strong>.',
+                        'In <em>Login Kit → Redirect domain</em>: add your app domain (e.g. <code>yourdomain.com</code>) — not the full path.',
+                        'Enable the <strong>Content Posting API</strong> product in App features.',
+                        'Paste the <strong>Callback URL</strong> below into the "Redirect URI" field and save.',
+                    ],
+                    youtube: [
+                        'Go to <strong>console.cloud.google.com</strong> → APIs & Services → Library and enable <strong>YouTube Data API v3</strong>.',
+                        'Go to <em>APIs & Services → Credentials</em> → Create Credentials → <strong>OAuth 2.0 Client ID</strong>.',
+                        'Select Application type: <strong>Web application</strong>.',
+                        'Paste the <strong>Callback URL</strong> shown below into "Authorized redirect URIs" and save.',
+                        'Copy the generated <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields on this page.',
+                        'In <em>OAuth consent screen</em>: add the scope <code>https://www.googleapis.com/auth/youtube.upload</code>.',
+                    ],
+                },
                 platformFields: {
                     twitter:   [
                         {key:'client_id',     label:'Client ID',              type:'text',     required:true},
@@ -160,6 +245,9 @@
                     } finally {
                         cred.saving = false;
                     }
+                },
+                openGuide(platform) {
+                    this.guideModal = { open: true, platform };
                 },
                 copyToClipboard(text) {
                     navigator.clipboard.writeText(text);
