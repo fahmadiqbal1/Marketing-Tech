@@ -19,10 +19,11 @@ Laravel 11 AI marketing platform:
 - **Alpine.js + Tailwind CSS**: dark slate-950 palette frontend
 - **Chart.js 4.4.8** (CDN): pinned — 4.4.0 had a `fullSize` crash
 - **Laravel Horizon**: SPA at `resources/views/vendor/horizon/layout.blade.php` with dark-theme override
-- **Social Layer (Phase 9F)**: `SocialPlatformService` (factory) → 6 real platform services, no stubs. Instagram (Graph API v19), Twitter (API v2 + PKCE), LinkedIn (ugcPosts v2), Facebook (Graph API v19 Page token, multi-page), TikTok (Content Posting API v2 + PKCE, async `PollTikTokPublishStatus`), YouTube (Data API v3 resumable upload with session recovery). Models: `ContentCalendar`, `HashtagSet`, `SocialAccount` (tokens encrypted at rest). 6 automation jobs on `social`/`low` queues with explicit `$queue` class properties. Feature flags: `SOCIAL_AUTO_POST_ENABLED=false`, `SOCIAL_DRY_RUN=false`. CSRF state validated for all 6 OAuth flows (incl. Instagram). Moderation gate: `scheduledNow()` requires `moderation_status IN (approved, auto_approved)` (indexed). Scheduling conflict: ±15 min check on create/update. `ensurePublicUrl()` converts local paths → S3 temporaryUrl.
+- **Social Layer (Phase 9F+)**: `SocialPlatformService` (factory) → 6 real platform services, no stubs. Instagram (Graph API v19), Twitter (API v2 + PKCE), LinkedIn (ugcPosts v2), Facebook (Graph API v19 Page token, multi-page), TikTok (Content Posting API v2 + PKCE, async `PollTikTokPublishStatus`), YouTube (Data API v3 resumable upload with session recovery). Models: `ContentCalendar`, `HashtagSet`, `SocialAccount` (tokens encrypted at rest, + `connection_healthy` + `last_tested_at`). Jobs on `social`/`low` queues — use `$this->onQueue()` in constructor (NOT `$queue` property — conflicts with `Queueable` trait). Feature flags: `SOCIAL_AUTO_POST_ENABLED=false`, `SOCIAL_DRY_RUN=false`. CSRF state validated for all 6 OAuth flows. Moderation gate: `scheduledNow()` requires `moderation_status IN (approved, auto_approved)` (indexed). `ensurePublicUrl()` converts local paths → S3 temporaryUrl. **Credential bridge**: `SocialCredentialServiceProvider::boot()` overwrites `config('services.*')` from `ApiCredentialService` DB values — registered in `bootstrap/providers.php`. App credentials verified live (OAuth client_credentials grant) on save via `apiVerifySocialCredentials()`. Account health checked hourly via `CheckAllSocialAccountHealth` → `TestSocialConnectionJob` (staggered 3s each). Rate-limit dispatcher: daily Redis quota keys `social:quota:{platform}:{date}`, Retry-After Redis key `social:retry_after:{platform}`, priority sort (overdue>30min=0, <5min=1, normal=2).
 - **Campaigns**: `POST /api/campaigns` → `apiCreateCampaign()` (name, type, audience, subject, schedule_at). Pause/Resume endpoints exist. Detail chart uses live `apiCampaignDetail` data (agent runs + outputs per day), not random data.
 - **Telegram Bot**: `POST /webhook/telegram` (HMAC verified) → `TelegramController` → `TelegramBotService` → `CommandHandler` → `AgentOrchestrator::dispatch()`. Full round-trip: start ACK → agent runs → result/failure notification via `BaseAgent::notifyUser()`.
 - **Horizon**: `supervisor-social` (3 processes) required for `DispatchScheduledPosts` (every-minute job). All supervisors: default, marketing, media, hiring, content, growth, knowledge, agents, low, social.
+- **ETCSLV Agent Harness**: `BaseAgent` uses `HookableTrait` (4 hooks: `before_run`, `after_run`, `before_tool`, `after_tool`) + `ValidatesOutput` trait. Register hooks via `$agent->on('before_tool', fn($name, $args) => ...)`. `AgentOutputContract` interface for final answer schema validation — implement and pass to `$agent->withOutputContract(...)`. Dead-letter on `maxSteps` exhaustion: written to `agent_dead_letters` table, job fails visibly in Horizon.
 
 ---
 
@@ -176,7 +177,7 @@ changes or unpushed commits. Resolve immediately; do not continue with a dirty t
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Marketing-Tech** (2926 symbols, 8152 relationships, 238 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Marketing-Tech** (2984 symbols, 8347 relationships, 243 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -274,42 +275,3 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
-
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
-
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
-
-| Tool | Use when |
-|------|----------|
-| `detect_changes` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context` | Need source snippets for review — token-efficient |
-| `get_impact_radius` | Understanding blast radius of a change |
-| `get_affected_flows` | Finding which execution paths are impacted |
-| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes` | Finding functions/classes by name or keyword |
-| `get_architecture_overview` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
-
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes` for code review.
-3. Use `get_affected_flows` to understand impact.
-4. Use `query_graph` pattern="tests_for" to check coverage.

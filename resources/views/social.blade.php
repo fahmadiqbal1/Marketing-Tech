@@ -429,11 +429,25 @@
                                     </template>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    {{-- Animated status dot --}}
-                                    <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
-                                        <span class="flex items-center gap-1.5">
+                                    {{-- Health-aware status dot --}}
+                                    <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected && accountFor('{{ $platform }}').connection_healthy === true">
+                                        <span class="flex items-center gap-1.5"
+                                              :title="accountFor('{{ $platform }}').last_tested_at ? 'Tested ' + new Date(accountFor('{{ $platform }}').last_tested_at).toLocaleString() : ''">
                                             <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot"></span>
-                                            <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">Connected</span>
+                                            <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">Healthy</span>
+                                        </span>
+                                    </template>
+                                    <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected && accountFor('{{ $platform }}').connection_healthy === false && accountFor('{{ $platform }}').last_tested_at">
+                                        <span class="flex items-center gap-1.5"
+                                              :title="'Failed: ' + (accountFor('{{ $platform }}').last_error ?? 'Unknown error')">
+                                            <span class="w-2 h-2 rounded-full bg-red-400"></span>
+                                            <span class="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-medium">Unhealthy</span>
+                                        </span>
+                                    </template>
+                                    <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected && !accountFor('{{ $platform }}').last_tested_at">
+                                        <span class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                                            <span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">Not tested</span>
                                         </span>
                                     </template>
                                     <template x-if="!accountFor('{{ $platform }}') || !accountFor('{{ $platform }}').is_connected">
@@ -501,6 +515,19 @@
                                         <span>Connect via OAuth</span>
                                     </template>
                                 </a>
+                                <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
+                                    <button @click="testAccount('{{ $platform }}')"
+                                            :disabled="testing === '{{ $platform }}'"
+                                            class="px-2 py-1.5 rounded-lg bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 text-xs transition-colors disabled:opacity-50"
+                                            title="Test connection now">
+                                        <template x-if="testing !== '{{ $platform }}'">
+                                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                        </template>
+                                        <template x-if="testing === '{{ $platform }}'">
+                                            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                        </template>
+                                    </button>
+                                </template>
                                 <template x-if="accountFor('{{ $platform }}') && accountFor('{{ $platform }}').is_connected">
                                     <button @click="disconnectAccount('{{ $platform }}')"
                                             class="px-2 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs transition-colors"
@@ -918,6 +945,7 @@ function accountsComponent() {
     return {
         accounts: [],
         accountsLoading: false,
+        testing: null,
 
         async init() { await this.load(); },
 
@@ -960,6 +988,26 @@ function accountsComponent() {
                 await this.load();
             } catch(e) {
                 showToast('Failed to disconnect: ' + e.message, 'error');
+            }
+        },
+
+        async testAccount(platform) {
+            const acct = this.accountFor(platform);
+            if (!acct || this.testing === platform) return;
+            this.testing = platform;
+            try {
+                const r = await apiPost(`/dashboard/api/social-accounts/${acct.id}/test`, {});
+                const idx = this.accounts.findIndex(a => a.id === acct.id);
+                if (idx !== -1) {
+                    this.accounts[idx].connection_healthy = r.healthy;
+                    this.accounts[idx].last_tested_at    = r.tested_at;
+                    this.accounts[idx].last_error        = r.error ?? null;
+                }
+                showToast(platform + ': ' + (r.healthy ? 'Connection healthy' : 'Connection failed — ' + (r.error ?? 'unknown')), r.healthy ? 'success' : 'error');
+            } catch(e) {
+                showToast('Test failed: ' + e.message, 'error');
+            } finally {
+                this.testing = null;
             }
         },
 
